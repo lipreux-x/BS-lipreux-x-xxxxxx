@@ -8,7 +8,7 @@ export default defineConfig({
     api: {
       name: 'BaseSecrete API',
       source: 'src/index.ts',
-      env: { JWT_SECRET: process.env.JWT_SECRET! },
+      env: { JWT_SECRET: process.env.JWT_SECRET!, GROUP_CODE_PEPPER: process.env.GROUP_CODE_PEPPER! },
     },
   },
   triggers: {

@@ -1,5 +1,5 @@
 import { argon2id, argon2Verify } from 'hash-wasm';
-import { createHash, createPublicKey, randomBytes, verify } from 'node:crypto';
+import { createHash, createHmac, createPublicKey, randomBytes, verify } from 'node:crypto';
 
 /*
  * Server-side crypto is limited to verification and hashing. It must stay
@@ -59,6 +59,16 @@ export function generateInviteCode(): string {
 
 export function normalizeInviteCode(code: string): string {
   return code.toUpperCase().replace(/[^0-9A-Z]/g, '');
+}
+
+/**
+ * Index for joining with the code alone. Keyed with a server-only secret so a
+ * database dump alone does not reveal which group uses which code.
+ */
+export function groupCodeLookup(code: string): string {
+  const pepper = process.env.GROUP_CODE_PEPPER;
+  if (!pepper || pepper.length < 32) throw new Error('GROUP_CODE_PEPPER is missing or too short');
+  return createHmac('sha256', pepper).update(code).digest('hex');
 }
 
 // Group code: low entropy by design, so Argon2id + strict rate limiting.

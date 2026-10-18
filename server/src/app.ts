@@ -10,6 +10,7 @@ import {
   frame,
   fromB64,
   generateInviteCode,
+  groupCodeLookup,
   hashGroupCode,
   normalizeInviteCode,
   sha256Hex,
@@ -262,13 +263,18 @@ app.post('/groups', async (c) => {
   );
   const me = c.get('userId');
   const codeHash = await hashGroupCode(input.groupCode);
+  const codeLookup = groupCodeLookup(input.groupCode);
   await db.transaction(async (tx) => {
+    // Codes are unique so a code alone identifies the group to join.
+    const [taken] = await tx.select({ id: groups.id }).from(groups).where(eq(groups.codeLookup, codeLookup));
+    if (taken) throw new HTTPException(409, { message: 'code_taken' });
     const inserted = await tx
       .insert(groups)
       .values({
         id: input.id,
         encryptedMeta: input.encryptedMeta,
         codeHash,
+        codeLookup,
         createdBy: me,
         ephemeralSeconds: input.ephemeralSeconds ?? null,
       })
@@ -282,22 +288,20 @@ app.post('/groups', async (c) => {
 });
 
 /**
- * Join with the group code. Success only grants membership: the group key
- * itself arrives later, sealed to the new member by an existing member.
+ * Join with the group code alone. Success only grants membership: the group
+ * key itself arrives later, sealed to the new member by an existing member.
  */
-app.post('/groups/:groupId/join', async (c) => {
-  const groupId = groupIdParam(c);
+app.post('/groups/join', async (c) => {
   const input = await body(c, z.object({ groupCode: z.string().max(64) }));
   const me = c.get('userId');
 
-  const [already] = await db
-    .select({ role: groupMembers.role })
-    .from(groupMembers)
-    .where(and(eq(groupMembers.groupId, groupId), eq(groupMembers.userId, me)));
-  if (already) return c.json({ joined: true });
-
+  // Rate limit before any lookup (SPEC §4.4: per user, all groups combined).
   // Record first, then count: concurrent requests cannot slip past the limit.
-  await db.insert(joinAttempts).values({ userId: me, groupId });
+  const lookup = groupCode.safeParse(input.groupCode).success ? groupCodeLookup(input.groupCode) : null;
+  const [group] = lookup
+    ? await db.select({ id: groups.id, codeHash: groups.codeHash }).from(groups).where(eq(groups.codeLookup, lookup))
+    : [];
+  await db.insert(joinAttempts).values({ userId: me, groupId: group?.id ?? null });
   const [{ count } = { count: 0 }] = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(joinAttempts)
@@ -307,13 +311,12 @@ app.post('/groups/:groupId/join', async (c) => {
     throw new HTTPException(429, { message: 'too_many_attempts' });
   }
 
-  // Unknown group and wrong code look identical to the caller.
-  const [group] = await db.select({ codeHash: groups.codeHash }).from(groups).where(eq(groups.id, groupId));
+  // Second factor on the match: the Argon2id hash of the same code.
   const ok = group ? await verifyGroupCode(input.groupCode, group.codeHash) : false;
-  if (!ok) throw new HTTPException(403, { message: 'wrong_code' });
+  if (!ok || !group) throw new HTTPException(403, { message: 'wrong_code' });
 
-  await db.insert(groupMembers).values({ groupId, userId: me, role: 'member' }).onConflictDoNothing();
-  return c.json({ joined: true });
+  await db.insert(groupMembers).values({ groupId: group.id, userId: me, role: 'member' }).onConflictDoNothing();
+  return c.json({ groupId: group.id });
 });
 
 app.get('/groups/:groupId/members', async (c) => {

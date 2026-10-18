@@ -32,6 +32,9 @@ export const groups = pgTable('groups', {
   id: uuid('id').primaryKey(), // chosen by the client: it is bound into encrypted_meta
   encryptedMeta: text('encrypted_meta').notNull(),
   codeHash: text('code_hash').notNull(), // Argon2id (encoded) of the group code
+  // HMAC-SHA256(GROUP_CODE_PEPPER, code): finds the group from the code alone.
+  // Unique, so two groups cannot share a code. Null for groups created before.
+  codeLookup: text('code_lookup').unique(),
   currentKeyVersion: integer('current_key_version').notNull().default(1),
   createdBy: uuid('created_by').references(() => profiles.id, { onDelete: 'set null' }),
   ephemeralSeconds: integer('ephemeral_seconds'),
@@ -102,7 +105,7 @@ export const joinAttempts = pgTable(
     userId: uuid('user_id')
       .notNull()
       .references(() => profiles.id, { onDelete: 'cascade' }),
-    groupId: uuid('group_id').notNull(),
+    groupId: uuid('group_id'), // null: code matched no group
     attemptedAt: timestamp('attempted_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index('join_attempts_user_time_idx').on(t.userId, t.attemptedAt)],

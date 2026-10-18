@@ -65,6 +65,10 @@ const messageAd = (groupId: string, senderId: string, clientId: string, keyVersi
   frame(utf8('bs/v1/message'), utf8(groupId), utf8(senderId), utf8(clientId), u32(keyVersion));
 
 const step = (s: string) => console.log(`  ✓ ${s}`);
+// Codes now identify groups globally: use letters so test codes can never
+// collide with a real (digit) group code on the branch.
+const rnd = () => Math.random().toString(36).slice(2, 8).toUpperCase();
+const GROUP_CODE = `ZZ${rnd()}`;
 let groupId = '';
 
 try {
@@ -94,10 +98,16 @@ try {
   const groupKey = sodium.randombytes_buf(32);
   const created = await call('POST', '/groups', {
     token: alice.token,
-    json: { id: groupId, encryptedMeta: b64(sodium.randombytes_buf(64)), groupCode: '482913', sealedKey: b64(sodium.crypto_box_seal(groupKey, alice.box.publicKey)) },
+    json: { id: groupId, encryptedMeta: b64(sodium.randombytes_buf(64)), groupCode: GROUP_CODE, sealedKey: b64(sodium.crypto_box_seal(groupKey, alice.box.publicKey)) },
   });
   assert.equal(created.status, 201, JSON.stringify(created.body));
-  step('alice created a group');
+  const dup = await call('POST', '/groups', {
+    token: alice.token,
+    json: { id: randomUUID(), encryptedMeta: b64(sodium.randombytes_buf(64)), groupCode: GROUP_CODE, sealedKey: b64(sodium.crypto_box_seal(groupKey, alice.box.publicKey)) },
+  });
+  assert.equal(dup.status, 409);
+  assert.equal(dup.body.error, 'code_taken');
+  step('alice created a group; a second group cannot reuse its code');
 
   // 4. Invite bob via API
   const inv = await call('POST', '/invites', { token: alice.token });
@@ -109,9 +119,11 @@ try {
   // 5. Join with code
   assert.equal((await call('POST', `/groups/${groupId}/messages`, { token: bob.token, json: {} })).status, 400);
   assert.equal((await call('GET', `/groups/${groupId}/messages`, { token: bob.token })).status, 404);
-  assert.equal((await call('POST', `/groups/${groupId}/join`, { token: bob.token, json: { groupCode: '000000' } })).status, 403);
-  assert.equal((await call('POST', `/groups/${groupId}/join`, { token: bob.token, json: { groupCode: '482913' } })).status, 200);
-  step('bob: non-member gets 404, wrong code 403, right code joins');
+  assert.equal((await call('POST', '/groups/join', { token: bob.token, json: { groupCode: `ZZ${rnd()}` } })).status, 403);
+  const joined = await call('POST', '/groups/join', { token: bob.token, json: { groupCode: GROUP_CODE } });
+  assert.equal(joined.status, 200);
+  assert.equal(joined.body.groupId, groupId);
+  step('bob: non-member gets 404, wrong code 403, the code alone finds and joins the group');
 
   // 6. Alice seals the key for bob
   const members = await call('GET', `/groups/${groupId}/members`, { token: alice.token });
@@ -179,9 +191,9 @@ try {
   const inv2 = await call('POST', '/invites', { token: alice.token });
   await register(carol, inv2.body.code);
   const statuses: number[] = [];
-  for (let i = 0; i < 6; i++) statuses.push((await call('POST', `/groups/${groupId}/join`, { token: carol.token, json: { groupCode: `11111${i}` } })).status);
+  for (let i = 0; i < 6; i++) statuses.push((await call('POST', '/groups/join', { token: carol.token, json: { groupCode: `ZZ${rnd()}` } })).status);
   assert.deepEqual(statuses, [403, 403, 403, 403, 403, 429]);
-  assert.equal((await call('POST', `/groups/${groupId}/join`, { token: carol.token, json: { groupCode: '482913' } })).status, 429);
+  assert.equal((await call('POST', '/groups/join', { token: carol.token, json: { groupCode: GROUP_CODE } })).status, 429);
   step('join is rate-limited after 5 attempts (even with the right code)');
 
   console.log('Smoke test passed.');
