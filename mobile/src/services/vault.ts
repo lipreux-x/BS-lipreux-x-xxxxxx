@@ -29,6 +29,7 @@ import { FREE_ATTEMPTS, parseLockout, registerFailure, remainingMs, type Lockout
  *   group_<id>_v<n>      group key locked by group code + master key
  *   meta_<id>            decrypted group name, sealed with the master key
  *   lockout_g_<id>       failed-attempt counter for that group's code
+ *   codever_<id>         version of the group code the local lock uses
  */
 
 /** Minimal key/value interface, so the vault can be tested without a device. */
@@ -90,6 +91,7 @@ const K = {
   group: (id: string, v: number) => `bs.group_${id}_v${v}`,
   meta: (id: string) => `bs.meta_${id}`,
   lockoutGroup: (id: string) => `bs.lockout_g_${id}`,
+  codeVersion: (id: string) => `bs.codever_${id}`,
 };
 
 export class Vault {
@@ -167,6 +169,16 @@ export class Vault {
     for (let v = 1; v <= upTo; v++) await this.store.delete(K.group(groupId, v));
     await this.store.delete(K.meta(groupId));
     await this.store.delete(K.lockoutGroup(groupId));
+    await this.store.delete(K.codeVersion(groupId));
+  }
+
+  /** Version of the group code the local lock uses (1 until the admin first changes it). */
+  async codeVersion(groupId: string): Promise<number> {
+    return Number((await this.store.get(K.codeVersion(groupId))) ?? 1);
+  }
+
+  async setCodeVersion(groupId: string, version: number) {
+    await this.store.set(K.codeVersion(groupId), String(version));
   }
 
   async saveGroupKey(groupId: string, keyVersion: number, groupKey: Uint8Array, groupCode: string, masterKey: Uint8Array) {

@@ -103,7 +103,7 @@ export async function unlockGroup(
   s: Session,
   groupId: string,
   groupCode: string,
-): Promise<{ groupKey: Uint8Array; keys: GroupKeys; keyVersion: number; meta: GroupMeta } | null> {
+): Promise<{ groupKey: Uint8Array; keys: GroupKeys; keyVersion: number; meta: GroupMeta; codeChanged: boolean } | null> {
   const g = (await s.api.groups()).find((x) => x.id === groupId);
   if (!g) throw new ApiError(404, 'not_found');
   const v = g.currentKeyVersion;
@@ -123,7 +123,40 @@ export async function unlockGroup(
   }
   const meta = decryptGroupMeta(g.encryptedMeta, groupId, v, groupKey);
   await s.vault.saveMeta(groupId, meta, s.masterKey);
-  return { groupKey, keys, keyVersion: v, meta };
+  // First unlock: the code just typed is the current one. Otherwise the admin
+  // may have changed it since this phone locked the key: ask for the new one.
+  if (local === null) await s.vault.setCodeVersion(groupId, g.codeVersion);
+  const codeChanged = local !== null && (await s.vault.codeVersion(groupId)) < g.codeVersion;
+  return { groupKey, keys, keyVersion: v, meta, codeChanged };
+}
+
+/** Re-locks the current key on this phone under the new group code (after the admin changed it). */
+export async function relockGroup(s: Session, groupId: string, keyVersion: number, groupKey: Uint8Array, newCode: string) {
+  const g = await summary(s, groupId);
+  await s.vault.saveGroupKey(groupId, keyVersion, groupKey, newCode, s.masterKey);
+  await s.vault.setCodeVersion(groupId, g.codeVersion);
+}
+
+/**
+ * Admin: new code + keywords. The server re-hashes them for future joins;
+ * the meta is re-encrypted with the new keywords; this phone re-locks the
+ * current key under the new code (older versions stay sealed on the server).
+ */
+export async function changeGroupCode(s: Session, groupId: string, keys: GroupKeys, keyVersion: number, groupCode: string, keywords: string[]) {
+  const groupKey = keys.get(keyVersion);
+  if (!groupKey) throw new ApiError(409, 'stale_key_version');
+  const g = await summary(s, groupId);
+  const meta: GroupMeta = { ...decryptGroupMeta(g.encryptedMeta, groupId, keyVersion, groupKey), keywords };
+  const { codeVersion } = await s.api.changeGroupCode(groupId, {
+    groupCode,
+    keywords,
+    keyVersion,
+    encryptedMeta: encryptGroupMeta(meta, groupId, keyVersion, groupKey),
+  });
+  await s.vault.saveGroupKey(groupId, keyVersion, groupKey, groupCode, s.masterKey);
+  for (let v = keyVersion - 1; v >= 1; v--) if (await s.vault.hasGroupKey(groupId, v)) await s.vault.deleteGroupKey(groupId, v);
+  await s.vault.saveMeta(groupId, meta, s.masterKey);
+  await s.vault.setCodeVersion(groupId, codeVersion);
 }
 
 /** Adds every version the server holds sealed to us that is not in `keys` yet. */

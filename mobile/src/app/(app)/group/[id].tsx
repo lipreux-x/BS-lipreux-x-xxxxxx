@@ -12,6 +12,7 @@ import {
   newClientId,
   sendText,
   shareMissingKeys,
+  relockGroup,
   syncGroup,
   unlockGroup,
   type ChatMessage,
@@ -45,6 +46,8 @@ function GroupUnlock({ groupId, onOpen }: { groupId: string; onOpen(g: OpenGroup
   const [firstCode, setFirstCode] = useState<string | null>(null);
   const [mismatch, setMismatch] = useState(false);
   const [lockedFor, setLockedFor] = useState(0);
+  // Unlocked with the old code, but the admin changed it: ask for the new one.
+  const [relock, setRelock] = useState<{ group: OpenGroup; first: string | null; mismatch: boolean } | null>(null);
 
   useEffect(() => {
     void listGroups(session)
@@ -59,7 +62,9 @@ function GroupUnlock({ groupId, onOpen }: { groupId: string; onOpen(g: OpenGroup
         setState({ kind: 'waiting-key' });
         return null;
       }
-      onOpen({ keys: res.keys, keyVersion: res.keyVersion, name: res.meta.name });
+      const group = { keys: res.keys, keyVersion: res.keyVersion, name: res.meta.name };
+      if (res.codeChanged) setRelock({ group, first: null, mismatch: false });
+      else onOpen(group);
       return null;
     } catch (e) {
       if (e instanceof WrongCodeError) return 'Code incorrect';
@@ -70,6 +75,45 @@ function GroupUnlock({ groupId, onOpen }: { groupId: string; onOpen(g: OpenGroup
       if (e instanceof NetworkError) return 'Pas de réseau';
       return 'Impossible d’ouvrir le groupe';
     }
+  }
+
+  if (relock) {
+    const { group } = relock;
+    return (
+      <View style={styles.center}>
+        <Stack.Screen options={{ title: 'Nouveau code' }} />
+        {relock.first === null ? (
+          <CodeEntry
+            key="new"
+            title="Le code du groupe a changé"
+            subtitle="Entre le nouveau code, donné en vrai par l’admin."
+            initialError={relock.mismatch ? 'Les codes ne correspondent pas' : undefined}
+            onComplete={async (code) => {
+              setRelock({ group, first: code, mismatch: false });
+              return null;
+            }}
+          />
+        ) : (
+          <CodeEntry
+            key="confirm-new"
+            title="Confirme le nouveau code"
+            onComplete={async (code) => {
+              if (code !== relock.first) {
+                setRelock({ group, first: null, mismatch: true });
+                return null;
+              }
+              try {
+                await relockGroup(session, groupId, group.keyVersion, group.keys.get(group.keyVersion)!, code);
+                onOpen(group);
+                return null;
+              } catch (e) {
+                return e instanceof NetworkError ? 'Pas de réseau' : 'Impossible d’enregistrer le code';
+              }
+            }}
+          />
+        )}
+      </View>
+    );
   }
 
   if (!state) return <SafeAreaView style={styles.center} />;

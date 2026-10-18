@@ -1,5 +1,5 @@
-import { router, Stack, useLocalSearchParams } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { router, Stack, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { useCallback, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { wipe } from '@/crypto/encoding';
 import { useUnlocked } from '@/session/SessionProvider';
@@ -34,7 +34,8 @@ export default function GroupSettings() {
       })
       .catch((e) => setError(message(e, 'Impossible de charger les réglages')));
   }, [session, profiles, id]);
-  useEffect(load, [load]);
+  // Also after changing the code: the keywords shown come from the refreshed meta.
+  useFocusEffect(load);
 
   async function run(action: () => Promise<void>, failure: string) {
     setBusy(true);
@@ -177,6 +178,15 @@ export default function GroupSettings() {
       </View>
 
       <View style={[styles.card, styles.actions]}>
+        {admin ? (
+          <Pressable
+            disabled={busy}
+            onPress={() => router.push({ pathname: '/group/code', params: { id } })}
+            style={[styles.action, styles.separator]}
+          >
+            <Text style={type.body}>Changer le code et les mots-clés</Text>
+          </Pressable>
+        ) : null}
         <Pressable disabled={busy} onPress={() => leave(info)} style={styles.action}>
           <Text style={styles.danger}>Quitter le groupe</Text>
         </Pressable>
@@ -214,4 +224,5 @@ const styles = StyleSheet.create({
   optionTextOn: { color: colors.text, fontWeight: '600' },
   actions: { marginTop: space.lg, paddingVertical: 0 },
   action: { paddingVertical: space.md },
+  separator: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
 });

@@ -10,6 +10,7 @@ import { generateIdentity } from '@/crypto';
 import { initCrypto } from '@/crypto/sodium';
 import { Api, type WireMessage } from '../api';
 import {
+  changeGroupCode,
   createGroup,
   decryptMessages,
   fetchSince,
@@ -24,7 +25,7 @@ import {
   type Session,
 } from '../groups';
 import { RealtimeClient } from '../realtime';
-import { Vault, type SecretStore } from '../vault';
+import { Vault, WrongCodeError, type SecretStore } from '../vault';
 
 const API_URL = process.env.E2E_API_URL;
 const INVITE = process.env.E2E_INVITE;
@@ -123,5 +124,12 @@ run('app services against the deployed API', () => {
     expect(reopened?.keyVersion).toBe(2);
     expect([...reopened!.keys.keys()].sort()).toEqual([1, 2]);
     expect(await alice.vault.latestGroupKeyVersion(groupId, 2)).toBe(2);
+
+    // Alice (admin) changes code + keywords: the new code opens the group, the old one no longer does.
+    const newCode = `ZZ${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+    await changeGroupCode(alice, groupId, reopened!.keys, 2, newCode, ['lune', 'mer', 'vent']);
+    await expect(unlockGroup(alice, groupId, groupCode)).rejects.toBeInstanceOf(WrongCodeError);
+    const withNew = await unlockGroup(alice, groupId, newCode);
+    expect(withNew).toMatchObject({ codeChanged: false, meta: { keywords: ['lune', 'mer', 'vent'] } });
   });
 });
