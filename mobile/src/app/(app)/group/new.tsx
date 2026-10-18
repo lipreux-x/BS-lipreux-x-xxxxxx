@@ -13,7 +13,7 @@ import { colors, space, type } from '@/ui/theme';
  * it; the server receives the encrypted name, the code (to check future joins)
  * and the key sealed for us. Locally the key is locked by code + master key.
  */
-type Step = { kind: 'name' } | { kind: 'code' } | { kind: 'confirm'; code: string };
+type Step = { kind: 'name' } | { kind: 'code'; notice?: string } | { kind: 'confirm'; code: string };
 
 export default function NewGroup() {
   const { session, openGroups } = useUnlocked();
@@ -26,6 +26,8 @@ export default function NewGroup() {
     return (
       <View style={styles.center}>
         <CodeEntry
+          key="code"
+          initialError={step.notice}
           title="Code du groupe"
           subtitle="6 chiffres à partager à l’oral avec les membres."
           onComplete={async (code) => {
@@ -41,11 +43,12 @@ export default function NewGroup() {
     return (
       <View style={styles.center}>
         <CodeEntry
+          key="confirm"
           title="Confirme le code"
           onComplete={async (code) => {
             if (code !== step.code) {
-              setStep({ kind: 'code' });
-              return 'Les codes ne correspondent pas';
+              setStep({ kind: 'code', notice: 'Les codes ne correspondent pas' });
+              return null;
             }
             try {
               const { id, groupKey } = await createGroup(session, name.trim(), code);

@@ -46,6 +46,7 @@ function GroupUnlock({ groupId, onOpen }: { groupId: string; onOpen(g: OpenGroup
   const { session } = useUnlocked();
   const [state, setState] = useState<GroupLockState | null>(null);
   const [firstCode, setFirstCode] = useState<string | null>(null);
+  const [mismatch, setMismatch] = useState(false);
   const [lockedFor, setLockedFor] = useState(0);
 
   useEffect(() => {
@@ -97,6 +98,8 @@ function GroupUnlock({ groupId, onOpen }: { groupId: string; onOpen(g: OpenGroup
         <Stack.Screen options={{ title: 'Groupe verrouillé' }} />
         {firstCode === null ? (
           <CodeEntry
+            key="code"
+            initialError={mismatch ? 'Les codes ne correspondent pas' : undefined}
             title="Code du groupe"
             subtitle="La clé est arrivée. Entre le code du groupe pour la protéger sur ce téléphone."
             onComplete={async (code) => {
@@ -106,11 +109,13 @@ function GroupUnlock({ groupId, onOpen }: { groupId: string; onOpen(g: OpenGroup
           />
         ) : (
           <CodeEntry
+            key="confirm"
             title="Confirme le code"
             onComplete={async (code) => {
               if (code !== firstCode) {
+                setMismatch(true);
                 setFirstCode(null);
-                return 'Les codes ne correspondent pas';
+                return null;
               }
               return attempt(code);
             }}

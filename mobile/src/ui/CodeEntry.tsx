@@ -16,16 +16,19 @@ export function CodeEntry({
   length = 6,
   onComplete,
   lockedForMs = 0,
+  initialError,
 }: {
   title: string;
   subtitle?: string;
   length?: number;
   onComplete(code: string): Promise<string | null>;
   lockedForMs?: number;
+  /** Shown until the first key press, e.g. "codes do not match" from the previous step. */
+  initialError?: string;
 }) {
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(initialError ?? null);
   const [wait, setWait] = useState(lockedForMs);
   const dots = useRef<PinDotsHandle>(null);
 
@@ -42,11 +45,13 @@ export function CodeEntry({
     await new Promise((r) => setTimeout(r, 50));
     const message = await onComplete(full).catch(() => 'Erreur inattendue');
     setBusy(false);
+    // Always clear: on success the parent often shows the next step in this
+    // same component instance, which must start empty.
+    setCode('');
     if (message) {
       setError(message);
       dots.current?.shake();
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      setCode('');
     }
   }
 

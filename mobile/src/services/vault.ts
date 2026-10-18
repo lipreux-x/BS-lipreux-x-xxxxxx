@@ -63,6 +63,24 @@ export class WrongCodeError extends Error {
   }
 }
 
+/** Key material computed before registering: the slow Argon2id step, no I/O. */
+export interface PreparedVault {
+  identity: Identity;
+  deviceSecret: Uint8Array;
+  masterKey: Uint8Array;
+  appCodeWrap: WrappedKey;
+}
+
+/**
+ * Runs the expensive part of account creation up front, so the invite is
+ * only consumed on the server once the phone is ready to save the account.
+ */
+export function prepareVault(identity: Identity, appCode: string): PreparedVault {
+  const deviceSecret = generateDeviceSecret();
+  const masterKey = generateMasterKey();
+  return { identity, deviceSecret, masterKey, appCodeWrap: wrapMasterKey(masterKey, appCode, deviceSecret) };
+}
+
 const K = {
   deviceSecret: 'bs.device_secret',
   master: 'bs.master_wrapped',
@@ -87,9 +105,11 @@ export class Vault {
 
   /** First launch, after the server accepted the registration. */
   async create(account: Account, identity: Identity, appCode: string): Promise<UnlockedVault> {
-    const deviceSecret = generateDeviceSecret();
-    const masterKey = generateMasterKey();
-    const wrapped = wrapMasterKey(masterKey, appCode, deviceSecret);
+    return this.commit(account, prepareVault(identity, appCode));
+  }
+
+  /** Persists a prepared vault once the server has accepted the account. */
+  async commit(account: Account, { identity, appCodeWrap: wrapped, deviceSecret, masterKey }: PreparedVault): Promise<UnlockedVault> {
     await this.store.set(K.deviceSecret, b64.encode(deviceSecret));
     await this.store.set(K.master, JSON.stringify(wrapped));
     await this.store.set(K.identity, sealIdentity(identity, masterKey));

@@ -6,7 +6,7 @@ import { wipe } from '@/crypto/encoding';
 import { Api } from '@/services/api';
 import { ProfileCache, type Session } from '@/services/groups';
 import { secureStore } from '@/services/secureStore';
-import { Vault } from '@/services/vault';
+import { prepareVault, Vault } from '@/services/vault';
 
 /*
  * App-wide lock state. Keys only exist in memory while unlocked; locking
@@ -91,8 +91,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     async ({ inviteCode, username, appCode }: { inviteCode: string; username: string; appCode: string }) => {
       // Keys are generated on the phone; only the public halves are sent.
       const identity = generateIdentity();
+      // Slow local step first (Argon2id): the invite is consumed only after it.
+      const prepared = prepareVault(identity, appCode);
       const { userId } = await new Api(API_URL).register(inviteCode, username, identity);
-      start(await vault.create({ userId, username }, identity, appCode));
+      start(await vault.commit({ userId, username }, prepared));
     },
     [start],
   );

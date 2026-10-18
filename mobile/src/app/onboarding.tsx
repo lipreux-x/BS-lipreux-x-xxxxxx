@@ -12,7 +12,7 @@ import { colors, space, type } from '@/ui/theme';
  * phone -> account created. The app code never leaves the phone.
  */
 
-type Step = { kind: 'welcome' } | { kind: 'code' } | { kind: 'confirm'; code: string };
+type Step = { kind: 'welcome' } | { kind: 'code'; notice?: string } | { kind: 'confirm'; code: string };
 
 const USERNAME = /^[A-Za-z0-9_.-]{3,24}$/;
 
@@ -29,6 +29,8 @@ export default function Onboarding() {
     return (
       <SafeAreaView style={styles.center}>
         <CodeEntry
+          key="code"
+          initialError={step.notice}
           title="Choisis ton code"
           subtitle="6 chiffres pour ouvrir l’app. Il ne quitte jamais ton téléphone."
           onComplete={async (code) => {
@@ -47,12 +49,13 @@ export default function Onboarding() {
     return (
       <SafeAreaView style={styles.center}>
         <CodeEntry
+          key="confirm"
           title="Confirme ton code"
           subtitle="Création de tes clés sur le téléphone…"
           onComplete={async (code) => {
             if (code !== step.code) {
-              setStep({ kind: 'code' });
-              return 'Les codes ne correspondent pas';
+              setStep({ kind: 'code', notice: 'Les codes ne correspondent pas' });
+              return null;
             }
             try {
               await register({ inviteCode: invite, username, appCode: code });

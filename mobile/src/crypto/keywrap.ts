@@ -24,7 +24,8 @@ export interface Argon2Params {
   mem: number; // bytes
 }
 export const ARGON2_NATIVE: Argon2Params = { ops: 3, mem: 64 * 1024 * 1024 };
-export const ARGON2_JS: Argon2Params = { ops: 3, mem: 4 * 1024 * 1024 };
+// ~0.9 s for 1 MiB / 2 passes measured with `node --jitless` (4 MiB / 3 passes: 6.3 s).
+export const ARGON2_JS: Argon2Params = { ops: 2, mem: 1024 * 1024 };
 const ARGON2_DEFAULT = backend === 'libsodium' ? ARGON2_NATIVE : ARGON2_JS;
 // Bounds for stored params: a tampered record must not make us allocate GBs.
 const MIN_OPS = 1;

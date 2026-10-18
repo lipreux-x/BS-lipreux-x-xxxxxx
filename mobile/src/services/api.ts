@@ -65,6 +65,8 @@ export interface Credentials {
 
 type Init = { method?: string; json?: unknown; auth?: boolean };
 
+const REQUEST_TIMEOUT_MS = 15_000;
+
 export class Api {
   private token: string | null = null;
   private tokenPromise: Promise<string> | null = null;
@@ -77,8 +79,12 @@ export class Api {
   // ---- transport -------------------------------------------------------------
 
   private async raw(path: string, init: Init, token?: string): Promise<Response> {
+    // fetch has no timeout of its own: a stalled request would spin forever.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
     try {
       return await fetch(this.baseUrl + path, {
+        signal: controller.signal,
         method: init.method ?? 'GET',
         headers: {
           ...(init.json !== undefined && { 'content-type': 'application/json' }),
@@ -88,6 +94,8 @@ export class Api {
       });
     } catch {
       throw new NetworkError();
+    } finally {
+      clearTimeout(timer);
     }
   }
 
