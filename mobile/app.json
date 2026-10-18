@@ -22,8 +22,12 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "react-native-libsodium"
+      "react-native-libsodium",
+      "expo-router",
+      "expo-status-bar",
+      "expo-secure-store"
     ],
-    "backgroundColor": "#000000"
+    "backgroundColor": "#000000",
+    "scheme": "basesecrete"
   }
 }

@@ -1,12 +1,36 @@
 import { sodium } from './sodium';
 
 const encoder = new TextEncoder();
-const decoder = new TextDecoder('utf-8', { fatal: true });
+// Hermes may lack TextDecoder: fall back to a strict decoder (rejects malformed input).
+const decoder = typeof TextDecoder === 'function' ? new TextDecoder('utf-8', { fatal: true }) : null;
 
 export const utf8 = {
   encode: (text: string): Uint8Array => encoder.encode(text),
-  decode: (bytes: Uint8Array): string => decoder.decode(bytes),
+  decode: (bytes: Uint8Array): string => (decoder ? decoder.decode(bytes) : decodeUtf8Strict(bytes)),
 };
+
+export function decodeUtf8Strict(bytes: Uint8Array): string {
+  let out = '';
+  for (let i = 0; i < bytes.length; ) {
+    const b0 = bytes[i++];
+    let cp: number;
+    let extra: number;
+    let min: number;
+    if (b0 < 0x80) [cp, extra, min] = [b0, 0, 0];
+    else if (b0 >= 0xc2 && b0 < 0xe0) [cp, extra, min] = [b0 & 0x1f, 1, 0x80];
+    else if (b0 >= 0xe0 && b0 < 0xf0) [cp, extra, min] = [b0 & 0x0f, 2, 0x800];
+    else if (b0 >= 0xf0 && b0 < 0xf5) [cp, extra, min] = [b0 & 0x07, 3, 0x10000];
+    else throw new TypeError('invalid utf-8');
+    for (let k = 0; k < extra; k++) {
+      const b = bytes[i++];
+      if (b === undefined || (b & 0xc0) !== 0x80) throw new TypeError('invalid utf-8');
+      cp = (cp << 6) | (b & 0x3f);
+    }
+    if (cp < min || cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff)) throw new TypeError('invalid utf-8');
+    out += String.fromCodePoint(cp);
+  }
+  return out;
+}
 
 /** URL-safe base64 without padding (libsodium default variant). */
 export const b64 = {

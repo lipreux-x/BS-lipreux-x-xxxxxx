@@ -31,3 +31,13 @@ export {
   type EncryptedMessage,
   type GroupMeta,
 } from './group';
+export {
+  normalizeInviteCode,
+  registrationProof,
+  loginSignature,
+  sealIdentity,
+  openIdentity,
+  sealLocal,
+  openLocal,
+} from './auth';
+export { b64, utf8 } from './encoding';
