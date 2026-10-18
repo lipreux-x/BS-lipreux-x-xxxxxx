@@ -1,4 +1,4 @@
-import { Stack, useLocalSearchParams } from 'expo-router';
+import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { FlatList, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -204,7 +204,16 @@ function Chat({ groupId, group }: { groupId: string; group: OpenGroup }) {
 
   return (
     <SafeAreaView style={styles.screen} edges={['bottom']}>
-      <Stack.Screen options={{ title: group.name }} />
+      <Stack.Screen
+        options={{
+          title: group.name,
+          headerRight: () => (
+            <Pressable hitSlop={12} onPress={() => router.push({ pathname: '/group/info', params: { id: groupId } })}>
+              <Text style={{ color: colors.accentFg }}>Infos</Text>
+            </Pressable>
+          ),
+        }}
+      />
       {!online ? <Text style={styles.banner}>Hors ligne — les messages partiront dès le retour du réseau</Text> : null}
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={90}>
         <FlatList
