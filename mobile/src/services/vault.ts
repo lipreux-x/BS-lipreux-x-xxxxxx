@@ -162,6 +162,13 @@ export class Vault {
     await this.store.delete(K.group(groupId, keyVersion));
   }
 
+  /** After leaving: every local key version (≤ upTo), the meta and the attempt counter. */
+  async forgetGroup(groupId: string, upTo: number) {
+    for (let v = 1; v <= upTo; v++) await this.store.delete(K.group(groupId, v));
+    await this.store.delete(K.meta(groupId));
+    await this.store.delete(K.lockoutGroup(groupId));
+  }
+
   async saveGroupKey(groupId: string, keyVersion: number, groupKey: Uint8Array, groupCode: string, masterKey: Uint8Array) {
     const locked = lockGroupKey(groupKey, groupCode, masterKey, groupId, keyVersion);
     await this.store.set(K.group(groupId, keyVersion), JSON.stringify(locked));

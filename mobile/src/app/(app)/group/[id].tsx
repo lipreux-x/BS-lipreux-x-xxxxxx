@@ -259,8 +259,8 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
         options={{
           title: group.name,
           headerRight: () => (
-            <Pressable hitSlop={12} onPress={() => router.push({ pathname: '/group/info', params: { id: groupId } })}>
-              <Text style={{ color: colors.accentFg }}>Infos</Text>
+            <Pressable hitSlop={12} onPress={() => router.push({ pathname: '/group/settings', params: { id: groupId } })}>
+              <Text style={{ color: colors.accentFg }}>Réglages</Text>
             </Pressable>
           ),
         }}
