@@ -1,0 +1,21 @@
+import { Stack } from 'expo-router';
+import { colors } from '@/ui/theme';
+
+export default function AppLayout() {
+  return (
+    <Stack
+      screenOptions={{
+        headerStyle: { backgroundColor: colors.bg },
+        headerTintColor: colors.gold,
+        headerTitleStyle: { color: colors.text },
+        contentStyle: { backgroundColor: colors.bg },
+      }}
+    >
+      <Stack.Screen name="index" options={{ title: 'BaseSecrète' }} />
+      <Stack.Screen name="group/new" options={{ title: 'Nouveau groupe', presentation: 'modal' }} />
+      <Stack.Screen name="group/join" options={{ title: 'Rejoindre un groupe', presentation: 'modal' }} />
+      <Stack.Screen name="group/[id]" options={{ title: '' }} />
+      <Stack.Screen name="settings" options={{ title: 'Réglages' }} />
+    </Stack>
+  );
+}
