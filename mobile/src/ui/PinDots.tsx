@@ -31,7 +31,7 @@ export const PinDots = forwardRef<PinDotsHandle, { length: number; filled: numbe
 
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', gap: 18 },
-  dot: { width: 14, height: 14, borderRadius: 7, borderWidth: 1.5, borderColor: colors.gold },
-  filled: { backgroundColor: colors.gold },
+  dot: { width: 14, height: 14, borderRadius: 7, borderWidth: 1.5, borderColor: colors.accentFg },
+  filled: { backgroundColor: colors.accentFg },
   error: { borderColor: colors.danger, backgroundColor: 'transparent' },
 });

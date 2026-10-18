@@ -144,7 +144,7 @@ function ShareId({ groupId }: { groupId: string }) {
         setTimeout(() => setCopied(false), 1500);
       }}
     >
-      <Text style={{ color: colors.gold }}>{copied ? 'Copié' : 'Partager'}</Text>
+      <Text style={{ color: colors.accentFg }}>{copied ? 'Copié' : 'Partager'}</Text>
     </Pressable>
   );
 }
@@ -279,11 +279,11 @@ const styles = StyleSheet.create({
   bubble: { maxWidth: '80%', borderRadius: 16, paddingHorizontal: 14, paddingVertical: 10 },
   mine: { alignSelf: 'flex-end', backgroundColor: colors.forest, borderBottomRightRadius: 4 },
   theirs: { alignSelf: 'flex-start', backgroundColor: colors.surface2, borderBottomLeftRadius: 4 },
-  author: { color: colors.gold, fontSize: 12, marginBottom: 2 },
+  author: { color: colors.accentFg, fontSize: 12, marginBottom: 2 },
   unreadable: { color: colors.textDim, fontStyle: 'italic' },
   status: { color: colors.textDim, fontSize: 11, marginTop: 4, textAlign: 'right' },
   composer: { flexDirection: 'row', alignItems: 'flex-end', gap: space.sm, padding: space.sm, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
   input: { flex: 1, minHeight: 44, maxHeight: 140, borderRadius: 22, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, color: colors.text, paddingHorizontal: 16, paddingVertical: 10, fontSize: 16 },
-  send: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.gold, alignItems: 'center', justifyContent: 'center' },
-  sendLabel: { color: colors.bg, fontSize: 22, fontWeight: '700' },
+  send: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.accent, borderWidth: 1, borderColor: colors.accentFg, alignItems: 'center', justifyContent: 'center' },
+  sendLabel: { color: colors.text, fontSize: 22, fontWeight: '700' },
 });

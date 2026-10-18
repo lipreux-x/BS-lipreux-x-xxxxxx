@@ -1,4 +1,4 @@
-// SPEC §8: black vault, Or Coffre accent, forest green for my messages.
+// SPEC §8: black vault, anthracite grey accent, forest green for my messages.
 export const colors = {
   bg: '#000000',
   surface: '#0D0D0D',
@@ -6,7 +6,8 @@ export const colors = {
   border: '#2A2A2A',
   text: '#FFFFFF',
   textDim: '#8A8A8A',
-  gold: '#D4AF37',
+  accent: '#383E42', // anthracite (RAL 7016): fills only — white text on it is 11:1
+  accentFg: '#9AA1A7', // light anthracite: strokes and text on black (7.8:1)
   forest: '#1E6B34', // white text on it: 6.6:1
   danger: '#E5484D',
 } as const;

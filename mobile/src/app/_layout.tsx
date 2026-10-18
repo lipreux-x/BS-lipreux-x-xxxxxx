@@ -9,7 +9,7 @@ function RootStack() {
   if (status.kind === 'loading') {
     return (
       <View style={{ flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center' }}>
-        <ActivityIndicator color={colors.gold} />
+        <ActivityIndicator color={colors.accentFg} />
       </View>
     );
   }
@@ -17,7 +17,7 @@ function RootStack() {
     <Stack
       screenOptions={{
         headerStyle: { backgroundColor: colors.bg },
-        headerTintColor: colors.gold,
+        headerTintColor: colors.accentFg,
         headerTitleStyle: { color: colors.text },
         contentStyle: { backgroundColor: colors.bg },
       }}

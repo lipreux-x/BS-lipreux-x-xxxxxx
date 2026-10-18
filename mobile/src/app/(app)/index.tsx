@@ -48,7 +48,7 @@ export default function GroupsList() {
         keyExtractor={(g) => g.id}
         refreshControl={
           <RefreshControl
-            tintColor={colors.gold}
+            tintColor={colors.accentFg}
             refreshing={refreshing}
             onRefresh={async () => {
               setRefreshing(true);
@@ -116,13 +116,13 @@ function HeaderButton({ label, onPress }: { label: string; onPress(): void }) {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   headerButtons: { flexDirection: 'row', gap: space.lg },
-  headerButton: { color: colors.gold, fontSize: 26 },
+  headerButton: { color: colors.accentFg, fontSize: 26 },
   banner: { backgroundColor: colors.surface2, color: colors.textDim, padding: space.sm, textAlign: 'center', fontSize: 13 },
   row: { flexDirection: 'row', alignItems: 'center', gap: space.md, paddingHorizontal: space.md, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
-  icon: { width: 48, height: 48, borderRadius: 10, borderWidth: 1, borderColor: colors.gold, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surface },
+  icon: { width: 48, height: 48, borderRadius: 10, borderWidth: 1, borderColor: colors.accentFg, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surface },
   iconText: { fontSize: 20 },
   empty: { alignItems: 'center', gap: space.md, padding: space.xl, marginTop: space.xl },
   centerText: { textAlign: 'center' },
-  link: { color: colors.gold, fontSize: 16, padding: space.md },
+  link: { color: colors.accentFg, fontSize: 16, padding: space.md },
   footer: { alignItems: 'center' },
 });

@@ -28,9 +28,9 @@ export function Button({
       ]}
     >
       {busy ? (
-        <ActivityIndicator color={primary ? colors.bg : colors.gold} />
+        <ActivityIndicator color={primary ? colors.text : colors.accentFg} />
       ) : (
-        <Text style={[styles.label, { color: primary ? colors.bg : colors.gold }]}>{title}</Text>
+        <Text style={[styles.label, { color: primary ? colors.text : colors.accentFg }]}>{title}</Text>
       )}
     </Pressable>
   );
@@ -38,7 +38,7 @@ export function Button({
 
 const styles = StyleSheet.create({
   base: { height: 52, borderRadius: 14, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 20 },
-  primary: { backgroundColor: colors.gold },
-  ghost: { borderWidth: 1, borderColor: colors.gold },
+  primary: { backgroundColor: colors.accent, borderWidth: 1, borderColor: colors.accentFg },
+  ghost: { borderWidth: 1, borderColor: colors.accentFg },
   label: { fontSize: 16, fontWeight: '600' },
 });

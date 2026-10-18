@@ -64,7 +64,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 const styles = StyleSheet.create({
   screen: { padding: space.md, gap: space.lg, backgroundColor: colors.bg },
   section: { gap: space.sm, padding: space.md, borderRadius: 14, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
-  sectionTitle: { color: colors.gold, fontSize: 13, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 1 },
+  sectionTitle: { color: colors.accentFg, fontSize: 13, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 1 },
   inviteBox: { gap: space.sm, paddingVertical: space.sm },
   invite: { color: colors.text, fontSize: 22, fontFamily: 'monospace', letterSpacing: 1, textAlign: 'center' },
   error: { color: colors.danger },

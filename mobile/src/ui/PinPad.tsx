@@ -35,7 +35,7 @@ const styles = StyleSheet.create({
   grid: { flexDirection: 'row', flexWrap: 'wrap', width: 288, justifyContent: 'space-between', rowGap: 16 },
   key: { width: 80, height: 80, alignItems: 'center', justifyContent: 'center' },
   button: { borderRadius: 40, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface },
-  pressed: { backgroundColor: colors.surface2, borderColor: colors.gold },
+  pressed: { backgroundColor: colors.surface2, borderColor: colors.accentFg },
   disabled: { opacity: 0.3 },
   label: { color: colors.text, fontSize: 32, fontWeight: '300' },
   del: { fontSize: 24, color: colors.textDim },

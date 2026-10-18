@@ -237,7 +237,7 @@ Composants partagés : `PinPad`, `PinDots`, `VaultSquare` (animation), `MessageB
 
 - **Fond : noir (style Sephora)** `#000000`, surfaces `#0D0D0D` / `#1A1A1A`, bordures `#2A2A2A`.
 - Texte : blanc `#FFFFFF`, secondaire `#8A8A8A`.
-- ✅ **Accent principal : Or Coffre `#D4AF37`** — carré, points du code, badges, éléments actifs.
+- ✅ **Accent principal : gris anthracite** — `#383E42` (RAL 7016) pour les aplats (boutons, face du coffre, texte blanc dessus : 11:1) et `#9AA1A7` pour les traits et textes sur le noir (points du code, bordures, liens : 7,8:1). Remplace l’Or Coffre initialement choisi.
 - ✅ **Seconde couleur : Vert forêt `#1E6B34`** — bulles de mes messages, statuts « en ligne / envoyé ». (Texte blanc dessus : contraste 6,6:1.)
 - Typo : une sans-serif géométrique (ex. *Inter* ou *Space Grotesk*), chiffres du pavé en grand.
 - Ambiance : coffre-fort / club privé. Peu d'éléments, beaucoup de noir, animations courtes et nettes.

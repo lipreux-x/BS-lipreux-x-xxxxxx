@@ -69,7 +69,7 @@ export function CodeEntry({
       <Text style={type.heading}>{title}</Text>
       {subtitle ? <Text style={[type.dim, styles.center]}>{subtitle}</Text> : null}
       <View style={styles.dots}>
-        {busy ? <ActivityIndicator color={colors.gold} /> : <PinDots ref={dots} length={length} filled={code.length} error={!!error} />}
+        {busy ? <ActivityIndicator color={colors.accentFg} /> : <PinDots ref={dots} length={length} filled={code.length} error={!!error} />}
       </View>
       <Text style={[styles.error, styles.center]}>
         {locked ? `Trop d'essais. Réessaie dans ${Math.ceil(wait / 1000)} s` : (error ?? ' ')}
