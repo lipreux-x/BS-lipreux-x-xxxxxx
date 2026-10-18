@@ -243,6 +243,8 @@ app.get('/groups', async (c) => {
       encryptedMeta: groups.encryptedMeta,
       currentKeyVersion: groups.currentKeyVersion,
       ephemeralSeconds: groups.ephemeralSeconds,
+      rotationPending: groups.rotationPending,
+      codeVersion: groups.codeVersion,
       role: groupMembers.role,
     })
     .from(groupMembers)
@@ -385,6 +387,141 @@ app.post('/groups/:groupId/keys', async (c) => {
   // First writer wins: a member cannot overwrite a key someone already holds.
   if (rows.length) await db.insert(groupKeys).values(rows).onConflictDoNothing();
   return c.json({ stored: rows.length });
+});
+
+// ---- Group settings ----------------------------------------------------------
+
+/**
+ * Removes a member and flags the group for key rotation: the leaver keeps the
+ * old keys (and history), but the next key is drawn by a remaining member's
+ * phone and sealed only to those who stay (SPEC §4.3). The last member out
+ * deletes the group; if the last admin leaves, the oldest member becomes admin.
+ */
+async function removeMember(groupId: string, userId: string) {
+  await db.transaction(async (tx) => {
+    await tx.select({ id: groups.id }).from(groups).where(eq(groups.id, groupId)).for('update');
+    await tx.delete(groupMembers).where(and(eq(groupMembers.groupId, groupId), eq(groupMembers.userId, userId)));
+    await tx.delete(groupKeys).where(and(eq(groupKeys.groupId, groupId), eq(groupKeys.userId, userId)));
+    const rest = await tx
+      .select({ userId: groupMembers.userId, role: groupMembers.role })
+      .from(groupMembers)
+      .where(eq(groupMembers.groupId, groupId))
+      .orderBy(groupMembers.joinedAt);
+    if (rest.length === 0) {
+      await tx.delete(groups).where(eq(groups.id, groupId));
+      return;
+    }
+    if (!rest.some((m) => m.role === 'admin')) {
+      await tx
+        .update(groupMembers)
+        .set({ role: 'admin' })
+        .where(and(eq(groupMembers.groupId, groupId), eq(groupMembers.userId, rest[0]!.userId)));
+    }
+    await tx.update(groups).set({ rotationPending: true }).where(eq(groups.id, groupId));
+  });
+}
+
+async function requireAdmin(groupId: string, userId: string) {
+  const row = await requireMember(groupId, userId);
+  if (row.role !== 'admin') throw new HTTPException(403, { message: 'admin_only' });
+  return row;
+}
+
+app.post('/groups/:groupId/leave', async (c) => {
+  const groupId = groupIdParam(c);
+  const me = c.get('userId');
+  await requireMember(groupId, me);
+  await removeMember(groupId, me);
+  return c.json({ left: true });
+});
+
+app.post('/groups/:groupId/members/:userId/remove', async (c) => {
+  const groupId = groupIdParam(c);
+  const me = c.get('userId');
+  await requireAdmin(groupId, me);
+  const target = z.uuid().safeParse(c.req.param('userId'));
+  if (!target.success || target.data === me) throw new HTTPException(400, { message: 'invalid_member' });
+  const [row] = await db
+    .select({ userId: groupMembers.userId })
+    .from(groupMembers)
+    .where(and(eq(groupMembers.groupId, groupId), eq(groupMembers.userId, target.data)));
+  if (!row) throw new HTTPException(404, { message: 'not_found' });
+  await removeMember(groupId, target.data);
+  return c.json({ removed: true });
+});
+
+/**
+ * Key rotation: a member's phone drew a new group key, sealed it to every
+ * current member (itself included) and re-encrypted the meta with it. The
+ * key set must cover exactly the current members, so nobody who left gets it
+ * and nobody who stays is left out.
+ */
+app.post('/groups/:groupId/rotate', async (c) => {
+  const groupId = groupIdParam(c);
+  const input = await body(
+    c,
+    z.object({
+      fromKeyVersion: keyVersion,
+      encryptedMeta: b64Bytes({ max: 16 * 1024 }),
+      keys: z.array(z.object({ userId: z.uuid(), sealedKey: b64Bytes({ max: 256 }) })).min(1).max(500),
+    }),
+  );
+  await requireMember(groupId, c.get('userId'));
+  const next = await db.transaction(async (tx) => {
+    const [g] = await tx
+      .select({ currentKeyVersion: groups.currentKeyVersion })
+      .from(groups)
+      .where(eq(groups.id, groupId))
+      .for('update');
+    if (!g || g.currentKeyVersion !== input.fromKeyVersion) throw new HTTPException(409, { message: 'stale_key_version' });
+    const members = await tx.select({ userId: groupMembers.userId }).from(groupMembers).where(eq(groupMembers.groupId, groupId));
+    const sent = new Set(input.keys.map((k) => k.userId));
+    if (sent.size !== input.keys.length || sent.size !== members.length || !members.every((m) => sent.has(m.userId))) {
+      throw new HTTPException(409, { message: 'members_changed' });
+    }
+    const v = g.currentKeyVersion + 1;
+    await tx.insert(groupKeys).values(input.keys.map((k) => ({ groupId, userId: k.userId, keyVersion: v, sealedKey: k.sealedKey })));
+    await tx
+      .update(groups)
+      .set({ currentKeyVersion: v, encryptedMeta: input.encryptedMeta, rotationPending: false })
+      .where(eq(groups.id, groupId));
+    return v;
+  });
+  return c.json({ currentKeyVersion: next });
+});
+
+/** Admin: new code + keywords (for future joins), with the meta re-encrypted to hold the new keywords. */
+app.put('/groups/:groupId/code', async (c) => {
+  const groupId = groupIdParam(c);
+  const input = await body(c, z.object({ groupCode, keywords, keyVersion, encryptedMeta: b64Bytes({ max: 16 * 1024 }) }));
+  await requireAdmin(groupId, c.get('userId'));
+  const [codeHash, keywordsHash] = await Promise.all([hashGroupCode(input.groupCode), hashKeywords(input.keywords)]);
+  const codeLookup = groupCodeLookup(input.groupCode);
+  const codeVersion = await db.transaction(async (tx) => {
+    const [g] = await tx
+      .select({ currentKeyVersion: groups.currentKeyVersion, codeVersion: groups.codeVersion })
+      .from(groups)
+      .where(eq(groups.id, groupId))
+      .for('update');
+    if (!g || g.currentKeyVersion !== input.keyVersion) throw new HTTPException(409, { message: 'stale_key_version' });
+    const [taken] = await tx.select({ id: groups.id }).from(groups).where(eq(groups.codeLookup, codeLookup));
+    if (taken && taken.id !== groupId) throw new HTTPException(409, { message: 'code_taken' });
+    await tx
+      .update(groups)
+      .set({ codeHash, codeLookup, keywordsHash, encryptedMeta: input.encryptedMeta, codeVersion: g.codeVersion + 1 })
+      .where(eq(groups.id, groupId));
+    return g.codeVersion + 1;
+  });
+  return c.json({ codeVersion });
+});
+
+/** Admin: disappearing messages, for messages sent from now on. */
+app.put('/groups/:groupId/ephemeral', async (c) => {
+  const groupId = groupIdParam(c);
+  const input = await body(c, z.object({ seconds: z.union([z.literal(86_400), z.literal(604_800)]).nullable() }));
+  await requireAdmin(groupId, c.get('userId'));
+  await db.update(groups).set({ ephemeralSeconds: input.seconds }).where(eq(groups.id, groupId));
+  return c.json({ ephemeralSeconds: input.seconds });
 });
 
 // ---- Messages ----------------------------------------------------------------

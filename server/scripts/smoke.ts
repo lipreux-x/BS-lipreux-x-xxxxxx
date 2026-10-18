@@ -200,6 +200,42 @@ try {
   assert.equal((await call('POST', '/groups/join', { token: carol.token, json: { groupCode: GROUP_CODE, keywords: KEYWORDS } })).status, 429);
   step('join is rate-limited after 5 attempts (even with the right code)');
 
+  // 11. Group settings: admin rights, ephemeral, code change, removal + key rotation, leave
+  const ephemeral = (token: string, seconds: number | null) => call('PUT', `/groups/${groupId}/ephemeral`, { token, json: { seconds } });
+  assert.equal((await ephemeral(bob.token, 86_400)).status, 403);
+  assert.equal((await ephemeral(alice.token, 86_400)).status, 200);
+  assert.equal((await ephemeral(alice.token, null)).status, 200);
+  const newCode = `ZZ${rnd()}`;
+  const changed = await call('PUT', `/groups/${groupId}/code`, {
+    token: alice.token,
+    json: { groupCode: newCode, keywords: ['lune', 'mer', 'vent'], keyVersion: 1, encryptedMeta: b64(sodium.randombytes_buf(64)) },
+  });
+  assert.equal(changed.status, 200, JSON.stringify(changed.body));
+  assert.equal(changed.body.codeVersion, 2);
+  step('only the admin sets ephemeral messages and changes the code + keywords');
+
+  assert.equal((await call('POST', `/groups/${groupId}/members/${alice.id}/remove`, { token: bob.token })).status, 403);
+  assert.equal((await call('POST', `/groups/${groupId}/members/${bob.id}/remove`, { token: alice.token })).status, 200);
+  assert.equal((await call('GET', `/groups/${groupId}/messages`, { token: bob.token })).status, 404);
+  const flagged = (await call('GET', '/groups', { token: alice.token })).body.find((g: { id: string }) => g.id === groupId);
+  assert.equal(flagged.rotationPending, true);
+  const newKey = sodium.randombytes_buf(32);
+  const rotate = (keys: { userId: string; sealedKey: string }[]) =>
+    call('POST', `/groups/${groupId}/rotate`, { token: alice.token, json: { fromKeyVersion: 1, encryptedMeta: b64(sodium.randombytes_buf(64)), keys } });
+  const forBob = { userId: bob.id, sealedKey: b64(sodium.crypto_box_seal(newKey, bobBoxPk)) };
+  const forAlice = { userId: alice.id, sealedKey: b64(sodium.crypto_box_seal(newKey, alice.box.publicKey)) };
+  assert.equal((await rotate([forAlice, forBob])).status, 409);
+  const rotated = await rotate([forAlice]);
+  assert.equal(rotated.status, 200);
+  assert.equal(rotated.body.currentKeyVersion, 2);
+  const after = (await call('GET', '/groups', { token: alice.token })).body.find((g: { id: string }) => g.id === groupId);
+  assert.equal(after.rotationPending, false);
+  step('admin removed bob; the new key can only be sealed to those who remain');
+
+  assert.equal((await call('POST', `/groups/${groupId}/leave`, { token: alice.token })).status, 200);
+  assert.equal((await call('GET', '/groups', { token: alice.token })).body.length, 0);
+  step('the last member leaving deletes the group');
+
   console.log('Smoke test passed.');
 } finally {
   if (groupId) await db.delete(schema.groups).where(inArray(schema.groups.id, [groupId]));

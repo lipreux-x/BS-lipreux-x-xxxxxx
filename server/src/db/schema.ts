@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import {
   bigserial,
+  boolean,
   index,
   integer,
   pgTable,
@@ -39,6 +40,12 @@ export const groups = pgTable('groups', {
   // Null for groups created before: they are joined with the code alone.
   keywordsHash: text('keywords_hash'),
   currentKeyVersion: integer('current_key_version').notNull().default(1),
+  // Set when a member leaves or is removed: the next member who opens the
+  // group draws a new key for those who remain (POST /groups/:id/rotate).
+  rotationPending: boolean('rotation_pending').notNull().default(false),
+  // Bumped when the admin changes the code: members' phones then ask for the
+  // new one to re-lock the group key locally.
+  codeVersion: integer('code_version').notNull().default(1),
   createdBy: uuid('created_by').references(() => profiles.id, { onDelete: 'set null' }),
   ephemeralSeconds: integer('ephemeral_seconds'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
