@@ -26,6 +26,8 @@
     "@types/libsodium-wrappers-sumo": "^0.7.8",
     "@types/node": "^26.6.5",
     "@types/react": "~19.3.0",
+    "eslint": "^9.0.0",
+    "eslint-config-expo": "~58.0.4",
     "jest": "^30.5.2",
     "libsodium-wrappers-sumo": "^0.8.4",
     "ts-jest": "^29.4.15",
@@ -37,7 +39,8 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "test": "jest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "lint": "expo lint"
   },
   "private": true
 }
