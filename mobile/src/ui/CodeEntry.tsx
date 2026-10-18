@@ -1,14 +1,15 @@
 import * as Haptics from 'expo-haptics';
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
-import { PinDots, type PinDotsHandle } from './PinDots';
+import { StyleSheet, Text, View } from 'react-native';
 import { PinPad } from './PinPad';
+import { SafeDisplay, type SafeDisplayHandle } from './SafeDisplay';
 import { colors, space, type } from './theme';
 
 /**
- * Title + 6 dots + keypad. `onComplete` returns null on success or an error
- * message to show (the dots shake and reset). While it runs, the pad is
- * disabled and a spinner shows: Argon2id takes a moment on the phone.
+ * Title + safe display + safe keypad. `onComplete` returns null on success or
+ * an error message to show (the display shakes and resets). While it runs, the
+ * pad is disabled and the display's LED turns amber: Argon2id takes a moment
+ * on the phone.
  */
 export function CodeEntry({
   title,
@@ -30,7 +31,7 @@ export function CodeEntry({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(initialError ?? null);
   const [wait, setWait] = useState(lockedForMs);
-  const dots = useRef<PinDotsHandle>(null);
+  const display = useRef<SafeDisplayHandle>(null);
 
   useEffect(() => setWait(lockedForMs), [lockedForMs]);
   useEffect(() => {
@@ -50,7 +51,7 @@ export function CodeEntry({
     setCode('');
     if (message) {
       setError(message);
-      dots.current?.shake();
+      display.current?.shake();
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     }
   }
@@ -68,20 +69,30 @@ export function CodeEntry({
     <View style={styles.wrap}>
       <Text style={type.heading}>{title}</Text>
       {subtitle ? <Text style={[type.dim, styles.center]}>{subtitle}</Text> : null}
-      <View style={styles.dots}>
-        {busy ? <ActivityIndicator color={colors.accentFg} /> : <PinDots ref={dots} length={length} filled={code.length} error={!!error} />}
+      <View style={styles.display}>
+        <SafeDisplay
+          ref={display}
+          length={length}
+          filled={busy ? length : code.length}
+          state={busy ? 'busy' : error ? 'error' : 'idle'}
+        />
       </View>
       <Text style={[styles.error, styles.center]}>
         {locked ? `Trop d'essais. Réessaie dans ${Math.ceil(wait / 1000)} s` : (error ?? ' ')}
       </Text>
-      <PinPad onDigit={digit} onDelete={() => setCode((c) => c.slice(0, -1))} disabled={busy || locked} />
+      <PinPad
+        onDigit={digit}
+        onDelete={() => setCode((c) => c.slice(0, -1))}
+        onClear={() => setCode('')}
+        disabled={busy || locked}
+      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   wrap: { alignItems: 'center', gap: space.md },
-  dots: { height: 40, justifyContent: 'center', marginTop: space.md },
+  display: { marginTop: space.md },
   error: { color: colors.danger, minHeight: 20, fontSize: 14 },
   center: { textAlign: 'center', paddingHorizontal: space.lg },
 });
