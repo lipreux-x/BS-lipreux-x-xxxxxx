@@ -20,8 +20,8 @@ import type { UnlockedVault, Vault } from './vault';
  * Key flow (SPEC §4.3–4.4):
  * - create: the phone draws the group key, encrypts the name with it, seals it
  *   for itself (server copy) and locks it locally with group code + master key.
- * - join: the server checks the code (rate-limited) and adds a membership; the
- *   key arrives later, sealed to us by a member who has it (shareMissingKeys).
+ * - join: the code alone finds the group; the server checks it (rate-limited)
+ *   and adds a membership; the key arrives later, sealed to us by a member who has it (shareMissingKeys).
  * - first unlock after the key arrived: we open the sealed copy with our
  *   identity, then lock it locally with the code the user just typed.
  */
@@ -78,8 +78,9 @@ export async function createGroup(s: Session, name: string, groupCode: string): 
   return { id, groupKey };
 }
 
-export async function joinGroup(s: Session, groupId: string, groupCode: string): Promise<void> {
-  await s.api.joinGroup(groupId.trim().toLowerCase(), groupCode);
+/** Returns the id of the group the code belongs to. */
+export async function joinGroup(s: Session, groupCode: string): Promise<string> {
+  return (await s.api.joinGroup(groupCode)).groupId;
 }
 
 /**

@@ -54,23 +54,25 @@ run('app services against the deployed API', () => {
     expect((await alice.api.me()).username).toBe(alice.account.username);
 
     // Alice creates a group and invites Bob.
-    const { id: groupId } = await createGroup(alice, 'Les Potes', '777111');
+    // Letter codes: never collide with a real (digit) group code on the branch.
+    const groupCode = `ZZ${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+    const { id: groupId } = await createGroup(alice, 'Les Potes', groupCode);
     const { code } = await alice.api.createInvite();
     const bob = await onboard('bob', code, '135790');
 
     // Bob joins with the code; he is a member but has no key yet.
-    await joinGroup(bob, groupId, '777111');
+    expect(await joinGroup(bob, groupCode)).toBe(groupId);
     expect((await listGroups(bob))[0]).toMatchObject({ id: groupId, name: null, state: { kind: 'waiting-key' } });
 
     // Alice opens the group: her phone seals the key for Bob.
     const aliceProfiles = new ProfileCache(alice.api);
-    const aliceUnlock = await unlockGroup(alice, groupId, '777111');
+    const aliceUnlock = await unlockGroup(alice, groupId, groupCode);
     expect(aliceUnlock?.meta.name).toBe('Les Potes');
     expect(await shareMissingKeys(alice, aliceProfiles, groupId, aliceUnlock!.groupKey, 1)).toBe(1);
 
     // Bob's first unlock stores the key locally under the code he types.
     expect((await listGroups(bob))[0]!.state.kind).toBe('first-unlock');
-    const bobUnlock = await unlockGroup(bob, groupId, '777111');
+    const bobUnlock = await unlockGroup(bob, groupId, groupCode);
     expect(bobUnlock?.meta.name).toBe('Les Potes');
     expect((await listGroups(bob))[0]).toMatchObject({ name: 'Les Potes', state: { kind: 'locked' } });
 

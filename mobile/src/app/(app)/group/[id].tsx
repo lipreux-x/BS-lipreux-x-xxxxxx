@@ -1,4 +1,3 @@
-import * as Clipboard from 'expo-clipboard';
 import { Stack, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { FlatList, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
@@ -75,14 +74,12 @@ function GroupUnlock({ groupId, onOpen }: { groupId: string; onOpen(g: OpenGroup
     }
   }
 
-  const share = <ShareId groupId={groupId} />;
-
   if (!state) return <SafeAreaView style={styles.center} />;
 
   if (state.kind === 'waiting-key') {
     return (
       <View style={[styles.center, { padding: space.lg, gap: space.md }]}>
-        <Stack.Screen options={{ title: 'Groupe verrouillé', headerRight: () => share }} />
+        <Stack.Screen options={{ title: 'Groupe verrouillé' }} />
         <Text style={type.heading}>En attente de la clé</Text>
         <Text style={[type.dim, { textAlign: 'center' }]}>
           Tu es membre. La clé du groupe arrivera chiffrée pour toi dès qu’un membre ouvrira le groupe sur son téléphone.
@@ -127,25 +124,9 @@ function GroupUnlock({ groupId, onOpen }: { groupId: string; onOpen(g: OpenGroup
 
   return (
     <View style={styles.center}>
-      <Stack.Screen options={{ title: 'Groupe verrouillé', headerRight: () => share }} />
+      <Stack.Screen options={{ title: 'Groupe verrouillé' }} />
       <CodeEntry title="Code du groupe" onComplete={attempt} lockedForMs={lockedFor} />
     </View>
-  );
-}
-
-function ShareId({ groupId }: { groupId: string }) {
-  const [copied, setCopied] = useState(false);
-  return (
-    <Pressable
-      hitSlop={12}
-      onPress={async () => {
-        await Clipboard.setStringAsync(groupId);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 1500);
-      }}
-    >
-      <Text style={{ color: colors.accentFg }}>{copied ? 'Copié' : 'Partager'}</Text>
-    </Pressable>
   );
 }
 
@@ -223,7 +204,7 @@ function Chat({ groupId, group }: { groupId: string; group: OpenGroup }) {
 
   return (
     <SafeAreaView style={styles.screen} edges={['bottom']}>
-      <Stack.Screen options={{ title: group.name, headerRight: () => <ShareId groupId={groupId} /> }} />
+      <Stack.Screen options={{ title: group.name }} />
       {!online ? <Text style={styles.banner}>Hors ligne — les messages partiront dès le retour du réseau</Text> : null}
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={90}>
         <FlatList

@@ -61,7 +61,7 @@ export default function GroupsList() {
           groups ? (
             <View style={styles.empty}>
               <Text style={type.heading}>Aucun groupe</Text>
-              <Text style={[type.dim, styles.centerText]}>Crée un groupe, ou rejoins celui d’un pote avec son identifiant et son code.</Text>
+              <Text style={[type.dim, styles.centerText]}>Crée un groupe, ou rejoins celui d’un pote avec son code.</Text>
               <Pressable onPress={() => router.push('/group/join')}>
                 <Text style={styles.link}>Rejoindre un groupe</Text>
               </Pressable>

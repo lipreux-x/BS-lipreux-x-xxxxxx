@@ -56,6 +56,10 @@ export default function NewGroup() {
               router.replace({ pathname: '/group/[id]', params: { id } });
               return null;
             } catch (e) {
+              if (e instanceof ApiError && e.code === 'code_taken') {
+                setStep({ kind: 'code', notice: 'Ce code est déjà pris par un autre groupe, choisis-en un autre' });
+                return null;
+              }
               setStep({ kind: 'name' });
               setError(e instanceof NetworkError ? 'Pas de réseau.' : e instanceof ApiError ? `Création impossible (${e.code})` : 'Création impossible');
               return null;

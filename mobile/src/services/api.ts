@@ -175,8 +175,9 @@ export class Api {
     return this.request<{ id: string; currentKeyVersion: number }>('/groups', { method: 'POST', json: input });
   }
 
-  joinGroup(groupId: string, groupCode: string) {
-    return this.request<{ joined: true }>(`/groups/${groupId}/join`, { method: 'POST', json: { groupCode } });
+  /** The code alone identifies the group (codes are unique server-side). */
+  joinGroup(groupCode: string) {
+    return this.request<{ groupId: string }>('/groups/join', { method: 'POST', json: { groupCode } });
   }
 
   members(groupId: string) {
