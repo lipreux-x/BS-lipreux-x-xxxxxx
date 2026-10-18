@@ -18,10 +18,11 @@ import type { UnlockedVault, Vault } from './vault';
  * Group flows on top of the API, the crypto module and the vault.
  *
  * Key flow (SPEC §4.3–4.4):
- * - create: the phone draws the group key, encrypts the name with it, seals it
- *   for itself (server copy) and locks it locally with group code + master key.
- * - join: the code alone finds the group; the server checks it (rate-limited)
- *   and adds a membership; the key arrives later, sealed to us by a member who has it (shareMissingKeys).
+ * - create: the phone draws the group key, encrypts the name and the 3 join
+ *   keywords with it, seals it for itself (server copy) and locks it locally
+ *   with group code + master key. The server gets code and keywords to hash.
+ * - join: the code finds the group; the server checks code + keywords
+ *   (rate-limited) and adds a membership; the key arrives later, sealed to us by a member who has it (shareMissingKeys).
  * - first unlock after the key arrived: we open the sealed copy with our
  *   identity, then lock it locally with the code the user just typed.
  */
@@ -63,14 +64,15 @@ async function lockState(s: Session, g: GroupSummary): Promise<GroupLockState> {
   return { kind: 'waiting-key' };
 }
 
-export async function createGroup(s: Session, name: string, groupCode: string): Promise<{ id: string; groupKey: Uint8Array }> {
+export async function createGroup(s: Session, name: string, groupCode: string, keywords: string[]): Promise<{ id: string; groupKey: Uint8Array }> {
   const id = randomUUID();
   const groupKey = generateGroupKey();
-  const meta: GroupMeta = { name };
+  const meta: GroupMeta = { name, keywords };
   await s.api.createGroup({
     id,
     encryptedMeta: encryptGroupMeta(meta, id, 1, groupKey),
     groupCode,
+    keywords,
     sealedKey: sealGroupKeyFor(groupKey, s.identity.boxPublicKey),
   });
   await s.vault.saveGroupKey(id, 1, groupKey, groupCode, s.masterKey);
@@ -79,8 +81,8 @@ export async function createGroup(s: Session, name: string, groupCode: string): 
 }
 
 /** Returns the id of the group the code belongs to. */
-export async function joinGroup(s: Session, groupCode: string): Promise<string> {
-  return (await s.api.joinGroup(groupCode)).groupId;
+export async function joinGroup(s: Session, groupCode: string, keywords: string[]): Promise<string> {
+  return (await s.api.joinGroup(groupCode, keywords)).groupId;
 }
 
 /**

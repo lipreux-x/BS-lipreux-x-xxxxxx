@@ -171,13 +171,13 @@ export class Api {
     return this.request<GroupSummary[]>('/groups');
   }
 
-  createGroup(input: { id: string; encryptedMeta: string; groupCode: string; sealedKey: string; ephemeralSeconds?: number | null }) {
+  createGroup(input: { id: string; encryptedMeta: string; groupCode: string; keywords: string[]; sealedKey: string; ephemeralSeconds?: number | null }) {
     return this.request<{ id: string; currentKeyVersion: number }>('/groups', { method: 'POST', json: input });
   }
 
-  /** The code alone identifies the group (codes are unique server-side). */
-  joinGroup(groupCode: string) {
-    return this.request<{ groupId: string }>('/groups/join', { method: 'POST', json: { groupCode } });
+  /** The code identifies the group (codes are unique server-side); the keywords are checked with it. */
+  joinGroup(groupCode: string, keywords: string[]) {
+    return this.request<{ groupId: string }>('/groups/join', { method: 'POST', json: { groupCode, keywords } });
   }
 
   members(groupId: string) {

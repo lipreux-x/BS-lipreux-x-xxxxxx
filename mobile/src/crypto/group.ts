@@ -100,6 +100,8 @@ export function decryptMessage(
 export interface GroupMeta {
   name: string;
   avatar?: string;
+  /** The 3 join keywords as typed at creation; absent for groups created before. */
+  keywords?: string[];
 }
 
 const metaAd = (groupId: string, keyVersion: number) =>

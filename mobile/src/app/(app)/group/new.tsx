@@ -6,21 +6,39 @@ import { ApiError, NetworkError } from '@/services/api';
 import { createGroup } from '@/services/groups';
 import { Button } from '@/ui/Button';
 import { CodeEntry } from '@/ui/CodeEntry';
+import { KeywordsForm } from '@/ui/KeywordsForm';
 import { colors, space, type } from '@/ui/theme';
 
 /*
- * Key flow: the group key is drawn on this phone. The name is encrypted with
- * it; the server receives the encrypted name, the code (to check future joins)
- * and the key sealed for us. Locally the key is locked by code + master key.
+ * Key flow: the group key is drawn on this phone. Name and keywords are
+ * encrypted with it; the server receives them encrypted, plus the code and
+ * the keywords (to check future joins) and the key sealed for us. Locally
+ * the key is locked by code + master key.
  */
-type Step = { kind: 'name' } | { kind: 'code'; notice?: string } | { kind: 'confirm'; code: string };
+type Step = { kind: 'name' } | { kind: 'keywords' } | { kind: 'code'; notice?: string } | { kind: 'confirm'; code: string };
 
 export default function NewGroup() {
   const { session, openGroups } = useUnlocked();
   const router = useRouter();
   const [step, setStep] = useState<Step>({ kind: 'name' });
   const [name, setName] = useState('');
+  const [keywords, setKeywords] = useState<string[] | undefined>();
   const [error, setError] = useState<string | null>(null);
+
+  if (step.kind === 'keywords') {
+    return (
+      <KeywordsForm
+        hint="3 mots-clés à donner en vrai avec le code : il faudra les deux pour rejoindre le groupe. Les membres les retrouvent dans la fiche du groupe."
+        submitTitle="Continuer"
+        initial={keywords}
+        onSubmit={async (words) => {
+          setKeywords(words);
+          setStep({ kind: 'code' });
+          return null;
+        }}
+      />
+    );
+  }
 
   if (step.kind === 'code') {
     return (
@@ -51,7 +69,7 @@ export default function NewGroup() {
               return null;
             }
             try {
-              const { id, groupKey } = await createGroup(session, name.trim(), code);
+              const { id, groupKey } = await createGroup(session, name.trim(), code, keywords!);
               openGroups.set(id, { groupKey, keyVersion: 1, name: name.trim() });
               router.replace({ pathname: '/group/[id]', params: { id } });
               return null;
@@ -83,7 +101,7 @@ export default function NewGroup() {
         style={styles.input}
       />
       {error ? <Text style={styles.error}>{error}</Text> : null}
-      <Button title="Continuer" disabled={!name.trim()} onPress={() => setStep({ kind: 'code' })} />
+      <Button title="Continuer" disabled={!name.trim()} onPress={() => setStep({ kind: 'keywords' })} />
     </View>
   );
 }
