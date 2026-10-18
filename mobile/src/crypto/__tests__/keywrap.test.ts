@@ -101,3 +101,27 @@ describe('group key (group code + master key)', () => {
     expectDecryptFailed(() => unlockGroupKey(locked, '777111', master, groupId, 2));
   });
 });
+
+describe('stored Argon2id parameters', () => {
+  it('records the cost used, so another backend can unwrap it', () => {
+    const wrapped = wrapMasterKey(generateMasterKey(), '482913', generateDeviceSecret());
+    expect(wrapped.ops).toBeGreaterThanOrEqual(1);
+    expect(wrapped.mem).toBeGreaterThanOrEqual(1024 * 1024);
+  });
+
+  it('rejects out-of-bounds parameters from a tampered record', () => {
+    const secret = generateDeviceSecret();
+    const wrapped = wrapMasterKey(generateMasterKey(), '482913', secret);
+    for (const bad of [{ mem: 8 * 1024 * 1024 * 1024 }, { ops: 1000 }, { ops: 0 }, { mem: 1000 }]) {
+      expect(() => unwrapMasterKey({ ...wrapped, ...bad }, '482913', secret)).toThrow(CryptoError);
+    }
+  });
+
+  it('a record without parameters (written before they were stored) uses the native defaults', () => {
+    const master = generateMasterKey();
+    const secret = generateDeviceSecret();
+    const { ops, mem, ...legacy } = wrapMasterKey(master, '482913', secret);
+    if (ops === 3 && mem === 64 * 1024 * 1024) expect(unwrapMasterKey(legacy, '482913', secret)).toEqual(master);
+    else expect(() => unwrapMasterKey(legacy, '482913', secret)).toThrow(CryptoError);
+  });
+});

@@ -1,5 +1,9 @@
-/** Unit tests for pure TS modules (crypto, services). Runs in Node. */
-module.exports = {
+/**
+ * Unit tests for pure TS modules (crypto, services). Runs in Node, once per
+ * crypto backend: native libsodium (via libsodium-wrappers-sumo) and the
+ * pure-JS backend used in Expo Go.
+ */
+const base = {
   testEnvironment: 'node',
   roots: ['<rootDir>/src'],
   transform: {
@@ -11,4 +15,11 @@ module.exports = {
     '^expo-crypto$': '<rootDir>/test-support/expo-crypto.js',
     '^@/(.*)$': '<rootDir>/src/$1',
   },
+};
+
+module.exports = {
+  projects: [
+    { ...base, displayName: 'libsodium', setupFiles: ['<rootDir>/test-support/backend-libsodium.js'] },
+    { ...base, displayName: 'js', setupFiles: ['<rootDir>/test-support/backend-js.js'] },
+  ],
 };
