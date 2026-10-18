@@ -4,7 +4,7 @@ import { API_URL } from '@/config';
 import { generateIdentity, initCrypto } from '@/crypto';
 import { wipe } from '@/crypto/encoding';
 import { Api } from '@/services/api';
-import { ProfileCache, type Session } from '@/services/groups';
+import { ProfileCache, type GroupKeys, type Session } from '@/services/groups';
 import { secureStore } from '@/services/secureStore';
 import { prepareVault, Vault } from '@/services/vault';
 
@@ -21,7 +21,7 @@ export type Status =
   | { kind: 'unlocked' };
 
 export interface OpenGroup {
-  groupKey: Uint8Array;
+  keys: GroupKeys; // every version we can read; keyVersion is the one to send with
   keyVersion: number;
   name: string;
 }
@@ -67,7 +67,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     wipe(s.masterKey);
     wipe(s.identity.boxSecretKey);
     wipe(s.identity.signSecretKey);
-    for (const g of openGroups.values()) wipe(g.groupKey);
+    for (const g of openGroups.values()) for (const k of g.keys.values()) wipe(k);
     openGroups.clear();
   }, [openGroups]);
 

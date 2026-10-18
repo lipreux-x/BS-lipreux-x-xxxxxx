@@ -25,7 +25,15 @@ import type { UnlockedVault, Vault } from './vault';
  *   (rate-limited) and adds a membership; the key arrives later, sealed to us by a member who has it (shareMissingKeys).
  * - first unlock after the key arrived: we open the sealed copy with our
  *   identity, then lock it locally with the code the user just typed.
+ * - rotation (a member left or was removed): a remaining member's phone draws
+ *   a new key, seals it to each member who stays and re-encrypts the meta
+ *   with it. Older versions stay readable: the server keeps every version
+ *   sealed to us, opened with our identity once the code was checked on the
+ *   newest key locked on this phone (one Argon2id per unlock).
  */
+
+/** Group keys by version (messages carry the version they were sent with). */
+export type GroupKeys = Map<number, Uint8Array>;
 
 export interface Session extends UnlockedVault {
   api: Api;
@@ -59,7 +67,8 @@ export async function listGroups(s: Session): Promise<GroupListItem[]> {
 }
 
 async function lockState(s: Session, g: GroupSummary): Promise<GroupLockState> {
-  if (await s.vault.hasGroupKey(g.id, g.currentKeyVersion)) return { kind: 'locked' };
+  // An older local key still proves the code after a rotation (see unlockGroup).
+  if ((await s.vault.latestGroupKeyVersion(g.id, g.currentKeyVersion)) !== null) return { kind: 'locked' };
   if (g.sealedKeys.some((k) => k.keyVersion === g.currentKeyVersion)) return { kind: 'first-unlock' };
   return { kind: 'waiting-key' };
 }
@@ -90,23 +99,99 @@ export async function joinGroup(s: Session, groupCode: string, keywords: string[
  * has not been shared with us yet. Wrong codes throw from the vault
  * (WrongCodeError / LockedOutError) and count toward the lockout.
  */
-export async function unlockGroup(s: Session, groupId: string, groupCode: string): Promise<{ groupKey: Uint8Array; keyVersion: number; meta: GroupMeta } | null> {
+export async function unlockGroup(
+  s: Session,
+  groupId: string,
+  groupCode: string,
+): Promise<{ groupKey: Uint8Array; keys: GroupKeys; keyVersion: number; meta: GroupMeta } | null> {
   const g = (await s.api.groups()).find((x) => x.id === groupId);
   if (!g) throw new ApiError(404, 'not_found');
   const v = g.currentKeyVersion;
 
-  let groupKey: Uint8Array;
-  if (await s.vault.hasGroupKey(groupId, v)) {
-    groupKey = await s.vault.openGroupKey(groupId, v, groupCode, s.masterKey);
-  } else {
-    const sealed = g.sealedKeys.find((k) => k.keyVersion === v);
-    if (!sealed) return null;
-    groupKey = openSealedGroupKey(sealed.sealedKey, s.identity);
+  // The newest key locked on this phone checks the code (throws if wrong).
+  const local = await s.vault.latestGroupKeyVersion(groupId, v);
+  const keys: GroupKeys = new Map();
+  if (local !== null) keys.set(local, await s.vault.openGroupKey(groupId, local, groupCode, s.masterKey));
+  openSealedKeys(s, g, keys);
+  const groupKey = keys.get(v);
+  if (!groupKey) return null;
+
+  // First unlock, or the key was rotated: lock the current one under this code.
+  if (local !== v) {
     await s.vault.saveGroupKey(groupId, v, groupKey, groupCode, s.masterKey);
+    if (local !== null) await s.vault.deleteGroupKey(groupId, local);
   }
-  const meta = decryptGroupMeta(g.encryptedMeta, groupId, 1, groupKey);
+  const meta = decryptGroupMeta(g.encryptedMeta, groupId, v, groupKey);
   await s.vault.saveMeta(groupId, meta, s.masterKey);
-  return { groupKey, keyVersion: v, meta };
+  return { groupKey, keys, keyVersion: v, meta };
+}
+
+/** Adds every version the server holds sealed to us that is not in `keys` yet. */
+function openSealedKeys(s: Session, g: GroupSummary, keys: GroupKeys) {
+  for (const k of g.sealedKeys) {
+    if (keys.has(k.keyVersion)) continue;
+    try {
+      keys.set(k.keyVersion, openSealedGroupKey(k.sealedKey, s.identity));
+    } catch {
+      // Not sealed to our current identity: that version stays unreadable.
+    }
+  }
+}
+
+/**
+ * Brings an open group up to date: rotates the key if a member left (the
+ * first phone to try wins, the others pick up its key), opens versions
+ * rotated by others, and refreshes the local meta. Throws ApiError 404 if
+ * we are no longer a member.
+ */
+export async function syncGroup(
+  s: Session,
+  profiles: ProfileCache,
+  groupId: string,
+  keys: GroupKeys,
+): Promise<{ summary: GroupSummary; keys: GroupKeys; keyVersion: number; meta: GroupMeta }> {
+  let g = await summary(s, groupId);
+  const next: GroupKeys = new Map(keys);
+  openSealedKeys(s, g, next);
+  if (g.rotationPending && next.has(g.currentKeyVersion)) {
+    const meta = decryptGroupMeta(g.encryptedMeta, groupId, g.currentKeyVersion, next.get(g.currentKeyVersion)!);
+    try {
+      await rotateKey(s, profiles, groupId, g.currentKeyVersion, meta);
+    } catch (e) {
+      // Someone rotated first, or membership changed meanwhile: take theirs, retry later.
+      if (!(e instanceof ApiError && e.status === 409)) throw e;
+    }
+    g = await summary(s, groupId);
+    openSealedKeys(s, g, next);
+  }
+  const current = next.get(g.currentKeyVersion);
+  if (!current) throw new ApiError(409, 'stale_key_version');
+  const meta = decryptGroupMeta(g.encryptedMeta, groupId, g.currentKeyVersion, current);
+  await s.vault.saveMeta(groupId, meta, s.masterKey);
+  return { summary: g, keys: next, keyVersion: g.currentKeyVersion, meta };
+}
+
+async function summary(s: Session, groupId: string): Promise<GroupSummary> {
+  const g = (await s.api.groups()).find((x) => x.id === groupId);
+  if (!g) throw new ApiError(404, 'not_found');
+  return g;
+}
+
+/** Draws a new group key and seals it to every current member, us included. */
+async function rotateKey(s: Session, profiles: ProfileCache, groupId: string, fromKeyVersion: number, meta: GroupMeta) {
+  const { members } = await s.api.members(groupId);
+  const known = await profiles.get(members.map((m) => m.userId));
+  const groupKey = generateGroupKey();
+  const keys = members.map((m) => {
+    const p = known.get(m.userId);
+    if (!p) throw new Error('missing_profile');
+    return { userId: m.userId, sealedKey: sealGroupKeyFor(groupKey, parsePublicIdentity(p).boxPublicKey) };
+  });
+  await s.api.rotateKey(groupId, {
+    fromKeyVersion,
+    encryptedMeta: encryptGroupMeta(meta, groupId, fromKeyVersion + 1, groupKey),
+    keys,
+  });
 }
 
 // ---- Members and key distribution -----------------------------------------------
@@ -157,12 +242,13 @@ export interface ChatMessage {
   mine: boolean;
 }
 
-export async function decryptMessages(s: Session, profiles: ProfileCache, groupKey: Uint8Array, wire: WireMessage[]): Promise<ChatMessage[]> {
+export async function decryptMessages(s: Session, profiles: ProfileCache, keys: GroupKeys, wire: WireMessage[]): Promise<ChatMessage[]> {
   const known = await profiles.get(wire.map((m) => m.senderId));
   return wire.map((m) => {
     const p = known.get(m.senderId);
+    const groupKey = keys.get(m.keyVersion);
     let text: string | null = null;
-    if (p) {
+    if (p && groupKey) {
       try {
         text = decryptMessage(
           { nonce: m.nonce, ciphertext: m.ciphertext, signature: m.signature },

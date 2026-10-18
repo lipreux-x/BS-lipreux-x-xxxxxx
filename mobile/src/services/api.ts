@@ -34,6 +34,10 @@ export interface GroupSummary {
   encryptedMeta: string;
   currentKeyVersion: number;
   ephemeralSeconds: number | null;
+  /** A member left or was removed: the next member who opens the group rotates the key. */
+  rotationPending: boolean;
+  /** Bumped when the admin changes the code. */
+  codeVersion: number;
   role: 'admin' | 'member';
   sealedKeys: { keyVersion: number; sealedKey: string }[];
 }
@@ -186,6 +190,27 @@ export class Api {
 
   shareKeys(groupId: string, keys: { userId: string; keyVersion: number; sealedKey: string }[]) {
     return this.request<{ stored: number }>(`/groups/${groupId}/keys`, { method: 'POST', json: { keys } });
+  }
+
+  /** New key sealed to exactly the current members, with the meta re-encrypted under it. */
+  rotateKey(groupId: string, input: { fromKeyVersion: number; encryptedMeta: string; keys: { userId: string; sealedKey: string }[] }) {
+    return this.request<{ currentKeyVersion: number }>(`/groups/${groupId}/rotate`, { method: 'POST', json: input });
+  }
+
+  leaveGroup(groupId: string) {
+    return this.request<{ left: true }>(`/groups/${groupId}/leave`, { method: 'POST' });
+  }
+
+  removeMember(groupId: string, userId: string) {
+    return this.request<{ removed: true }>(`/groups/${groupId}/members/${userId}/remove`, { method: 'POST' });
+  }
+
+  changeGroupCode(groupId: string, input: { groupCode: string; keywords: string[]; keyVersion: number; encryptedMeta: string }) {
+    return this.request<{ codeVersion: number }>(`/groups/${groupId}/code`, { method: 'PUT', json: input });
+  }
+
+  setEphemeral(groupId: string, seconds: number | null) {
+    return this.request<{ ephemeralSeconds: number | null }>(`/groups/${groupId}/ephemeral`, { method: 'PUT', json: { seconds } });
   }
 
   // ---- messages ----------------------------------------------------------------

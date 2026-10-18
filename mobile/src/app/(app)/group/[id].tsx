@@ -1,10 +1,10 @@
-import { router, Stack, useLocalSearchParams } from 'expo-router';
+import { router, Stack, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { FlatList, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { API_URL } from '@/config';
 import { useUnlocked, type OpenGroup } from '@/session/SessionProvider';
-import { NetworkError } from '@/services/api';
+import { ApiError, NetworkError, type WireMessage } from '@/services/api';
 import {
   decryptMessages,
   fetchSince,
@@ -12,6 +12,7 @@ import {
   newClientId,
   sendText,
   shareMissingKeys,
+  syncGroup,
   unlockGroup,
   type ChatMessage,
   type GroupLockState,
@@ -25,18 +26,15 @@ export default function GroupScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { openGroups } = useUnlocked();
   const [open, setOpen] = useState<OpenGroup | undefined>(openGroups.get(id));
-
-  return open ? (
-    <Chat groupId={id} group={open} />
-  ) : (
-    <GroupUnlock
-      groupId={id}
-      onOpen={(g) => {
-        openGroups.set(id, g);
-        setOpen(g);
-      }}
-    />
+  const update = useCallback(
+    (g: OpenGroup) => {
+      openGroups.set(id, g);
+      setOpen(g);
+    },
+    [openGroups, id],
   );
+
+  return open ? <Chat groupId={id} group={open} onUpdate={update} /> : <GroupUnlock groupId={id} onOpen={update} />;
 }
 
 // ---- Unlock (SPEC §2.3) --------------------------------------------------------------
@@ -61,7 +59,7 @@ function GroupUnlock({ groupId, onOpen }: { groupId: string; onOpen(g: OpenGroup
         setState({ kind: 'waiting-key' });
         return null;
       }
-      onOpen({ groupKey: res.groupKey, keyVersion: res.keyVersion, name: res.meta.name });
+      onOpen({ keys: res.keys, keyVersion: res.keyVersion, name: res.meta.name });
       return null;
     } catch (e) {
       if (e instanceof WrongCodeError) return 'Code incorrect';
@@ -138,13 +136,51 @@ interface Pending {
   failed: boolean;
 }
 
-function Chat({ groupId, group }: { groupId: string; group: OpenGroup }) {
+function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup; onUpdate(g: OpenGroup): void }) {
   const { session, profiles } = useUnlocked();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [pending, setPending] = useState<Pending[]>([]);
   const [draft, setDraft] = useState('');
   const [online, setOnline] = useState(true);
+  const [removed, setRemoved] = useState(false);
   const lastSeq = useRef(0);
+  // Latest keys for callbacks that outlive a render (realtime, retries).
+  const current = useRef(group);
+  useEffect(() => {
+    current.current = group;
+  }, [group]);
+
+  /** Rotation if a member left, keys rotated by others, key handout to new members. */
+  const sync = useCallback(async (): Promise<OpenGroup> => {
+    try {
+      const r = await syncGroup(session, profiles, groupId, current.current.keys);
+      const g = { keys: r.keys, keyVersion: r.keyVersion, name: r.meta.name };
+      current.current = g;
+      onUpdate(g);
+      // Hand the key to members who joined since (they cannot read anything until then).
+      await shareMissingKeys(session, profiles, groupId, r.keys.get(r.keyVersion)!, r.keyVersion).catch(() => {});
+      return g;
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 404) setRemoved(true);
+      return current.current;
+    }
+  }, [session, profiles, groupId, onUpdate]);
+
+  const decrypt = useCallback(
+    async (wire: WireMessage[]) => {
+      let keys = current.current.keys;
+      if (wire.some((m) => !keys.has(m.keyVersion))) keys = (await sync()).keys;
+      return decryptMessages(session, profiles, keys, wire);
+    },
+    [session, profiles, sync],
+  );
+
+  // On open and when coming back from the group's settings.
+  useFocusEffect(
+    useCallback(() => {
+      void sync();
+    }, [sync]),
+  );
 
   const merge = useCallback((incoming: ChatMessage[]) => {
     if (!incoming.length) return;
@@ -161,39 +197,54 @@ function Chat({ groupId, group }: { groupId: string; group: OpenGroup }) {
   const resync = useCallback(async () => {
     try {
       const wire = await fetchSince(session, groupId, lastSeq.current);
-      merge(await decryptMessages(session, profiles, group.groupKey, wire));
+      merge(await decrypt(wire));
       setOnline(true);
     } catch (e) {
       if (e instanceof NetworkError) setOnline(false);
     }
-  }, [session, profiles, groupId, group.groupKey, merge]);
+  }, [session, groupId, decrypt, merge]);
 
   useEffect(() => {
     void resync();
-    // Hand the key to members who joined since (they cannot read anything until then).
-    void shareMissingKeys(session, profiles, groupId, group.groupKey, group.keyVersion).catch(() => {});
-
     const rt = new RealtimeClient(API_URL, () => session.api.accessToken(), {
       onConnected: () => void resync(),
       onStatus: setOnline,
       onMessage: (m) => {
         if (m.groupId !== groupId) return;
-        void decryptMessages(session, profiles, group.groupKey, [m]).then(merge);
+        void decrypt([m]).then(merge);
       },
     });
     rt.start();
     return () => rt.stop();
-  }, [session, profiles, groupId, group, resync, merge]);
+  }, [session, groupId, resync, decrypt, merge]);
 
   async function send(text: string, clientId = newClientId()) {
     setPending((p) => [...p.filter((x) => x.clientId !== clientId), { clientId, text, failed: false }]);
+    const attempt = (g: OpenGroup) => sendText(session, groupId, g.keys.get(g.keyVersion)!, g.keyVersion, text, clientId);
     try {
-      const wire = await sendText(session, groupId, group.groupKey, group.keyVersion, text, clientId);
-      merge(await decryptMessages(session, profiles, group.groupKey, [wire]));
+      let wire: WireMessage;
+      try {
+        wire = await attempt(current.current);
+      } catch (e) {
+        // The key was rotated since we opened the group: pick up the new one, send again.
+        if (!(e instanceof ApiError && e.code === 'stale_key_version')) throw e;
+        wire = await attempt(await sync());
+      }
+      merge(await decrypt([wire]));
     } catch {
       // Same clientId on retry: the server de-duplicates if the first send did land.
       setPending((p) => p.map((x) => (x.clientId === clientId ? { ...x, failed: true } : x)));
     }
+  }
+
+  if (removed) {
+    return (
+      <View style={[styles.center, { padding: space.lg, gap: space.md }]}>
+        <Stack.Screen options={{ title: group.name }} />
+        <Text style={type.heading}>Tu ne fais plus partie de ce groupe</Text>
+        <Text style={[type.dim, { textAlign: 'center' }]}>Un admin t’a retiré. Les nouveaux messages ne te sont plus accessibles.</Text>
+      </View>
+    );
   }
 
   type Row = { key: string; mine: boolean; text: string | null; author?: string; status?: 'sending' | 'failed'; pending?: Pending };

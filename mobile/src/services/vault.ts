@@ -152,6 +152,16 @@ export class Vault {
     return (await this.store.get(K.group(groupId, keyVersion))) !== null;
   }
 
+  /** Highest key version (≤ upTo) locked on this phone, or null. */
+  async latestGroupKeyVersion(groupId: string, upTo: number): Promise<number | null> {
+    for (let v = upTo; v >= 1; v--) if (await this.hasGroupKey(groupId, v)) return v;
+    return null;
+  }
+
+  async deleteGroupKey(groupId: string, keyVersion: number) {
+    await this.store.delete(K.group(groupId, keyVersion));
+  }
+
   async saveGroupKey(groupId: string, keyVersion: number, groupKey: Uint8Array, groupCode: string, masterKey: Uint8Array) {
     const locked = lockGroupKey(groupKey, groupCode, masterKey, groupId, keyVersion);
     await this.store.set(K.group(groupId, keyVersion), JSON.stringify(locked));
