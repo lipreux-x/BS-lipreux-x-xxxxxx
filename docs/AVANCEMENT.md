@@ -1,8 +1,20 @@
 # BaseSecrète — Avancement
 
-État du projet au 19/10/2026 : les derniers ajouts et changements, puis le plan du projet avec ce qui est fait et ce qui reste. La spec de référence est [SPEC.md](SPEC.md).
+État du projet au 19/10/2026 (mis à jour après les réglages du groupe) : les derniers ajouts et changements, puis le plan du projet avec ce qui est fait et ce qui reste. La spec de référence est [SPEC.md](SPEC.md).
 
 ## Derniers ajouts et changements
+
+### Réglages du groupe
+
+Le bouton **« Réglages »** en haut de la conversation ouvre les réglages du groupe (la fiche info en fait partie) :
+- **Mots-clés** et **membres** : l'admin en premier avec un badge ; les membres qui attendent encore la clé sont signalés.
+- **Retirer un membre** (admin) : la clé du groupe change tout de suite, la personne retirée ne lit plus les nouveaux messages.
+- **Messages éphémères** (admin) : désactivés, 24 h ou 7 jours, pour les messages envoyés ensuite.
+- **Changer le code et les mots-clés** (admin). Les autres membres tapent l'ancien code à leur prochaine ouverture du groupe, puis le téléphone leur demande le nouveau.
+- **Quitter le groupe** : les clés du groupe sont effacées du téléphone. Si le dernier admin part, le membre le plus ancien devient admin. Le dernier membre qui part supprime le groupe.
+
+**Rotation de clé** (SPEC §4.3) : quand un membre part ou est retiré, le premier membre restant qui ouvre le groupe crée une nouvelle clé et la donne, chiffrée, à chacun des membres restants. Le serveur refuse une rotation qui oublierait un membre ou en inclurait un parti. Les anciens messages restent lisibles. Le déverrouillage ne coûte toujours qu'un seul calcul Argon2id, même après plusieurs rotations.
+
 
 ### Rejoindre un groupe : code + 3 mots-clés
 
@@ -62,6 +74,11 @@ Le changement s'applique à tous les écrans de code : verrouillage, inscription
 | `480ddc2` | 18/10 | Serveur : 3 mots-clés avec le code |
 | `de78eec` | 19/10 | App : 3 mots-clés pour créer et rejoindre |
 | `a3fa1e0` | 19/10 | App : fiche info du groupe |
+| `472984b` | 19/10 | Ce document |
+| `e38bea8` | 19/10 | Serveur : quitter, retirer, rotation de clé, code, éphémère |
+| `d550f5d` | 19/10 | App : plusieurs versions de clé + rotation automatique |
+| `2e3abce` | 19/10 | App : écran Réglages du groupe |
+| `0b2c0d9` | 19/10 | App : changer le code et les mots-clés |
 
 ## Plan du projet
 
@@ -88,8 +105,8 @@ Le changement s'applique à tous les écrans de code : verrouillage, inscription
 |---|---|---|
 | ⬜ | Images et vocaux chiffrés | À faire |
 | ⬜ | Notifications push génériques | À faire |
-| 🟡 | Messages éphémères | Serveur prêt (durée par groupe + purge toutes les heures). Il manque le réglage dans l'app. |
-| ⬜ | Rotation de clé quand un membre part | À faire (il faut d'abord « quitter / retirer un membre ») |
+| ✅ | Messages éphémères | Fait : réglage admin dans les réglages du groupe, purge toutes les heures sur le serveur |
+| ✅ | Rotation de clé quand un membre part | Fait, avec « quitter » et « retirer un membre » |
 
 ### v0.3
 
@@ -102,8 +119,6 @@ Le changement s'applique à tous les écrans de code : verrouillage, inscription
 
 ### Prochaines étapes proposées
 
-1. **Réglages du groupe** (SPEC §7, `GroupSettings`) : la fiche info en est la première partie. Il reste : quitter le groupe, retirer un membre (admin), changer le code et les mots-clés, messages éphémères.
-2. **Rotation de clé** au départ d'un membre, à faire en même temps que le point 1.
-3. **Stockage local chiffré des messages** pour lire hors connexion.
-4. **Qualité** : corriger les 12 erreurs ESLint restantes (`VaultSquare.tsx`, `SessionProvider.tsx`, `CodeEntry.tsx`) et accélérer les tests crypto (la suite complète prend environ 40 min).
-5. **Production** : préparer la branche Neon de production et un build EAS de développement.
+1. **Stockage local chiffré des messages** pour lire hors connexion.
+2. **Qualité** : corriger les 12 erreurs ESLint restantes (`VaultSquare.tsx`, `SessionProvider.tsx`, `CodeEntry.tsx`) et accélérer les tests crypto (la suite complète prend environ 40 min).
+3. **Production** : préparer la branche Neon de production et un build EAS de développement.
