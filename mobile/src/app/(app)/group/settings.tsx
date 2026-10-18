@@ -94,6 +94,14 @@ export default function GroupSettings() {
     );
   }
 
+  // Locks just this group: its keys leave memory, the code is asked again next time.
+  function close() {
+    const open = openGroups.get(id);
+    if (open) for (const k of open.keys.values()) wipe(k);
+    openGroups.delete(id);
+    router.dismissAll();
+  }
+
   if (!info) {
     return (
       <View style={styles.center}>
@@ -178,6 +186,10 @@ export default function GroupSettings() {
       </View>
 
       <View style={[styles.card, styles.actions]}>
+        <Pressable disabled={busy} onPress={close} style={[styles.action, styles.separator]}>
+          <Text style={type.body}>🔒 Fermer le coffre</Text>
+          <Text style={type.dim}>Le code sera redemandé pour rouvrir la discussion.</Text>
+        </Pressable>
         {admin ? (
           <Pressable
             disabled={busy}
