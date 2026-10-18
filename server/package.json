@@ -1,0 +1,32 @@
+{
+  "name": "basesecrete-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "db:generate": "drizzle-kit generate",
+    "smoke": "tsx scripts/smoke.ts"
+  },
+  "dependencies": {
+    "@neon/functions": "^0.11.0",
+    "drizzle-orm": "^0.45.4",
+    "hash-wasm": "^4.12.0",
+    "hono": "^4.13.13",
+    "jose": "^6.2.12",
+    "pg": "^8.23.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@neon/config": "^1.9.2",
+    "@types/libsodium-wrappers-sumo": "^0.7.8",
+    "@types/node": "^26.6.5",
+    "@types/pg": "^8.23.1",
+    "drizzle-kit": "^0.31.11",
+    "libsodium-wrappers-sumo": "^0.8.4",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}
