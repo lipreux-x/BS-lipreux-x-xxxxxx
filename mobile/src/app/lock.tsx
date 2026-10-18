@@ -1,18 +1,25 @@
 import { useEffect, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Animated, Easing, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useSession } from '@/session/SessionProvider';
 import { remainingMs } from '@/services/lockout';
 import { LockedOutError, WrongCodeError } from '@/services/vault';
 import { CodeEntry } from '@/ui/CodeEntry';
-import { colors, space, type } from '@/ui/theme';
-import { VaultSquare } from '@/ui/VaultSquare';
+import { calm } from '@/ui/theme';
+import { VaultDoor } from '@/ui/VaultDoor';
 
-// SPEC §2.1: black screen, breathing square; tap -> keypad for the 6-digit app code.
+// SPEC §2.1: vault door; tap -> it unlocks and opens -> a calm keypad for the 6-digit app code.
+// The vault look is only for the opening; the code screen stays quiet.
 export default function LockScreen() {
   const { status, vault, unlock } = useSession();
   const [opened, setOpened] = useState(false);
   const [lockedFor, setLockedFor] = useState(0);
+  const [reveal] = useState(() => new Animated.Value(0));
+
+  useEffect(() => {
+    if (!opened) return;
+    Animated.timing(reveal, { toValue: 1, duration: 320, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
+  }, [opened, reveal]);
 
   useEffect(() => {
     void vault.appLockout().then((s) => setLockedFor(remainingMs(s, Date.now())));
@@ -38,24 +45,28 @@ export default function LockScreen() {
 
   return (
     <SafeAreaView style={styles.screen}>
+      {opened ? <Animated.View style={[StyleSheet.absoluteFill, calm, { opacity: reveal }]} /> : null}
       {opened ? (
-        <CodeEntry
-          title="Code BaseSecrète"
-          subtitle={status.kind === 'locked' ? status.username : undefined}
-          onComplete={submit}
-          lockedForMs={lockedFor}
-        />
+        <Animated.View
+          style={{
+            opacity: reveal,
+            transform: [{ scale: reveal.interpolate({ inputRange: [0, 1], outputRange: [0.94, 1] }) }],
+          }}
+        >
+          <CodeEntry
+            title="Code BaseSecrète"
+            subtitle={status.kind === 'locked' ? status.username : undefined}
+            onComplete={submit}
+            lockedForMs={lockedFor}
+          />
+        </Animated.View>
       ) : (
-        <View style={styles.center}>
-          <VaultSquare onOpen={() => setOpened(true)} />
-          <Text style={[type.dim, { marginTop: space.xl }]}>Touche le coffre</Text>
-        </View>
+        <VaultDoor hint="Touche le coffre" onOpen={() => setOpened(true)} />
       )}
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center' },
-  center: { alignItems: 'center' },
+  screen: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 });
