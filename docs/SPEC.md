@@ -100,6 +100,7 @@
 - Fonctionnement : la clé de groupe stockée localement est ré-enveloppée avec `Argon2id(code_groupe, sel_groupe)` **puis** avec la clé maître locale. Il faut donc les deux.
 - Pour **rejoindre** un groupe : le serveur garde seulement un hash Argon2id du code de groupe, et vérifie via une fonction de l'API avec **limite stricte d'essais** (ex. 5 essais / heure / utilisateur). Le vrai secret (la clé de groupe) n'arrive ensuite que via `crypto_box_seal`, envoyé par un membre existant ou l'admin du groupe.
 - Code de groupe : 6 chiffres minimum dans le MVP ; prévoir l'option alphanumérique plus longue.
+- **3 mots-clés** choisis à la création, demandés avec le code pour **rejoindre**. Le serveur n'en garde qu'un hash Argon2id (casse, accents, espaces et ordre ignorés) ; un échec ne dit jamais si c'est le code ou les mots-clés. Les membres les retrouvent dans la fiche info du groupe (chiffrés avec la clé de groupe dans `encrypted_meta`).
 
 ### 4.5 Protection contre le forçage
 - Code app : après 5 échecs → délai croissant (30 s, 1 min, 5 min, 15 min…). Option « auto-destruction » après 10 échecs = effacement des données locales.

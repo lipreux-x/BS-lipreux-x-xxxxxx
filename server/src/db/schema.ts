@@ -35,6 +35,9 @@ export const groups = pgTable('groups', {
   // HMAC-SHA256(GROUP_CODE_PEPPER, code): finds the group from the code alone.
   // Unique, so two groups cannot share a code. Null for groups created before.
   codeLookup: text('code_lookup').unique(),
+  // Argon2id (encoded) of the 3 join keywords, normalized (normalizeKeywords).
+  // Null for groups created before: they are joined with the code alone.
+  keywordsHash: text('keywords_hash'),
   currentKeyVersion: integer('current_key_version').notNull().default(1),
   createdBy: uuid('created_by').references(() => profiles.id, { onDelete: 'set null' }),
   ephemeralSeconds: integer('ephemeral_seconds'),

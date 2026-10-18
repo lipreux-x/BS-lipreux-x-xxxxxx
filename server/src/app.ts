@@ -12,11 +12,15 @@ import {
   generateInviteCode,
   groupCodeLookup,
   hashGroupCode,
+  hashKeywords,
+  KEYWORD_COUNT,
+  normalizeKeyword,
   normalizeInviteCode,
   sha256Hex,
   utf8,
   verifyEd25519,
   verifyGroupCode,
+  verifyKeywords,
 } from './lib/crypto';
 import { issueAccessToken, issueChallenge, verifyAccessToken, verifyChallenge } from './lib/tokens';
 import { realtime } from './realtime';
@@ -41,6 +45,14 @@ const b64Bytes = (len?: { exact?: number; max?: number }) =>
 const username = z.string().regex(/^[A-Za-z0-9_.-]{3,24}$/);
 const groupCode = z.string().regex(/^[0-9A-Za-z]{6,64}$/); // same rule as mobile keywrap.ts
 const keyVersion = z.number().int().min(1).max(1_000_000);
+// 3 distinct words once normalized (case, accents, spaces ignored).
+const keywords = z
+  .array(z.string().max(40))
+  .length(KEYWORD_COUNT)
+  .refine((ws) => {
+    const n = ws.map(normalizeKeyword);
+    return n.every((w) => w.length > 0) && new Set(n).size === n.length;
+  }, 'invalid keywords');
 
 async function body<T extends z.ZodType>(c: Context, schema: T): Promise<z.infer<T>> {
   const json = await c.req.json().catch(() => undefined);
@@ -257,12 +269,13 @@ app.post('/groups', async (c) => {
       id: z.uuid(), // generated on the phone: bound into encryptedMeta's AD
       encryptedMeta: b64Bytes({ max: 16 * 1024 }),
       groupCode,
+      keywords,
       sealedKey: b64Bytes({ max: 256 }),
       ephemeralSeconds: z.union([z.literal(86_400), z.literal(604_800)]).nullable().optional(),
     }),
   );
   const me = c.get('userId');
-  const codeHash = await hashGroupCode(input.groupCode);
+  const [codeHash, keywordsHash] = await Promise.all([hashGroupCode(input.groupCode), hashKeywords(input.keywords)]);
   const codeLookup = groupCodeLookup(input.groupCode);
   await db.transaction(async (tx) => {
     // Codes are unique so a code alone identifies the group to join.
@@ -275,6 +288,7 @@ app.post('/groups', async (c) => {
         encryptedMeta: input.encryptedMeta,
         codeHash,
         codeLookup,
+        keywordsHash,
         createdBy: me,
         ephemeralSeconds: input.ephemeralSeconds ?? null,
       })
@@ -288,18 +302,19 @@ app.post('/groups', async (c) => {
 });
 
 /**
- * Join with the group code alone. Success only grants membership: the group
- * key itself arrives later, sealed to the new member by an existing member.
+ * Join with the group code + the 3 keywords (groups created before keywords:
+ * code alone). Success only grants membership: the group key itself arrives
+ * later, sealed to the new member by an existing member.
  */
 app.post('/groups/join', async (c) => {
-  const input = await body(c, z.object({ groupCode: z.string().max(64) }));
+  const input = await body(c, z.object({ groupCode: z.string().max(64), keywords: z.array(z.string().max(40)).max(KEYWORD_COUNT).optional() }));
   const me = c.get('userId');
 
   // Rate limit before any lookup (SPEC §4.4: per user, all groups combined).
   // Record first, then count: concurrent requests cannot slip past the limit.
   const lookup = groupCode.safeParse(input.groupCode).success ? groupCodeLookup(input.groupCode) : null;
   const [group] = lookup
-    ? await db.select({ id: groups.id, codeHash: groups.codeHash }).from(groups).where(eq(groups.codeLookup, lookup))
+    ? await db.select({ id: groups.id, codeHash: groups.codeHash, keywordsHash: groups.keywordsHash }).from(groups).where(eq(groups.codeLookup, lookup))
     : [];
   await db.insert(joinAttempts).values({ userId: me, groupId: group?.id ?? null });
   const [{ count } = { count: 0 }] = await db
@@ -311,8 +326,15 @@ app.post('/groups/join', async (c) => {
     throw new HTTPException(429, { message: 'too_many_attempts' });
   }
 
-  // Second factor on the match: the Argon2id hash of the same code.
-  const ok = group ? await verifyGroupCode(input.groupCode, group.codeHash) : false;
+  // Second factor on the match: the Argon2id hash of the same code, then the
+  // keywords. Both always run and a failure never says which part was wrong.
+  const [codeOk, keywordsOk] = group
+    ? await Promise.all([
+        verifyGroupCode(input.groupCode, group.codeHash),
+        group.keywordsHash ? verifyKeywords(input.keywords ?? [], group.keywordsHash) : true,
+      ])
+    : [false, false];
+  const ok = codeOk && keywordsOk;
   if (!ok || !group) throw new HTTPException(403, { message: 'wrong_code' });
 
   await db.insert(groupMembers).values({ groupId: group.id, userId: me, role: 'member' }).onConflictDoNothing();

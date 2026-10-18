@@ -91,3 +91,20 @@ export async function verifyGroupCode(code: string, encoded: string): Promise<bo
     return false;
   }
 }
+
+/*
+ * Join keywords: 3 words chosen at creation, typed with the code to join.
+ * Compared forgivingly: case, accents, extra spaces and order do not matter.
+ */
+export const KEYWORD_COUNT = 3;
+
+export function normalizeKeyword(word: string): string {
+  return word.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().trim().replace(/\s+/g, ' ');
+}
+
+export function normalizeKeywords(words: string[]): string {
+  return words.map(normalizeKeyword).sort().join('\n');
+}
+
+export const hashKeywords = (words: string[]) => hashGroupCode(normalizeKeywords(words));
+export const verifyKeywords = (words: string[], encoded: string) => verifyGroupCode(normalizeKeywords(words), encoded);

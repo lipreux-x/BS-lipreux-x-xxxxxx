@@ -15,6 +15,13 @@
       "when": 1792356313950,
       "tag": "0001_join_by_code",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1792358048372,
+      "tag": "0002_group_keywords",
+      "breakpoints": true
     }
   ]
 }
