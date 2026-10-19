@@ -154,6 +154,7 @@ Le changement s'applique à tous les écrans de code : verrouillage, inscription
 
 ### Mise en production (branche Neon `dev`)
 
+- Notifications (20/10) : migration `0011_push_tokens` appliquée, API redéployée. Vérifié : `/health` répond, `PUT /me/push-token` refuse sans connexion (401). Pas encore testé de bout en bout : il manque les identifiants Firebase et un nouveau build.
 - Se connecter (19/10) : migration `0008_account_backup` appliquée (colonnes `backup_*` dans `profiles`, table `login_attempts`), API redéployée, smoke test et test e2e de l'app passés contre l'API déployée.
 
 - Effacement + groupes éphémères (19/10) : migration `0007_group_expiry_purges` appliquée, API redéployée, smoke test passé contre l'API déployée (effacement réservé à l'admin, rechargement signalé, date d'autodestruction vérifiée, groupe expiré caché et impossible à rejoindre).
