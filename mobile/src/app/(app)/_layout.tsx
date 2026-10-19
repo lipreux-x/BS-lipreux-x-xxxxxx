@@ -18,6 +18,7 @@ export default function AppLayout() {
       <Stack.Screen name="group/code" options={{ title: 'Changer le code', presentation: 'modal' }} />
       <Stack.Screen name="group/settings" options={{ title: 'Réglages du groupe', presentation: 'modal' }} />
       <Stack.Screen name="settings" options={{ title: 'Réglages' }} />
+      <Stack.Screen name="biometrics" options={{ title: 'Empreinte', presentation: 'modal' }} />
     </Stack>
   );
 }

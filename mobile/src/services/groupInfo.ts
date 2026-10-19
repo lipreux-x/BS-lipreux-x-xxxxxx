@@ -1,5 +1,5 @@
 import { ApiError } from './api';
-import type { ProfileCache, Session } from './groups';
+import { forgetGroup, type ProfileCache, type Session } from './groups';
 
 export interface GroupInfoMember {
   userId: string;
@@ -59,5 +59,5 @@ export async function groupInfo(s: Session, profiles: ProfileCache, groupId: str
 /** Leaves the group and erases what this phone kept of it (keys, secret, name, attempt counter). 409 handover_required for the last admin. */
 export async function leaveGroup(s: Session, groupId: string, keyVersion: number): Promise<void> {
   await s.api.leaveGroup(groupId);
-  await s.vault.forgetGroup(groupId, keyVersion);
+  await forgetGroup(s, groupId, keyVersion);
 }

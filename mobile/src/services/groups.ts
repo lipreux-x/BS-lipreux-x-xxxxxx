@@ -24,7 +24,8 @@ import {
   type VoiceBody,
 } from '@/crypto';
 import { constantTimeEqual, wipe } from '@/crypto/encoding';
-import { ApiError, type Api, type GroupSummary, type PendingGroupSummary, type Profile, type WireMessage } from './api';
+import { ApiError, NetworkError, type Api, type GroupSummary, type PendingGroupSummary, type Profile, type WireMessage } from './api';
+import { records, type LocalStore } from './localStore';
 import type { StoredGroupSecret, UnlockedVault, Vault } from './vault';
 
 /*
@@ -54,6 +55,9 @@ import type { StoredGroupSecret, UnlockedVault, Vault } from './vault';
  *   for the members of the meta who are still there.
  * - code change (admin): new joinKey, new keywords in the meta, every handout
  *   re-wrapped under the new code. Other members type the new code once.
+ * - offline: the last group list from the server is kept in the local store
+ *   (handouts included), so the list shows and a group unlocks without
+ *   network, with the same checks (code, signatures, meta revision).
  */
 
 /** Group keys by version (messages carry the version they were sent with). */
@@ -62,6 +66,8 @@ export type GroupKeys = Map<number, Uint8Array>;
 export interface Session extends UnlockedVault {
   api: Api;
   vault: Vault;
+  /** Messages, group summaries, profiles and media kept on the phone (SPEC §5.2). */
+  local: LocalStore;
 }
 
 export type GroupLockState =
@@ -101,15 +107,18 @@ const isActive = (g: GroupSummary | PendingGroupSummary): g is GroupSummary => g
 /**
  * The groups we belong to (or asked to join). A group this phone kept
  * something for that the server no longer lists (self-destructed, removed,
- * request refused) is erased from the phone too: keys, name, counters.
+ * request refused) is erased from the phone too: keys, name, counters,
+ * messages. Without network: the last list saved on the phone (`offline`).
  */
-export async function listGroups(s: Session): Promise<GroupListItem[]> {
-  const groups = await s.api.groups();
-  const alive = new Set(groups.map((g) => g.id));
-  for (const [id, upTo] of Object.entries(await s.vault.knownGroups())) {
-    if (!alive.has(id)) await s.vault.forgetGroup(id, upTo);
+export async function listGroups(s: Session): Promise<{ items: GroupListItem[]; offline: boolean }> {
+  const { groups, offline } = await fetchGroups(s);
+  if (!offline) {
+    const alive = new Set(groups.map((g) => g.id));
+    for (const [id, upTo] of Object.entries(await s.vault.knownGroups())) {
+      if (!alive.has(id)) await forgetGroup(s, id, upTo);
+    }
   }
-  return Promise.all(
+  const items = await Promise.all(
     groups.map(async (g) =>
       isActive(g)
         ? {
@@ -123,6 +132,34 @@ export async function listGroups(s: Session): Promise<GroupListItem[]> {
         : { id: g.id, name: null, keyVersion: 0, role: 'member' as const, state: { kind: 'pending' as const }, expiresAt: g.expiresAt ?? null },
     ),
   );
+  return { items, offline };
+}
+
+type AnyGroupSummary = GroupSummary | PendingGroupSummary;
+
+/**
+ * Our groups from the server, saved on the phone; the saved list when there
+ * is no network (`offline`). Throws NetworkError if nothing was saved yet.
+ */
+export async function fetchGroups(s: Session): Promise<{ groups: AnyGroupSummary[]; offline: boolean }> {
+  try {
+    const groups = await s.api.groups();
+    await s.local.setRecord(records.groups, groups.map((g) => g.id));
+    for (const g of groups) await s.local.setRecord(records.group(g.id), g);
+    return { groups, offline: false };
+  } catch (e) {
+    if (!(e instanceof NetworkError)) throw e;
+    const ids = await s.local.getRecord<string[]>(records.groups);
+    if (!ids) throw e;
+    const saved = await Promise.all(ids.map((id) => s.local.getRecord<AnyGroupSummary>(records.group(id))));
+    return { groups: saved.filter((g): g is AnyGroupSummary => g !== null), offline: true };
+  }
+}
+
+/** Erases what the phone keeps of a group: keys, secret, meta, counters, messages, media. */
+export async function forgetGroup(s: Session, groupId: string, upTo: number) {
+  await s.vault.forgetGroup(groupId, upTo);
+  await s.local.forgetGroup(groupId).catch(() => {});
 }
 
 async function lockState(s: Session, g: GroupSummary): Promise<GroupLockState> {
@@ -276,7 +313,9 @@ export async function unlockGroup(
   groupCode: string,
   keywords?: string[],
 ): Promise<OpenedGroup | null> {
-  const g = await summary(s, groupId);
+  // Without network: the summary saved at the last list (same checks follow).
+  const g = (await fetchGroups(s)).groups.find((x): x is GroupSummary => x.id === groupId && isActive(x));
+  if (!g) throw new ApiError(404, 'not_found');
   const v = g.currentKeyVersion;
   const local = await s.vault.latestGroupKeyVersion(groupId, v);
   const known: GroupKeys = new Map();
@@ -565,12 +604,14 @@ export class ProfileCache {
     private readonly api: Api,
     private readonly vault: Vault,
     private readonly masterKey: Uint8Array,
+    /** Where profiles are saved for offline use (names, avatars; keys still come from the pins). */
+    private readonly local: LocalStore | null = null,
   ) {}
 
   async get(ids: string[]): Promise<Map<string, KnownProfile>> {
     const missing = [...new Set(ids)].filter((id) => !this.byId.has(id));
     if (missing.length) {
-      for (const p of await this.api.profiles(missing)) {
+      for (const p of await this.fetch(missing)) {
         const pinned = await this.vault.pinned(p.id, this.masterKey);
         if (!pinned) {
           await this.vault.pin(p.id, { signPublicKey: p.publicKeySign, boxPublicKey: p.publicKeyBox }, this.masterKey);
@@ -582,6 +623,23 @@ export class ProfileCache {
       }
     }
     return this.byId;
+  }
+
+  /** From the server (saved on the phone); offline, the profiles saved earlier. */
+  private async fetch(ids: string[]): Promise<Profile[]> {
+    try {
+      const fetched = await this.api.profiles(ids);
+      if (this.local && fetched.length) {
+        const saved = (await this.local.getRecord<Record<string, Profile>>(records.profiles).catch(() => null)) ?? {};
+        for (const p of fetched) saved[p.id] = p;
+        await this.local.setRecord(records.profiles, saved).catch(() => {});
+      }
+      return fetched;
+    } catch (e) {
+      if (!(e instanceof NetworkError) || !this.local) throw e;
+      const saved = (await this.local.getRecord<Record<string, Profile>>(records.profiles)) ?? {};
+      return ids.flatMap((id) => (saved[id] ? [saved[id]] : []));
+    }
   }
 
   /** Pinned keys of these users; a user whose keys changed is left out (never trusted). */
@@ -736,6 +794,7 @@ async function uploadFile(s: Session, groupId: string, plaintext: Uint8Array) {
   const { id, uploadUrl } = await s.api.createAttachment(groupId, size);
   const { blob, fileKey } = encryptAttachment(plaintext, { groupId, attachmentId: id });
   await s.api.uploadBlob(uploadUrl, blob);
+  await s.local.saveBlob(groupId, id, blob).catch(() => {}); // our own file, readable offline
   return { attachmentId: id, fileKey: b64.encode(fileKey), size: blob.length };
 }
 
@@ -778,9 +837,25 @@ export async function sendAttachment(
   return s.api.sendMessage(groupId, { clientId, keyVersion, ...encrypted, attachmentId: body.attachmentId });
 }
 
-/** Downloads and decrypts an image or a voice message. Throws CryptoError if the blob was tampered with or swapped. */
+/**
+ * Decrypts an image or a voice message: the blob kept on the phone if any,
+ * else downloaded (and kept for offline use). Throws CryptoError if the blob
+ * was tampered with or swapped.
+ */
 export async function loadAttachment(s: Session, groupId: string, body: ImageBody | VoiceBody): Promise<Uint8Array> {
+  const ctx = { groupId, attachmentId: body.attachmentId };
+  const fileKey = b64.decode(body.fileKey);
+  const kept = await s.local.blob(body.attachmentId).catch(() => null);
+  if (kept) {
+    try {
+      return decryptAttachment(kept, fileKey, ctx);
+    } catch {
+      await s.local.dropBlob(body.attachmentId).catch(() => {}); // damaged: fetch it again
+    }
+  }
   const { url } = await s.api.attachmentUrl(groupId, body.attachmentId);
   const blob = await s.api.downloadBlob(url);
-  return decryptAttachment(blob, b64.decode(body.fileKey), { groupId, attachmentId: body.attachmentId });
+  const plain = decryptAttachment(blob, fileKey, ctx);
+  await s.local.saveBlob(groupId, body.attachmentId, blob).catch(() => {});
+  return plain;
 }

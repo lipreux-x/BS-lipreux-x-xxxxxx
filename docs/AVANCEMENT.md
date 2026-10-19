@@ -1,8 +1,45 @@
 # BaseSecrète — Avancement
 
-État du projet au 19/10/2026 (mis à jour après l'ajout de « Se connecter ») : les derniers ajouts et changements, puis le plan du projet avec ce qui est fait et ce qui reste. La spec de référence est [SPEC.md](SPEC.md).
+État du projet au 20/10/2026 (mis à jour après le lot sécurité : empreinte, auto-destruction, captures, hors connexion) : les derniers ajouts et changements, puis le plan du projet avec ce qui est fait et ce qui reste. La spec de référence est [SPEC.md](SPEC.md).
 
 ## Derniers ajouts et changements
+
+### Ouvrir l'app avec l'empreinte (20/10)
+
+- **Réglages → Sécurité → Empreinte → Activer** : le code de l'app est redemandé, puis le téléphone demande le doigt une fois pour vérifier.
+- Ensuite, toucher le coffre à l'écran d'accueil demande l'empreinte **à la place du code app**. Si on annule ou que ça échoue, le clavier du code est là, avec un bouton « Ouvrir avec l'empreinte » pour réessayer.
+- **Empreinte seulement**, pas de reconnaissance faciale : l'option n'apparaît que sur un téléphone avec un capteur d'empreinte et un doigt enregistré.
+- Comment c'est protégé : une copie de la clé maître est gardée par le Keychain (iOS, Touch ID) ou le Keystore (Android), qui ne la rend qu'après la vérification faite par le système. L'app ne voit jamais le doigt.
+- **Garde-fous** :
+  - le code reste demandé si on ne l'a pas tapé depuis 48 h ;
+  - le code reste demandé pour ouvrir chaque groupe ;
+  - ajouter un doigt au téléphone invalide la copie, et l'option se désactive ;
+  - retirer le code du téléphone la supprime ;
+  - l'auto-destruction l'efface en premier.
+
+### Auto-destruction après trop de codes faux (20/10, SPEC §4.5)
+
+- **Réglages → Sécurité → Auto-destruction** : désactivée (par défaut), 10 essais ou 20 essais, avec confirmation.
+- Au Nᵉ code app faux d'affilée, tout ce que l'app garde sur le téléphone est effacé : secret de l'appareil, clé maître (et sa copie pour l'empreinte), clé matérielle, identité, groupes, base locale, photos et vocaux gardés. On revient avec « Se connecter » (pseudo + mot de passe).
+- Le secret de l'appareil, la clé maître et la copie pour l'empreinte partent **en premier**. Un effacement interrompu ne laisse rien de lisible, et le lancement suivant le termine.
+- Un essai compté puis interrompu (app tuée) compte aussi pour le seuil.
+- À l'approche du seuil, l'écran de verrouillage prévient : « effacement de l'app après 3 essais de plus ».
+- Seul le code app compte : les codes de groupe gardent leurs délais.
+
+### Captures d'écran : au choix (20/10)
+
+- **Réglages → Sécurité → Captures d'écran** : autorisées (par défaut, comme avant) ou bloquées.
+- Bloquées : ni capture ni enregistrement de l'écran dans l'app (`FLAG_SECURE` sur Android, iOS 13+). Le réglage vaut pour ce téléphone et s'applique dès le lancement, écran de verrouillage compris.
+
+### Hors connexion : lecture, file d'envoi, photos et vocaux (20/10, SPEC §5.2)
+
+- Les messages reçus sont gardés sur le téléphone, dans une base SQLite (`expo-sqlite`).
+- Sans réseau : la liste des groupes s'affiche (bandeau « Hors ligne »), un groupe s'ouvre avec son code (mêmes vérifications : signatures, révision de la meta), et la conversation se relit.
+- **Chiffrement** : chaque ligne est scellée (XChaCha20-Poly1305) avec une clé tirée de la clé maître. Les identifiants de groupe sont hachés avec une clé. Les messages restent sous leur forme serveur, chiffrés et signés avec la clé de groupe : relire un groupe demande toujours son code.
+- Aussi gardés : la dernière liste des groupes (avec les remises de clé) et les profils des membres (noms, avatars). Les clés des contacts restent celles épinglées dans le coffre.
+- **File d'envoi** : un message écrit sans réseau reste en attente (⏳), même si l'app est fermée ou verrouillée, et part tout seul dans l'ordre au retour du réseau. Une photo ou un vocal déjà envoyé sur le serveur n'est pas renvoyé.
+- **Photos et vocaux** vus ou envoyés : gardés chiffrés comme sur le serveur (fichier au nom haché), utilisables hors connexion. Leur clé n'existe que dans le message. Les 300 plus récents sont gardés.
+- Les messages éphémères expirés sont supprimés à chaque déverrouillage. Un effacement d'historique est appliqué au retour du réseau. Quitter un groupe ou une autodestruction efface aussi sa copie locale.
 
 ### Audit de sécurité et protocole v2 (19/10)
 
@@ -145,7 +182,7 @@ Le changement s'applique à tous les écrans de code : verrouillage, inscription
 | ✅ | Créer / rejoindre un groupe avec code | Fait, avec en plus les 3 mots-clés |
 | ✅ | Messages texte E2EE en temps réel (WebSocket) | Fait |
 | 🟡 | Wi-Fi et 4G/5G, reconnexion automatique | Reconnexion + resynchro codées, à tester en vrai en changeant de réseau |
-| 🟡 | Hors connexion : lecture locale, file d'envoi, resynchro | Messages en attente + renvoi + resynchro faits. Il manque le stockage local des messages (SQLite chiffré) pour lire sans réseau. |
+| ✅ | Hors connexion : lecture locale, file d'envoi, resynchro | Fait : lecture hors connexion (SQLite, lignes scellées), file d'envoi gardée qui part au retour du réseau, photos et vocaux gardés chiffrés, resynchro. |
 | ✅ | Reverrouillage automatique en arrière-plan | Fait |
 
 ### v0.2
@@ -161,13 +198,13 @@ Le changement s'applique à tous les écrans de code : verrouillage, inscription
 
 | | Fonction | État |
 |---|---|---|
-| 🟡 | Biométrie, empreinte de sécurité, réactions, réponses | Réponses faites : appui long sur un message → Répondre (ou Copier), la citation est chiffrée dans la réponse et un tap dessus ramène au message d'origine. Le reste est à faire. |
-| ⬜ | Blocage des captures d'écran, auto-destruction après X échecs | À faire |
+| 🟡 | Biométrie, empreinte de sécurité, réactions, réponses | Réponses faites : appui long sur un message → Répondre (ou Copier), la citation est chiffrée dans la réponse et un tap dessus ramène au message d'origine. Empreinte de sécurité faite (audit v2). Ouverture de l'app par l'empreinte faite (pas de reconnaissance faciale). Réactions à faire. |
+| ✅ | Blocage des captures d'écran, auto-destruction après X échecs | Fait : captures bloquées en option dans les Réglages ; effacement de tout le téléphone après 10 ou 20 codes app faux (option) |
 | ⬜ | Multi-appareils via QR code | À faire |
 | ⬜ | Mode « à côté » sans internet (Bluetooth / Wi-Fi Direct) | À faire |
 
 ### Prochaines étapes proposées
 
-1. **Stockage local chiffré des messages** pour lire hors connexion.
+1. **Build EAS de développement** et test sur téléphone : empreinte, mode avion, retour du réseau avec des messages en file, auto-destruction.
 2. **Qualité** : corriger les 12 erreurs ESLint restantes (`VaultSquare.tsx`, `SessionProvider.tsx`, `CodeEntry.tsx`) et accélérer les tests crypto (la suite complète prend environ 40 min).
 3. **Production** : préparer la branche Neon de production et un build EAS de développement.

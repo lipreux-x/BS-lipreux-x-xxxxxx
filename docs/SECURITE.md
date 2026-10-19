@@ -132,7 +132,7 @@ Trois audits ont été menés en parallèle : le serveur et l'API, le chiffremen
 2. **Changer le code après un retrait.** Un membre retiré est banni, mais il connaît toujours le code et les mots-clés. Avec la complicité du serveur, il pourrait encore fabriquer des remises de clé. L'app le conseille ; elle pourrait **l'imposer** (proposer de changer le code juste après un retrait).
 3. **Rotation quand un membre quitte de lui-même.** La nouvelle clé n'est créée qu'à la prochaine ouverture du groupe par un admin. D'ici là, les messages restent sous l'ancienne clé, que le membre parti connaît ; il ne peut les lire qu'avec la complicité du serveur. Piste : bloquer l'envoi tant que la rotation n'est pas faite, ou laisser n'importe quel membre la faire avec une signature vérifiée.
 4. **Blocage de la reconnexion.** Quelqu'un qui connaît ton pseudo peut bloquer ta reconnexion par mot de passe pendant une heure en enchaînant les échecs. Pistes : petit calcul imposé au client avant chaque essai (preuve de travail), ou limite par adresse réseau si Neon la fournit de façon fiable.
-5. **Option « auto-destruction » après 10 codes faux** (prévue dans le SPEC, pas faite).
+5. ~~**Option « auto-destruction » après 10 codes faux**~~ : faite le 20/10 (Réglages, 10 ou 20 essais ; secret de l'appareil, clé maître et copie pour l'empreinte effacés en premier).
 
 ### Ensuite
 6. **Historique des admins.** Si un téléphone rate un changement d'admin, il accepte comme nouvel admin un membre déjà connu, et une bannière le signale. Garder l'historique des metas signées sur le serveur permettrait de vérifier toute la chaîne.
@@ -143,7 +143,7 @@ Trois audits ont été menés en parallèle : le serveur et l'API, le chiffremen
    - L'heure, l'ordre et le caractère éphémère d'un message sont décidés par le serveur, pas signés par l'expéditeur.
 9. **Citations.** Elles pointent vers l'identifiant donné par le serveur. Les rattacher à (expéditeur, identifiant choisi par l'expéditeur) serait plus solide.
 10. **Épinglage du certificat** de l'API. Il protégerait contre un faux certificat installé sur le téléphone (profil d'entreprise, MDM).
-11. **Android 12 et moins.** L'aperçu dans les apps récentes peut être capturé avant que le cache noir s'affiche. Seul `FLAG_SECURE` l'empêche, mais il bloquerait aussi les captures d'écran : refusé pour l'instant, choix du produit.
+11. **Android 12 et moins.** L'aperçu dans les apps récentes peut être capturé avant que le cache noir s'affiche. Seul `FLAG_SECURE` l'empêche, mais il bloque aussi les captures d'écran : depuis le 20/10, c'est une option dans les Réglages (« Captures d'écran : bloquées »), désactivée par défaut.
 12. **Clavier.** Le champ de message laisse le clavier apprendre les mots tapés : c'est un compromis entre confort et discrétion.
 13. **Mémoire.** En JavaScript, certaines valeurs secrètes (chaînes de caractères) ne peuvent pas être effacées de la mémoire. Le verrouillage est donc un verrou d'interface, pas un nettoyage garanti de la mémoire.
 14. **Codes de groupe courts.** 6 chiffres, c'est peu ; les mots-clés apportent l'essentiel de la protection. On pourrait encourager les codes plus longs.

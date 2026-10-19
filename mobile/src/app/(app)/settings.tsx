@@ -1,16 +1,48 @@
-import { useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { router, useFocusEffect } from 'expo-router';
+import { useCallback, useEffect, useState } from 'react';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { keyFingerprint } from '@/crypto';
 import { useUnlocked } from '@/session/SessionProvider';
 import { copySensitive } from '@/services/clipboard';
 import { ApiError, NetworkError } from '@/services/api';
+import { WIPE_AFTER_CHOICES } from '@/services/vault';
 import { Avatar, isAvatarId, type AvatarId } from '@/ui/avatars';
 import { AvatarPicker } from '@/ui/AvatarPicker';
 import { Button } from '@/ui/Button';
 import { colors, space, type } from '@/ui/theme';
 
 export default function Settings() {
-  const { session, profiles, lock } = useUnlocked();
+  const { session, profiles, vault, lock, setScreenshotsBlocked } = useUnlocked();
+  // Per-phone security options, read from the Secure Store (undefined until then).
+  const [wipeAfter, setWipeAfter] = useState<number | null | undefined>(undefined);
+  const [noScreenshots, setNoScreenshots] = useState<boolean | undefined>(undefined);
+  const [bioOn, setBioOn] = useState<boolean | undefined>(undefined);
+  const [bioAvailable, setBioAvailable] = useState(false);
+
+  useEffect(() => {
+    void vault.wipeAfter().then(setWipeAfter);
+    void vault.screenshotsBlocked().then(setNoScreenshots);
+    void vault.biometricsAvailable().then(setBioAvailable);
+  }, [vault]);
+  // Read again when coming back from the screen that turns biometrics on.
+  useFocusEffect(
+    useCallback(() => {
+      void vault.biometricsEnabled().then(setBioOn);
+    }, [vault]),
+  );
+
+  function chooseWipeAfter(next: number | null) {
+    const save = () => void vault.setWipeAfter(next).then(() => setWipeAfter(next));
+    if (next === null) return save();
+    Alert.alert(
+      `Tout effacer après ${next} codes faux ?`,
+      'Clés, groupes et messages seront effacés de ce téléphone, sans retour possible. Tu pourras revenir avec « Se connecter » (pseudo + mot de passe), puis le code et les mots-clés de chaque groupe.',
+      [
+        { text: 'Annuler', style: 'cancel' },
+        { text: 'Activer', style: 'destructive', onPress: save },
+      ],
+    );
+  }
   // undefined: not loaded yet (the server holds the choice, shared with group mates).
   const [avatar, setAvatar] = useState<AvatarId | null | undefined>(undefined);
   const [avatarError, setAvatarError] = useState<string | null>(null);
@@ -94,8 +126,68 @@ export default function Settings() {
           Hors de l’app plus de 5 minutes, le code BaseSecrète est redemandé. Un groupe se referme 10 minutes après que tu l’as quitté.
         </Text>
         <Button title="Verrouiller maintenant" variant="ghost" onPress={lock} />
+
+        <Text style={styles.subTitle}>Empreinte</Text>
+        {bioAvailable || bioOn ? (
+          <>
+            <Text style={type.dim}>
+              Ouvre l’app avec ton doigt au lieu du code. Le code reste demandé toutes les 48 h, et pour ouvrir chaque groupe. Si un doigt est
+              ajouté au téléphone, l’empreinte se désactive.
+            </Text>
+            <Button
+              title={bioOn ? 'Désactiver' : 'Activer'}
+              variant={bioOn ? 'ghost' : 'primary'}
+              disabled={bioOn === undefined}
+              onPress={() => (bioOn ? void vault.disableBiometrics().then(() => setBioOn(false)) : router.push('/biometrics'))}
+            />
+          </>
+        ) : (
+          <Text style={type.dim}>Pas de capteur d’empreinte, ou aucun doigt enregistré sur ce téléphone.</Text>
+        )}
+
+        <Text style={styles.subTitle}>Captures d’écran</Text>
+        <Text style={type.dim}>Bloquées : ni capture ni enregistrement de l’écran dans l’app, sur ce téléphone.</Text>
+        <Segment
+          options={[
+            { label: 'Autorisées', value: false },
+            { label: 'Bloquées', value: true },
+          ]}
+          value={noScreenshots}
+          onChange={(blocked) => void setScreenshotsBlocked(blocked).then(() => setNoScreenshots(blocked))}
+        />
+
+        <Text style={styles.subTitle}>Auto-destruction</Text>
+        <Text style={type.dim}>Après trop de codes faux d’affilée, tout ce que l’app garde sur ce téléphone est effacé.</Text>
+        <Segment
+          options={[{ label: 'Désactivée', value: null }, ...WIPE_AFTER_CHOICES.map((n) => ({ label: `${n} essais`, value: n }))]}
+          value={wipeAfter}
+          onChange={chooseWipeAfter}
+        />
       </Section>
     </ScrollView>
+  );
+}
+
+/** A row of choices; `value` undefined: not loaded yet (disabled). */
+function Segment<T>({ options, value, onChange }: { options: { label: string; value: T }[]; value: T | undefined; onChange(v: T): void }) {
+  return (
+    <View style={styles.segment}>
+      {options.map((o) => {
+        const on = value === o.value;
+        return (
+          <Pressable
+            key={o.label}
+            disabled={value === undefined || on}
+            accessibilityRole="button"
+            accessibilityState={{ selected: on }}
+            onPress={() => onChange(o.value)}
+            style={[styles.option, on && styles.optionOn]}
+          >
+            <Text style={[styles.optionText, on && styles.optionTextOn]}>{o.label}</Text>
+          </Pressable>
+        );
+      })}
+    </View>
   );
 }
 
@@ -117,5 +209,10 @@ const styles = StyleSheet.create({
   inviteBox: { gap: space.sm, paddingVertical: space.sm },
   invite: { color: colors.text, fontSize: 22, fontFamily: 'monospace', letterSpacing: 1, textAlign: 'center' },
   error: { color: colors.danger },
+  segment: { flexDirection: 'row', gap: space.sm },
+  option: { flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: colors.border },
+  optionOn: { backgroundColor: colors.accent, borderColor: colors.accentFg },
+  optionText: { color: colors.textDim, fontSize: 14 },
+  optionTextOn: { color: colors.text, fontWeight: '600' },
   fingerprint: { color: colors.text, fontSize: 18, fontFamily: 'monospace', letterSpacing: 1, textAlign: 'center', lineHeight: 28 },
 });

@@ -75,6 +75,8 @@ export {
   openIdentity,
   sealLocal,
   openLocal,
+  deriveLocalDbKey,
+  blindLocalId,
 } from './auth';
 export {
   createKeyBackup,

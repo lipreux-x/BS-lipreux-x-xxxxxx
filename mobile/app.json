@@ -77,7 +77,8 @@
           "resizeMode": "contain",
           "backgroundColor": "#000000"
         }
-      ]
+      ],
+      "expo-sqlite"
     ],
     "backgroundColor": "#000000",
     "scheme": "basesecrete",

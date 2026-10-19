@@ -16,6 +16,7 @@ import {
   type Identity,
   type WrappedKey,
 } from '@/crypto';
+import { wipe } from '@/crypto/encoding';
 import { checkLockout, FREE_ATTEMPTS, parseLockout, registerFailure, type LockoutState } from './lockout';
 
 /*
@@ -40,7 +41,32 @@ import { checkLockout, FREE_ATTEMPTS, parseLockout, registerFailure, type Lockou
  *   groups               { <id>: highest key version } of every group this
  *                        phone keeps something for, to forget the ones that
  *                        are gone from the server (self-destructed, removed)
+ *   wipe_after           wrong app codes in a row that erase everything
+ *                        (SPEC §4.5), absent when the option is off
+ *   bio                  "1" when opening the app with the fingerprint is on;
+ *                        the master key copy itself is in the BiometricStore
+ *   code_at              last time the app code was typed (wall clock, ms)
+ *   no_screenshots       "1" when screenshots and screen recording are blocked
  */
+
+/**
+ * Where the fingerprint copy of the master key lives (services/biometrics.ts).
+ * `load` makes the system ask for the finger; it throws or returns null when
+ * the user cancels, fails, or the copy was invalidated.
+ */
+export interface BiometricStore {
+  /** A fingerprint sensor with a finger enrolled. */
+  available(): Promise<boolean>;
+  save(value: string): Promise<void>;
+  load(): Promise<string | null>;
+  clear(): Promise<void>;
+}
+
+/** The fingerprint opens the app only this long after the app code was last typed. */
+export const BIOMETRIC_MAX_AGE_MS = 48 * 3_600_000;
+
+/** Choices offered in Settings for the self-destruct option (SPEC §4.5). */
+export const WIPE_AFTER_CHOICES = [10, 20] as const;
 
 /** Minimal key/value interface, so the vault can be tested without a device. */
 export interface SecretStore {
@@ -74,17 +100,32 @@ export interface PinnedKeys {
   boxPublicKey: string;
 }
 
+/** `attemptsBeforeWipe`: wrong app codes left before the phone is erased, null when that option is off. */
 export class LockedOutError extends Error {
-  constructor(public readonly retryInMs: number) {
+  constructor(
+    public readonly retryInMs: number,
+    public readonly attemptsBeforeWipe: number | null = null,
+  ) {
     super('locked_out');
     this.name = 'LockedOutError';
   }
 }
 
 export class WrongCodeError extends Error {
-  constructor(public readonly attemptsBeforeDelay: number) {
+  constructor(
+    public readonly attemptsBeforeDelay: number,
+    public readonly attemptsBeforeWipe: number | null = null,
+  ) {
     super('wrong_code');
     this.name = 'WrongCodeError';
+  }
+}
+
+/** Too many wrong app codes with the self-destruct option on: everything on the phone was erased. */
+export class WipedError extends Error {
+  constructor() {
+    super('wiped');
+    this.name = 'WipedError';
   }
 }
 
@@ -119,6 +160,10 @@ const K = {
   codeVersion: (id: string) => `bs.codever_${id}`,
   pin: (userId: string) => `bs.pin_${userId}`,
   groups: 'bs.groups',
+  wipeAfter: 'bs.wipe_after',
+  bio: 'bs.bio',
+  codeAt: 'bs.code_at',
+  noScreenshots: 'bs.no_screenshots',
 };
 
 export class Vault {
@@ -126,6 +171,7 @@ export class Vault {
     private readonly store: SecretStore,
     private readonly now: () => number = Date.now,
     private readonly uptime: () => number | null = uptimeMs,
+    private readonly bio: BiometricStore | null = null,
   ) {}
 
   async account(): Promise<Account | null> {
@@ -159,10 +205,123 @@ export class Vault {
     ]);
     if (!account || !secret || !master || !sealedIdentity) throw new Error('no_account');
 
-    const masterKey = await this.withLockout(K.lockoutApp, () =>
-      unwrapMasterKey(JSON.parse(master) as WrappedKey, appCode, b64.decode(secret)),
+    const masterKey = await this.withLockout(
+      K.lockoutApp,
+      () => unwrapMasterKey(JSON.parse(master) as WrappedKey, appCode, b64.decode(secret)),
+      await this.wipeAfter(),
     );
+    await this.store.set(K.codeAt, String(this.now()));
     return { account, identity: openIdentity(sealedIdentity, masterKey), masterKey };
+  }
+
+  /** False when an account is recorded but its keys are gone (a wipe was cut short). */
+  async intact(): Promise<boolean> {
+    const [secret, master, identity] = await Promise.all([
+      this.store.get(K.deviceSecret),
+      this.store.get(K.master),
+      this.store.get(K.identity),
+    ]);
+    return !!secret && !!master && !!identity;
+  }
+
+  // ---- self-destruct, screenshots ----------------------------------------------------
+
+  /** Wrong app codes in a row that erase the phone, or null (option off). */
+  async wipeAfter(): Promise<number | null> {
+    const n = Number(await this.store.get(K.wipeAfter));
+    return Number.isInteger(n) && n > 0 ? n : null;
+  }
+
+  async setWipeAfter(attempts: number | null) {
+    if (attempts === null) await this.store.delete(K.wipeAfter);
+    else await this.store.set(K.wipeAfter, String(attempts));
+  }
+
+  /** Screenshots and screen recording blocked in the app (a per-phone choice, off by default). */
+  async screenshotsBlocked(): Promise<boolean> {
+    return (await this.store.get(K.noScreenshots)) === '1';
+  }
+
+  async setScreenshotsBlocked(blocked: boolean) {
+    if (blocked) await this.store.set(K.noScreenshots, '1');
+    else await this.store.delete(K.noScreenshots);
+  }
+
+  // ---- biometrics ------------------------------------------------------------------
+
+  /** A fingerprint sensor with a finger enrolled on this phone. */
+  async biometricsAvailable(): Promise<boolean> {
+    return (await this.bio?.available()) ?? false;
+  }
+
+  async biometricsEnabled(): Promise<boolean> {
+    return (await this.store.get(K.bio)) === '1';
+  }
+
+  /**
+   * The fingerprint may open the app now: option on, and the app code typed
+   * in the last 48 h (so it is never forgotten, and a phone left aside long
+   * enough needs the code again).
+   */
+  async canUseBiometrics(): Promise<boolean> {
+    if (!(await this.biometricsEnabled()) || !(await this.biometricsAvailable())) return false;
+    const at = Number(await this.store.get(K.codeAt));
+    const age = this.now() - at;
+    return Number.isFinite(at) && at > 0 && age >= 0 && age < BIOMETRIC_MAX_AGE_MS;
+  }
+
+  /**
+   * Turns the option on. The app code is asked again (and counts toward the
+   * lockout like on the lock screen); the system then asks for the finger
+   * once, to check it works before relying on it.
+   */
+  async enableBiometrics(appCode: string): Promise<void> {
+    if (!this.bio || !(await this.biometricsAvailable())) throw new Error('biometrics_unavailable');
+    const { masterKey, identity } = await this.unlock(appCode);
+    try {
+      await this.bio.save(b64.encode(masterKey));
+      if ((await this.bio.load()) !== b64.encode(masterKey)) throw new Error('biometrics_failed');
+    } catch (e) {
+      await this.bio.clear().catch(() => {});
+      throw e;
+    } finally {
+      // A second copy of the keys, only needed to check the code: out of memory now.
+      for (const k of [masterKey, identity.boxSecretKey, identity.signSecretKey]) wipe(k);
+    }
+    await this.store.set(K.bio, '1');
+  }
+
+  async disableBiometrics() {
+    await this.store.delete(K.bio);
+    await this.bio?.clear().catch(() => {});
+  }
+
+  /**
+   * Opens the vault with the fingerprint. Null when not allowed right now,
+   * cancelled or failed: the app code is then asked. A copy the system
+   * invalidated (a finger was added) turns the option off.
+   */
+  async unlockWithBiometrics(): Promise<UnlockedVault | null> {
+    if (!this.bio || !(await this.canUseBiometrics())) return null;
+    const [account, sealedIdentity] = await Promise.all([this.account(), this.store.get(K.identity)]);
+    if (!account || !sealedIdentity) return null;
+    let raw: string | null;
+    try {
+      raw = await this.bio.load();
+    } catch {
+      return null; // cancelled, failed, locked out by the system: the code is there
+    }
+    if (!raw) {
+      await this.disableBiometrics();
+      return null;
+    }
+    try {
+      const masterKey = b64.decode(raw);
+      return { account, identity: openIdentity(sealedIdentity, masterKey), masterKey };
+    } catch {
+      await this.disableBiometrics();
+      return null;
+    }
   }
 
   async appLockout(): Promise<LockoutState> {
@@ -294,12 +453,21 @@ export class Vault {
   }
 
   /**
-   * Erases the account from this phone: every item the vault can name. (A
-   * contact pin left behind is sealed with the master key, gone with it.)
+   * Erases the account from this phone: every item the vault can name. The
+   * device secret, the wrapped master key and its biometric copy go first:
+   * without them every other record is unreadable, so a wipe cut short still
+   * leaves nothing to recover (crypto-shredding). Safe to call again to
+   * finish an interrupted wipe. (A contact pin left behind is sealed with the
+   * master key, gone with it.)
    */
   async wipeAll() {
-    for (const [id, upTo] of Object.entries(await this.knownGroups())) await this.forgetGroup(id, upTo);
-    for (const key of [K.account, K.identity, K.master, K.deviceSecret, K.lockoutApp, K.groups]) await this.store.delete(key);
+    const known = await this.knownGroups().catch(() => ({}) as Record<string, number>);
+    await this.store.delete(K.deviceSecret);
+    await this.store.delete(K.master);
+    await this.disableBiometrics();
+    for (const key of [K.account, K.identity, K.lockoutApp, K.wipeAfter, K.codeAt]) await this.store.delete(key);
+    for (const [id, upTo] of Object.entries(known)) await this.forgetGroup(id, upTo);
+    await this.store.delete(K.groups);
   }
 
   // ---- contacts ------------------------------------------------------------------
@@ -324,11 +492,20 @@ export class Vault {
    * The attempt is counted as a failure BEFORE it runs and cleared after a
    * success: killing the app mid-attempt does not give a free guess.
    */
-  private async withLockout<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  /**
+   * `wipeAt` (app code only): failures in a row that erase the phone, or
+   * null. An attempt cut short (app killed) still counts toward it.
+   */
+  private async withLockout<T>(key: string, fn: () => Promise<T>, wipeAt: number | null = null): Promise<T> {
     const state = parseLockout(await this.store.get(key));
+    const left = (failures: number) => (wipeAt === null ? null : Math.max(0, wipeAt - failures));
+    if (wipeAt !== null && state.failures >= wipeAt) {
+      await this.wipeAll();
+      throw new WipedError();
+    }
     const { remaining, rebased } = checkLockout(state, this.now(), this.uptime());
     if (rebased) await this.store.set(key, JSON.stringify(rebased));
-    if (remaining > 0) throw new LockedOutError(remaining);
+    if (remaining > 0) throw new LockedOutError(remaining, left(state.failures));
     const next = registerFailure(state, this.now(), this.uptime());
     await this.store.set(key, JSON.stringify(next));
     try {
@@ -340,9 +517,13 @@ export class Vault {
         await this.store.set(key, JSON.stringify(state)); // not a wrong code: give the attempt back
         throw e;
       }
+      if (wipeAt !== null && next.failures >= wipeAt) {
+        await this.wipeAll();
+        throw new WipedError();
+      }
       const { remaining: wait } = checkLockout(next, this.now(), this.uptime());
-      if (wait > 0) throw new LockedOutError(wait);
-      throw new WrongCodeError(FREE_ATTEMPTS - next.failures);
+      if (wait > 0) throw new LockedOutError(wait, left(next.failures));
+      throw new WrongCodeError(FREE_ATTEMPTS - next.failures, left(next.failures));
     }
   }
 }

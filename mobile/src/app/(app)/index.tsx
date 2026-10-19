@@ -23,7 +23,7 @@ export default function GroupsList() {
 
   const load = useCallback(async () => {
     try {
-      const list = await listGroups(session);
+      const { items: list, offline } = await listGroups(session);
       // Groups gone from the server (self-destructed, removed): their keys leave memory too.
       const alive = new Set(list.map((g) => g.id));
       for (const [id, g] of openGroups) {
@@ -32,7 +32,7 @@ export default function GroupsList() {
         openGroups.delete(id);
       }
       setGroups(list);
-      setProblem(null);
+      setProblem(offline ? 'offline' : null);
     } catch (e) {
       setProblem(e instanceof NetworkError ? 'offline' : 'error');
     }

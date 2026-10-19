@@ -15,6 +15,7 @@ import {
   AttachmentTooLargeError,
   decryptMessages,
   fetchSince,
+  forgetGroup,
   GroupTamperedError,
   joinRequests,
   KeyChangedError,
@@ -35,6 +36,8 @@ import {
   type PreparedVoice,
 } from '@/services/groups';
 import { imageCache, pickImage } from '@/services/images';
+import { records, type LocalStore } from '@/services/localStore';
+import { loadOutbox, saveOutbox, type Pending } from '@/services/outbox';
 import { useVoiceRecorder, voiceCache, voicePlayer } from '@/services/voice';
 import { RealtimeClient } from '@/services/realtime';
 import { LockedOutError, WrongCodeError } from '@/services/vault';
@@ -95,8 +98,8 @@ function GroupUnlock({ groupId, onOpen }: { groupId: string; onOpen(g: OpenGroup
 
   useEffect(() => {
     listGroups(session)
-      .then((gs) => {
-        const g = gs.find((x) => x.id === groupId);
+      .then(({ items }) => {
+        const g = items.find((x) => x.id === groupId);
         if (!g) setGone(true);
         setState(g?.state ?? { kind: 'locked' });
       })
@@ -263,13 +266,6 @@ function GroupUnlock({ groupId, onOpen }: { groupId: string; onOpen(g: OpenGroup
 
 // ---- Chat (SPEC §2.4) ------------------------------------------------------------------
 
-type Pending = { clientId: string; at: string; failed: boolean; error?: string; replyTo?: ReplyRef } & (
-  | { kind: 'text'; text: string }
-  // `body` is set once the encrypted file is uploaded: a retry only resends the message.
-  | { kind: 'image'; image: PreparedImage; body?: ImageBody }
-  | { kind: 'voice'; voice: PreparedVoice; body?: VoiceBody }
-);
-
 /** The group no longer exists for us: self-destructed (or we were removed). */
 function GroupGone() {
   return (
@@ -412,6 +408,13 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
     }, [session, groupId]),
   );
 
+  /**
+   * The phone's copy of the history (SPEC §5.2): shown first, readable
+   * offline. Best effort: it only serves offline reading, the server keeps
+   * the history (and the store refuses writes once the app is locked).
+   */
+  const keep = useCallback((fn: (l: LocalStore) => Promise<unknown>) => fn(session.local).catch(() => {}), [session]);
+
   /** `replace`: the whole history was fetched again (after an erase), drop what is no longer in it. */
   const merge = useCallback((incoming: ChatMessage[], replace = false) => {
     if (!incoming.length && !replace) return;
@@ -425,9 +428,33 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
     setPending((p) => p.filter((x) => !done.has(x.clientId)));
   }, []);
 
+  // What the phone kept, loaded once before the first fetch (which then only asks for what is newer).
+  const localLoaded = useRef<Promise<void> | null>(null);
+  // The outbox is saved on every change, but only once loaded: never overwritten by the empty start.
+  const outboxLoaded = useRef(false);
+  const loadLocal = useCallback(() => {
+    localLoaded.current ??= (async () => {
+      await keep(async (l) => {
+        const queued = await loadOutbox(l, groupId);
+        // Messages written meanwhile stay after those from before.
+        setPending((p) => [...queued.filter((q) => !p.some((x) => x.clientId === q.clientId)), ...p]);
+        outboxLoaded.current = true;
+      });
+      await keep(async (l) => {
+        const [wire, chat] = await Promise.all([l.messages(groupId), l.getRecord<{ purgeSeq: number }>(records.chat(groupId))]);
+        if (chat) purgeSeq.current = chat.purgeSeq;
+        if (!wire.length) return;
+        merge(await decrypt(wire));
+        setLoaded(true);
+      });
+    })();
+    return localLoaded.current;
+  }, [keep, groupId, decrypt, merge]);
+
   /** New messages since the last fetch; the whole history again if part of it was erased meanwhile. */
   const resync = useCallback(
     async (opts: { full?: boolean } = {}) => {
+      await loadLocal();
       try {
         let full = !!opts.full;
         let res = await fetchSince(session, groupId, full ? 0 : lastSeq.current);
@@ -439,11 +466,19 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
         merge(await decrypt(res.messages), full);
         setLoaded(true);
         setOnline(true);
+        setFlushes((n) => n + 1);
+        void keep(async (l) => {
+          await (full ? l.replaceMessages(groupId, res.messages) : l.saveMessages(groupId, res.messages));
+          await l.setRecord(records.chat(groupId), { purgeSeq: res.purgeSeq });
+        });
       } catch (e) {
-        if (e instanceof NetworkError) setOnline(false);
+        if (e instanceof NetworkError) {
+          setOnline(false);
+          setLoaded(true);
+        }
       }
     },
-    [session, groupId, decrypt, merge],
+    [session, groupId, decrypt, merge, keep, loadLocal],
   );
 
   useEffect(() => {
@@ -456,6 +491,7 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
       },
       onMessage: (m) => {
         if (m.groupId !== groupId) return;
+        void keep((l) => l.saveMessages(groupId, [m]));
         decrypt([m])
           .then(merge)
           .catch(() => void resync());
@@ -463,14 +499,14 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
     });
     rt.start();
     return () => rt.stop();
-  }, [session, groupId, resync, decrypt, merge]);
+  }, [session, groupId, resync, decrypt, merge, keep]);
 
   /** Self-destructed: keys out of memory and off the phone, nothing left to show. */
   const destroy = useCallback(() => {
     const open = openGroups.get(groupId);
     if (open) for (const k of open.keys.values()) wipe(k);
     openGroups.delete(groupId);
-    void session.vault.forgetGroup(groupId, current.current.keyVersion);
+    void forgetGroup(session, groupId, current.current.keyVersion);
     setMessages([]);
     setPending([]);
     setDestroyed(true);
@@ -523,10 +559,32 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
     }
   }
 
-  async function send(item: Pending) {
+  useEffect(() => {
+    if (outboxLoaded.current) void keep((l) => saveOutbox(l, groupId, pending));
+  }, [pending, keep, groupId]);
+
+  // Network back (or group opened): what waits goes out, in order.
+  const [flushes, setFlushes] = useState(0);
+  const inFlight = useRef(new Set<string>());
+  useEffect(() => {
+    if (!flushes) return;
+    const queue = pending.filter((p) => !p.error && !inFlight.current.has(p.clientId));
+    void (async () => {
+      for (const p of queue) await send(p, { scroll: false });
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs per flush, with the queue of that moment
+  }, [flushes]);
+
+  async function send(item: Pending, { scroll = true } = {}) {
     const { clientId } = item;
-    list.current?.scrollToOffset({ offset: 0, animated: true });
-    setPending((p) => [...p.filter((x) => x.clientId !== clientId), { ...item, failed: false, error: undefined }]);
+    if (inFlight.current.has(clientId)) return;
+    inFlight.current.add(clientId);
+    if (scroll) list.current?.scrollToOffset({ offset: 0, animated: true });
+    setPending((p) =>
+      p.some((x) => x.clientId === clientId)
+        ? p.map((x) => (x.clientId === clientId ? { ...item, failed: false, error: undefined } : x))
+        : [...p, { ...item, failed: false, error: undefined }],
+    );
     try {
       let ready = item;
       // Encrypted on the phone with a fresh file key, then uploaded: the server only stores the blob.
@@ -555,11 +613,16 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
       // Our own image or voice message: no need to download what we just sent.
       if (ready.kind === 'image') imageCache.set(ready.body!.attachmentId, ready.image.jpeg);
       if (ready.kind === 'voice') voiceCache.set(ready.body!.attachmentId, ready.voice.audio);
+      void keep((l) => l.saveMessages(groupId, [wire]));
       merge(await decrypt([wire]));
     } catch (e) {
       // Same clientId on retry: the server de-duplicates if the first send did land.
+      // No network: stays waiting (⏳) and goes out when the connection is back.
       const error = e instanceof AttachmentTooLargeError ? (item.kind === 'voice' ? 'Vocal trop long' : 'Image trop lourde') : undefined;
-      setPending((p) => p.map((x) => (x.clientId === clientId ? { ...x, failed: true, error } : x)));
+      const failed = !(e instanceof NetworkError);
+      setPending((p) => p.map((x) => (x.clientId === clientId ? { ...x, failed, error } : x)));
+    } finally {
+      inFlight.current.delete(clientId);
     }
   }
 

@@ -1,24 +1,32 @@
 import { fetch as expoFetch } from 'expo/fetch';
+import * as ScreenCapture from 'expo-screen-capture';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AppState } from 'react-native';
 import { API_URL } from '@/config';
 import { backupKeys, createKeyBackup, deleteDeviceKey, generateIdentity, initCrypto, openKeyBackup, uptimeMs, type Identity } from '@/crypto';
 import { wipe } from '@/crypto/encoding';
 import { Api, type BinaryFetch } from '@/services/api';
+import { biometricStore } from '@/services/biometrics';
 import { ProfileCache, type GroupKeys, type Session } from '@/services/groups';
 import { imageCache } from '@/services/images';
+import { deleteLocalDb, openLocalStore } from '@/services/localDb';
+import type { LocalStore } from '@/services/localStore';
 import { voiceCache } from '@/services/voice';
 import { secureStore } from '@/services/secureStore';
 import { isFreshInstall, markInstalled } from '@/services/install';
 import { sweepPlaintextCache } from '@/services/sweep';
-import { prepareVault, Vault } from '@/services/vault';
+import { prepareVault, Vault, WipedError, type UnlockedVault } from '@/services/vault';
 import { systemUiOpen } from './autoLock';
 
 /*
  * App-wide lock state. Keys only exist in memory while unlocked; locking
  * (manually, or after 5 min out of the app, SPEC §2.1.4) drops the session
- * and best-effort wipes the key bytes. A group closes on its own 10 min after
- * the user left it (SPEC §2.3.3).
+ * and best-effort wipes the key bytes, and closes the local store. A group
+ * closes on its own 10 min after the user left it (SPEC §2.3.3).
+ *
+ * Optional, per phone (Settings): screenshots and screen recording blocked
+ * (FLAG_SECURE on Android, iOS 13+), and opening the app with the
+ * fingerprint instead of the app code (services/biometrics.ts).
  */
 
 /** Out of the app for this long: the app code is asked again. */
@@ -50,8 +58,17 @@ interface SessionContextValue {
   groupsVersion: number;
   /** A screen of this group is on screen (call `leave` when it is not anymore). */
   enterGroup(groupId: string): () => void;
-  /** Checks the code; resolves with `enter`, which opens the app (so the UI can show success first). */
+  /**
+   * Checks the code; resolves with `enter`, which opens the app (so the UI can show success first).
+   * Throws WipedError when too many wrong codes erased the phone (status is then 'no-account').
+   */
   unlock(appCode: string): Promise<() => void>;
+  /** Fingerprint: resolves with `enter`, or null (not allowed now, cancelled, failed): ask the code. */
+  unlockWithBiometrics(): Promise<(() => void) | null>;
+  /** Settings: turns fingerprint unlock on after checking the app code (WrongCodeError, LockedOutError, WipedError). */
+  enableBiometrics(appCode: string): Promise<void>;
+  /** Settings: blocks or allows screenshots, applied at once and at every launch. */
+  setScreenshotsBlocked(blocked: boolean): Promise<void>;
   register(input: { inviteCode: string; username: string; password: string; appCode: string }): Promise<void>;
   /** Checks username + password against the server's key backup (slow: Argon2id). */
   recover(input: { username: string; password: string }): Promise<RecoveredAccount>;
@@ -71,7 +88,11 @@ export interface RecoveredAccount {
 const clock = () => uptimeMs() ?? Date.now();
 
 const SessionContext = createContext<SessionContextValue | null>(null);
-const vault = new Vault(secureStore);
+const vault = new Vault(secureStore, Date.now, uptimeMs, biometricStore);
+
+function applyScreenshots(blocked: boolean) {
+  (blocked ? ScreenCapture.preventScreenCaptureAsync() : ScreenCapture.allowScreenCaptureAsync()).catch(() => {});
+}
 
 export function SessionProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<Status>({ kind: 'loading' });
@@ -94,8 +115,17 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         }
         markInstalled();
       }
+      applyScreenshots(await vault.screenshotsBlocked());
       const account = await vault.account();
-      setStatus(account ? { kind: 'locked', username: account.username } : { kind: 'no-account' });
+      if (account && (await vault.intact())) {
+        setStatus({ kind: 'locked', username: account.username });
+        return;
+      }
+      // No account, or a wipe cut short: make sure nothing is left behind.
+      if (account) await deleteDeviceKey().catch(() => {});
+      await vault.wipeAll();
+      await deleteLocalDb();
+      setStatus({ kind: 'no-account' });
     })();
   }, []);
 
@@ -108,6 +138,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     sessionRef.current = null;
     setSession(null);
     setStatus({ kind: 'locked', username: s.account.username });
+    void s.local.close();
     wipe(s.masterKey);
     wipe(s.identity.boxSecretKey);
     wipe(s.identity.signSecretKey);
@@ -189,20 +220,60 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     };
   }, [lock, expireGroups]);
 
-  const start = useCallback((u: Awaited<ReturnType<Vault['unlock']>>) => {
+  const start = useCallback((u: UnlockedVault, local: LocalStore) => {
     // expo/fetch: sends and reads raw bytes (encrypted images), which RN's fetch cannot.
     const api = new Api(API_URL, { userId: u.account.userId, identity: u.identity }, expoFetch as unknown as BinaryFetch);
-    setSession({ ...u, api, vault });
+    setSession({ ...u, api, vault, local });
     setStatus({ kind: 'unlocked' });
   }, []);
 
+  /** Too many wrong codes erased the vault: the hardware key and the local database go too, back to onboarding. */
+  const wiped = useCallback(async () => {
+    const s = sessionRef.current;
+    lock();
+    await s?.local.close().catch(() => {}); // the file can only be deleted once closed
+    await deleteDeviceKey().catch(() => {});
+    await deleteLocalDb();
+    setStatus({ kind: 'no-account' });
+  }, [lock]);
+
   const unlock = useCallback(
     async (appCode: string) => {
-      const u = await vault.unlock(appCode);
-      return () => start(u);
+      try {
+        const u = await vault.unlock(appCode);
+        const local = await openLocalStore(u.masterKey);
+        return () => start(u, local);
+      } catch (e) {
+        if (e instanceof WipedError) await wiped();
+        throw e;
+      }
     },
-    [start],
+    [start, wiped],
   );
+
+  const unlockWithBiometrics = useCallback(async () => {
+    const u = await vault.unlockWithBiometrics();
+    if (!u) return null;
+    const local = await openLocalStore(u.masterKey);
+    return () => start(u, local);
+  }, [start]);
+
+  const enableBiometrics = useCallback(
+    async (appCode: string) => {
+      try {
+        await vault.enableBiometrics(appCode);
+      } catch (e) {
+        if (e instanceof WipedError) await wiped();
+        throw e;
+      }
+    },
+    [wiped],
+  );
+
+  const setScreenshotsBlocked = useCallback(async (blocked: boolean) => {
+    await vault.setScreenshotsBlocked(blocked);
+    applyScreenshots(blocked);
+  }, []);
 
   const register = useCallback(
     async ({ inviteCode, username, password, appCode }: { inviteCode: string; username: string; password: string; appCode: string }) => {
@@ -213,7 +284,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       const prepared = await prepareVault(identity, appCode);
       const backup = await createKeyBackup(identity, username, password);
       const { userId } = await new Api(API_URL).register(inviteCode, username, identity, backup);
-      start(await vault.commit({ userId, username }, prepared));
+      const u = await vault.commit({ userId, username }, prepared);
+      start(u, await openLocalStore(u.masterKey));
     },
     [start],
   );
@@ -233,16 +305,33 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const restore = useCallback(
     async ({ userId, username, identity }: RecoveredAccount, appCode: string) => {
       // New device secret and master key: nothing local survives from the old phone.
-      start(await vault.commit({ userId, username }, await prepareVault(identity, appCode)));
+      const u = await vault.commit({ userId, username }, await prepareVault(identity, appCode));
+      start(u, await openLocalStore(u.masterKey));
     },
     [start],
   );
 
-  const profiles = useMemo(() => (session ? new ProfileCache(session.api, vault, session.masterKey) : null), [session]);
+  const profiles = useMemo(() => (session ? new ProfileCache(session.api, vault, session.masterKey, session.local) : null), [session]);
 
   const value = useMemo(
-    () => ({ status, vault, session, profiles, openGroups, groupsVersion, enterGroup, unlock, register, recover, restore, lock }),
-    [status, session, profiles, openGroups, groupsVersion, enterGroup, unlock, register, recover, restore, lock],
+    () => ({
+      status,
+      vault,
+      session,
+      profiles,
+      openGroups,
+      groupsVersion,
+      enterGroup,
+      unlock,
+      unlockWithBiometrics,
+      enableBiometrics,
+      setScreenshotsBlocked,
+      register,
+      recover,
+      restore,
+      lock,
+    }),
+    [status, session, profiles, openGroups, groupsVersion, enterGroup, unlock, unlockWithBiometrics, enableBiometrics, setScreenshotsBlocked, register, recover, restore, lock],
   );
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 }

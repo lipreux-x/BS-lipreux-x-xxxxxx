@@ -40,7 +40,7 @@
 - Messages texte (MVP), puis images, vocaux, réactions.
 - Indicateurs : envoyé / reçu / lu (optionnel, désactivable).
 - Option « messages éphémères » par groupe (24 h / 7 j / off).
-- Apps récentes : flou sur iOS, aperçu vide sur Android 13+ (cache noir avant). Les captures d'écran restent autorisées (pas de `FLAG_SECURE`, choix du produit).
+- Apps récentes : flou sur iOS, aperçu vide sur Android 13+ (cache noir avant). Les captures d'écran sont autorisées par défaut ; une option des Réglages les bloque sur le téléphone (`expo-screen-capture` : `FLAG_SECURE` sur Android, iOS 13+).
 
 ### 2.5 Onboarding (première fois)
 1. L'utilisateur reçoit un **code d'invitation** d'un membre existant (valable 2 h ; 3 invitations ouvertes et 10 par jour au plus par membre).
@@ -64,7 +64,7 @@
 | ORM | **Drizzle** + driver `@neondatabase/serverless` | Typé, léger, migrations simples |
 | Crypto | Algorithmes libsodium en JS audité (@noble, tweetnacl), octet pour octet ; **module natif** `mobile/modules/bs-native` pour Argon2id (implémentation de référence) et la clé matérielle | Primitives éprouvées, pas de crypto maison |
 | Stockage secret local | `expo-secure-store` (Keychain / Keystore) | Clés protégées par le matériel |
-| Biométrie | `expo-local-authentication` | Option de déverrouillage |
+| Biométrie | `expo-local-authentication` + `expo-secure-store` | Option : ouvrir l'app avec l'empreinte (pas de reconnaissance faciale) |
 | Base locale | `expo-sqlite` (chiffrée, ex. SQLCipher via op-sqlite) | Cache des messages déchiffrés, hors-ligne |
 | Notifications | Expo Notifications | **Contenu générique uniquement** (« Nouveau message ») |
 | UI | NativeWind (Tailwind) + Reanimated | Animations du carré / pavé |
@@ -108,7 +108,9 @@
 - Les membres retrouvent les mots-clés dans la fiche info du groupe (dans la meta chiffrée).
 
 ### 4.5 Protection contre le forçage
-- Code app : après 5 échecs → délai croissant (30 s, 1 min, 5 min, 15 min, 1 h). Option « auto-destruction » après 10 échecs = effacement des données locales (pas encore faite).
+- Code app : après 5 échecs → délai croissant (30 s, 1 min, 5 min, 15 min, 1 h). Option « auto-destruction » après 10 échecs = effacement des données locales.
+  - Fait : option dans Réglages (désactivée, 10 ou 20 essais), `bs.wipe_after` dans le Secure Store. Secret de l'appareil, clé maître et copie pour l'empreinte effacés en premier, puis le reste, la clé matérielle et la base SQLite ; un effacement interrompu est terminé au lancement suivant.
+- Empreinte (fait) : optionnelle, pour ouvrir l'app à la place du code app. Une copie de la clé maître est gardée dans le Keychain/Keystore avec authentification biométrique obligatoire (`requireAuthentication`, invalidée si un doigt est ajouté, `WHEN_PASSCODE_SET_THIS_DEVICE_ONLY`). Offerte seulement avec un capteur d'empreinte. Activation avec le code app ; code redemandé après 48 h sans l'avoir tapé ; les groupes demandent toujours leur code.
 - Code groupe : même logique, compteur par groupe.
 - Compteurs stockés dans le Secure Store. Chaque essai est compté **avant** d'être tenté (tuer l'app pendant un essai ne le rend pas gratuit), et l'attente se mesure sur l'horloge de démarrage du téléphone : avancer la date ne la raccourcit pas, un redémarrage la fait repartir.
 - Serveur : invitations, créations de groupe et changements de code limités par utilisateur ; 60 messages par minute ; défis de connexion à usage unique ; un pseudo ne peut pas exister en deux casses (« Alice »/« alice ») ; une invitation brûle après 3 pseudos déjà pris.
@@ -151,6 +153,7 @@ L'app doit marcher **partout** : en Wi-Fi, en données mobiles (4G/5G), et conti
 
 ### 5.2 Hors connexion (offline-first)
 - Tous les messages déchiffrés sont gardés dans la **SQLite locale chiffrée** → on peut relire ses conversations sans réseau.
+  - Fait (`mobile/src/services/localStore.ts`) : pas de SQLCipher ; chaque ligne est scellée en XChaCha20-Poly1305 avec une clé dérivée de la clé maître, les ids de groupe sont hachés avec clé. Les messages sont gardés sous leur forme serveur (chiffrés + signés avec la clé de groupe) : les relire demande toujours le code du groupe. La liste des groupes (remises de clé comprises) et les profils sont gardés pour déverrouiller hors ligne ; la file d'envoi (`services/outbox.ts`) et les fichiers chiffrés des photos et vocaux aussi.
 - Écrire sans réseau : le message est chiffré tout de suite et mis dans une **file d'envoi locale** (statut ⏳).
 - Au retour du réseau : envoi automatique de la file dans l'ordre, puis statut ✓.
 - Chaque message a un `client_id` (UUID généré sur le téléphone) → le serveur ignore les doublons si un envoi est rejoué.
