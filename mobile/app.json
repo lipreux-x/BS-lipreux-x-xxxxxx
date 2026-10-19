@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "BaseSecrète",
+    "name": "BaseSecrete",
     "slug": "basesecrete",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -9,7 +9,10 @@
     "owner": "8max",
     "ios": {
       "bundleIdentifier": "com.lipreux.basesecrete",
-      "supportsTablet": false
+      "supportsTablet": false,
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -30,6 +33,7 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
+      ["./plugins/withDisplayName", "BaseSecrète"],
       "react-native-libsodium",
       "expo-router",
       "expo-status-bar",
