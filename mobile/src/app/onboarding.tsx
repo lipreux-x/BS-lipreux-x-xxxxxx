@@ -6,6 +6,7 @@ import { useSession, type RecoveredAccount } from '@/session/SessionProvider';
 import { ApiError, NetworkError } from '@/services/api';
 import { Button } from '@/ui/Button';
 import { CodeEntry } from '@/ui/CodeEntry';
+import { PasswordField } from '@/ui/PasswordField';
 import { Wordmark } from '@/ui/Wordmark';
 import { colors, fonts, space, type } from '@/ui/theme';
 
@@ -150,27 +151,19 @@ export default function Onboarding() {
           />
 
           <Text style={styles.label}>Mot de passe</Text>
-          <TextInput
+          <PasswordField
             value={password}
             onChangeText={setPassword}
             placeholder={login ? 'Ton mot de passe' : `${MIN_PASSWORD_LENGTH} caractères minimum`}
-            placeholderTextColor={colors.textDim}
-            secureTextEntry
-            autoCapitalize="none"
-            autoCorrect={false}
             textContentType={login ? 'password' : 'newPassword'}
             style={styles.input}
           />
           {login ? null : (
             <>
-              <TextInput
+              <PasswordField
                 value={password2}
                 onChangeText={setPassword2}
                 placeholder="Confirme le mot de passe"
-                placeholderTextColor={colors.textDim}
-                secureTextEntry
-                autoCapitalize="none"
-                autoCorrect={false}
                 textContentType="newPassword"
                 style={styles.input}
               />
