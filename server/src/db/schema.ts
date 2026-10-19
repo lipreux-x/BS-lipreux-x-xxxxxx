@@ -19,6 +19,9 @@ export const profiles = pgTable('profiles', {
   username: text('username').notNull().unique(),
   publicKeyBox: text('public_key_box').notNull(), // X25519, base64url
   publicKeySign: text('public_key_sign').notNull(), // Ed25519, base64url
+  // One of the avatar icons (AVATARS in app.ts), never an uploaded image.
+  // Null: the default empty silhouette. Visible to group mates, like the username.
+  avatar: text('avatar'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 

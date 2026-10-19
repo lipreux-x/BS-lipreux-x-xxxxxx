@@ -46,6 +46,8 @@ const b64Bytes = (len?: { exact?: number; max?: number }) =>
   }, 'invalid base64url');
 
 const username = z.string().regex(/^[A-Za-z0-9_.-]{3,24}$/);
+// Avatar icons only (mobile src/ui/avatars.tsx): no uploaded picture ever reaches the server.
+export const AVATARS = ['mask', 'spy', 'bank', 'vault', 'gem', 'gold', 'loot', 'piggy', 'key', 'drill', 'lookout'] as const;
 const groupCode = z.string().regex(/^[0-9A-Za-z]{6,64}$/); // same rule as mobile keywrap.ts
 const keyVersion = z.number().int().min(1).max(1_000_000);
 // 3 distinct words once normalized (case, accents, spaces ignored).
@@ -187,6 +189,7 @@ app.post('/auth/token', async (c) => {
 // ---- Everything below requires a valid access token -------------------------
 
 app.use('/me', requireAuth);
+app.use('/me/*', requireAuth);
 app.use('/invites/*', requireAuth);
 app.use('/invites', requireAuth);
 app.use('/profiles', requireAuth);
@@ -196,7 +199,14 @@ app.use('/groups/*', requireAuth);
 app.get('/me', async (c) => {
   const [p] = await db.select().from(profiles).where(eq(profiles.id, c.get('userId')));
   if (!p) throw new HTTPException(404, { message: 'not_found' });
-  return c.json({ id: p.id, username: p.username, publicKeyBox: p.publicKeyBox, publicKeySign: p.publicKeySign });
+  return c.json({ id: p.id, username: p.username, publicKeyBox: p.publicKeyBox, publicKeySign: p.publicKeySign, avatar: p.avatar });
+});
+
+/** Picks one of the avatar icons, or null for the default silhouette. */
+app.put('/me/avatar', async (c) => {
+  const { avatar } = await body(c, z.object({ avatar: z.enum(AVATARS).nullable() }));
+  await db.update(profiles).set({ avatar }).where(eq(profiles.id, c.get('userId')));
+  return c.json({ avatar });
 });
 
 app.post('/invites', async (c) => {
@@ -221,6 +231,7 @@ app.get('/profiles', async (c) => {
       username: profiles.username,
       publicKeyBox: profiles.publicKeyBox,
       publicKeySign: profiles.publicKeySign,
+      avatar: profiles.avatar,
     })
     .from(profiles)
     .where(
