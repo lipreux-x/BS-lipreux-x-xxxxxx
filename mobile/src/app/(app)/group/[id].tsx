@@ -493,16 +493,19 @@ function Timeline({
       renderItem={({ item }) => {
         if (item.kind === 'day') return <DaySeparator label={item.label} />;
         const { message: line } = item;
+        // Others' messages each carry the sender's avatar and name, so who wrote
+        // what is never in doubt; only mine are grouped in runs.
+        const last = !line.mine || item.last;
         return (
-          <View style={item.last ? styles.runEnd : undefined}>
+          <View style={last ? styles.runEnd : undefined}>
             <MessageBubble
               mine={line.mine}
-              author={!line.mine && item.first ? line.author : undefined}
+              author={line.mine ? undefined : line.author}
               avatar={line.avatar}
               time={timeLabel(line.at)}
               status={line.status}
               error={line.pending?.error}
-              last={item.last}
+              last={last}
               media={!!(line.image || line.local)}
               onRetry={line.pending ? () => onRetry(line.pending!) : undefined}
             >

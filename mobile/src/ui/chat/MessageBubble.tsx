@@ -16,8 +16,8 @@ const STATUS_LABEL: Record<DeliveryStatus, string> = { sending: 'Envoi en cours'
  * on the LCD font and, for mine, the delivery LED (amber sending, green
  * stored on the server, red failed).
  *
- * Others' messages have a column on the left: their avatar and name open
- * each run, the following messages of the run line up under the name.
+ * Others' messages have a column on the left with the sender's avatar, and
+ * their name above the bubble, on every message.
  */
 export function MessageBubble({
   mine,
@@ -32,7 +32,7 @@ export function MessageBubble({
   children,
 }: {
   mine: boolean;
-  /** Name of someone else, shown with their avatar on the first message of a run. */
+  /** Name of someone else, shown with their avatar. */
   author?: string;
   /** Their avatar icon id. */
   avatar?: string | null;
@@ -83,7 +83,6 @@ export function MessageBubble({
   if (mine) return <View style={styles.rowMine}>{bubble}</View>;
   return (
     <View style={styles.rowTheirs}>
-      {/* Avatar on the run's first message; an empty slot keeps the others aligned. */}
       <View style={styles.avatarSlot}>{author ? <Avatar id={isAvatarId(avatar) ? avatar : null} size={AVATAR} /> : null}</View>
       {bubble}
     </View>
