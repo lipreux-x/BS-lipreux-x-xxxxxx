@@ -51,6 +51,7 @@ Le changement s'applique à tous les écrans de code : verrouillage, inscription
 ### Mise en production (branche Neon `dev`)
 
 - Migration `0002_group_keywords` appliquée.
+- Avatars (19/10) : migrations `0005_profile_avatar` et `0006_avatar_icons` (passage aux icônes Lucide, anciens choix convertis) appliquées, API redéployée, test e2e passé (choix visible par un membre du groupe, valeur hors liste refusée).
 - Images (19/10) : migration `0004_attachments` appliquée, bucket privé `attachments` créé, API redéployée. Test e2e passé contre l'API déployée (envoi, réception et déchiffrement d'une image, réutilisation refusée). Un upload d'une taille différente de celle annoncée est bien refusé (403).
 - API déployée : `https://br-muddy-bar-barqix1g-api.compute.c-8.eu-central-1.aws.neon.tech/`.
 - Smoke test passé contre l'API déployée (inscription, groupes, code + mots-clés, chat chiffré, temps réel, limite d'essais).
