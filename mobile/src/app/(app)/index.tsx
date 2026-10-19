@@ -15,15 +15,15 @@ export default function GroupsList() {
   const router = useRouter();
   const [groups, setGroups] = useState<GroupListItem[] | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [offline, setOffline] = useState(false);
+  // Why the last refresh failed: no network, or the server answered an error.
+  const [problem, setProblem] = useState<'offline' | 'error' | null>(null);
 
   const load = useCallback(async () => {
     try {
       setGroups(await listGroups(session));
-      setOffline(false);
+      setProblem(null);
     } catch (e) {
-      if (e instanceof NetworkError) setOffline(true);
-      else throw e;
+      setProblem(e instanceof NetworkError ? 'offline' : 'error');
     }
   }, [session]);
 
@@ -46,7 +46,13 @@ export default function GroupsList() {
           ),
         }}
       />
-      {offline ? <Text style={styles.banner}>Hors ligne — la liste se mettra à jour au retour du réseau</Text> : null}
+      {problem ? (
+        <Text style={styles.banner}>
+          {problem === 'offline'
+            ? 'Hors ligne — la liste se mettra à jour au retour du réseau'
+            : 'Impossible de mettre à jour la liste — tire vers le bas pour réessayer'}
+        </Text>
+      ) : null}
       <FlatList
         data={groups ?? []}
         keyExtractor={(g) => g.id}

@@ -119,8 +119,18 @@ export class Api {
       this.token = null;
       res = await this.raw(path, init, await this.accessToken());
     }
-    const text = await res.text();
-    const body = text ? (JSON.parse(text) as unknown) : null;
+    const text = await res.text().catch(() => {
+      throw new NetworkError();
+    });
+    // Our API always answers JSON. Anything else comes from in between (the
+    // platform proxy during a cold start or an outage, a captive Wi-Fi portal):
+    // a transient network problem, not an answer.
+    let body: unknown = null;
+    try {
+      body = text ? JSON.parse(text) : null;
+    } catch {
+      throw res.ok || res.status >= 500 ? new NetworkError() : new ApiError(res.status, `http_${res.status}`);
+    }
     if (!res.ok) throw new ApiError(res.status, (body as { error?: string } | null)?.error ?? `http_${res.status}`);
     return body as T;
   }

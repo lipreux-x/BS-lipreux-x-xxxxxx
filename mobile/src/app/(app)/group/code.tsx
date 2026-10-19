@@ -24,7 +24,10 @@ export default function ChangeGroupCode() {
   const [keywords, setKeywords] = useState<string[]>([]);
 
   useEffect(() => {
-    void session.vault.meta(id, session.masterKey).then((m) => setCurrent(m?.keywords ?? null));
+    session.vault
+      .meta(id, session.masterKey)
+      .then((m) => setCurrent(m?.keywords ?? null))
+      .catch(() => setCurrent(null));
   }, [session, id]);
 
   if (current === undefined) {

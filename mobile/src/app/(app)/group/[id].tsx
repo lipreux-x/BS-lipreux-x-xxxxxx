@@ -62,7 +62,7 @@ function GroupUnlock({ groupId, onOpen }: { groupId: string; onOpen(g: OpenGroup
   const [relock, setRelock] = useState<{ group: OpenGroup; first: string | null; mismatch: boolean } | null>(null);
 
   useEffect(() => {
-    void listGroups(session)
+    listGroups(session)
       .then((gs) => setState(gs.find((g) => g.id === groupId)?.state ?? { kind: 'waiting-key' }))
       .catch(() => setState({ kind: 'locked' }));
   }, [session, groupId]);
@@ -274,7 +274,9 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
       onStatus: setOnline,
       onMessage: (m) => {
         if (m.groupId !== groupId) return;
-        void decrypt([m]).then(merge);
+        decrypt([m])
+          .then(merge)
+          .catch(() => void resync());
       },
     });
     rt.start();
