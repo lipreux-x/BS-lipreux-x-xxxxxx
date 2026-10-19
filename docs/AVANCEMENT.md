@@ -4,10 +4,16 @@
 
 ## Derniers ajouts et changements
 
+### Mot de passe affiché à l'envers (20/10)
+
+- À l'inscription et à la connexion, le mot de passe s'affiche **à l'envers** au lieu des points. Le bouton **⇄ Lire** à droite du champ le remet à l'endroit, et **⇄ Envers** le retourne.
+- Les suggestions du clavier sont coupées : il n'apprend pas le mot de passe.
+
 ### Ouvrir l'app avec l'empreinte (20/10)
 
 - **Réglages → Sécurité → Empreinte → Activer** : le code de l'app est redemandé, puis le téléphone demande le doigt une fois pour vérifier.
-- Ensuite, toucher le coffre à l'écran d'accueil demande l'empreinte **à la place du code app**. Si on annule ou que ça échoue, le clavier du code est là, avec un bouton « Ouvrir avec l'empreinte » pour réessayer.
+- Ensuite, la porte du coffre s'ouvre sur un **lecteur d'empreinte façon coffre-fort**, **à la place du clavier du code app**. Il y a une empreinte verte qui respire : on la touche, une ligne de scan la balaie pendant qu'on pose le doigt, puis le voyant passe au vert et le coffre s'ouvre. En cas d'échec, le voyant passe au rouge et l'empreinte tremble. « Taper le code » ramène au clavier.
+- La vérification passe toujours par la fenêtre d'empreinte du système : aucune app ne peut lire le capteur elle-même, et c'est ce qui garantit que seul le vrai doigt libère la clé.
 - **Empreinte seulement**, pas de reconnaissance faciale : l'option n'apparaît que sur un téléphone avec un capteur d'empreinte et un doigt enregistré.
 - Comment c'est protégé : une copie de la clé maître est gardée par le Keychain (iOS, Touch ID) ou le Keystore (Android), qui ne la rend qu'après la vérification faite par le système. L'app ne voit jamais le doigt.
 - **Garde-fous** :

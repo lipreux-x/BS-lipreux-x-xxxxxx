@@ -5,35 +5,34 @@ import { NativeCryptoMissingError } from '@/crypto';
 import { useSession } from '@/session/SessionProvider';
 import { LockedOutError, WipedError, WrongCodeError } from '@/services/vault';
 import { CodeEntry, type CodeResult } from '@/ui/CodeEntry';
-import { calm, colors, fonts, space } from '@/ui/theme';
+import { FingerprintPad } from '@/ui/FingerprintPad';
+import { calm, colors, fonts, space, type } from '@/ui/theme';
 import { VaultDoor } from '@/ui/VaultDoor';
 
 // SPEC §2.1: vault door; tap -> it unlocks and opens -> a calm keypad for the 6-digit app code.
 // The vault look is only for the opening; the code screen stays quiet. The door ends with the
 // vault's inside (painted `calm`) filling the screen, so the calm background shows at once and
 // only the keypad fades in, as if it were waiting inside.
-// With the fingerprint on (Settings), opening the door asks for the finger first; the keypad stays
-// underneath for when it is cancelled, fails, or the code is due (every 48 h).
+// With the fingerprint on (Settings), the door opens on the safe's fingerprint reader instead of
+// the keypad: tap the green print, it scans, the safe opens. "Taper le code" switches to the
+// keypad; it is shown by itself when the code is due (every 48 h) or the fingerprint was dropped.
 export default function LockScreen() {
   const { status, vault, unlock, unlockWithBiometrics } = useSession();
   const [opened, setOpened] = useState(false);
   const [lockedFor, setLockedFor] = useState(0);
   const [bio, setBio] = useState(false);
+  const [useCode, setUseCode] = useState(false);
   const [reveal] = useState(() => new Animated.Value(0));
 
   useEffect(() => {
     void vault.canUseBiometrics().then(setBio);
   }, [vault]);
 
-  async function tryBiometrics() {
+  async function scan() {
     const enter = await unlockWithBiometrics().catch(() => null);
-    if (enter) enter();
-    else setBio(await vault.canUseBiometrics());
-  }
-
-  function open() {
-    setOpened(true);
-    if (bio) void tryBiometrics();
+    // Not allowed anymore (copy dropped by the system): the keypad takes over.
+    if (!enter) setBio(await vault.canUseBiometrics());
+    return enter;
   }
 
   useEffect(() => {
@@ -78,20 +77,33 @@ export default function LockScreen() {
             transform: [{ scale: reveal.interpolate({ inputRange: [0, 1], outputRange: [0.9, 1] }) }],
           }}
         >
-          <CodeEntry
-            title="Code BaseSecrète"
-            subtitle={status.kind === 'locked' ? status.username : undefined}
-            onComplete={submit}
-            lockedForMs={lockedFor}
-          />
-          {bio ? (
-            <Pressable accessibilityRole="button" onPress={() => void tryBiometrics()} style={styles.bio} hitSlop={8}>
-              <Text style={styles.bioText}>Ouvrir avec l’empreinte</Text>
-            </Pressable>
-          ) : null}
+          {bio && !useCode ? (
+            <>
+              <Text style={styles.title}>BaseSecrète</Text>
+              {status.kind === 'locked' ? <Text style={styles.subtitle}>{status.username}</Text> : null}
+              <FingerprintPad onScan={scan} />
+              <Pressable accessibilityRole="button" onPress={() => setUseCode(true)} style={styles.switch} hitSlop={8}>
+                <Text style={styles.switchText}>Taper le code</Text>
+              </Pressable>
+            </>
+          ) : (
+            <>
+              <CodeEntry
+                title="Code BaseSecrète"
+                subtitle={status.kind === 'locked' ? status.username : undefined}
+                onComplete={submit}
+                lockedForMs={lockedFor}
+              />
+              {bio ? (
+                <Pressable accessibilityRole="button" onPress={() => setUseCode(false)} style={styles.switch} hitSlop={8}>
+                  <Text style={styles.switchText}>Utiliser l’empreinte</Text>
+                </Pressable>
+              ) : null}
+            </>
+          )}
         </Animated.View>
       ) : (
-        <VaultDoor hint="Touche le coffre" onOpen={open} />
+        <VaultDoor hint="Touche le coffre" onOpen={() => setOpened(true)} />
       )}
     </SafeAreaView>
   );
@@ -103,6 +115,8 @@ function beforeWipe(n: number): string {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  bio: { alignSelf: 'center', marginTop: space.lg, paddingVertical: space.sm, paddingHorizontal: space.md },
-  bioText: { color: colors.accentFg, fontFamily: fonts.medium, fontSize: 16 },
+  title: { ...type.title, textAlign: 'center' },
+  subtitle: { ...type.dim, textAlign: 'center', marginTop: space.xs, marginBottom: space.xl },
+  switch: { alignSelf: 'center', marginTop: space.lg, paddingVertical: space.sm, paddingHorizontal: space.md },
+  switchText: { color: colors.accentFg, fontFamily: fonts.medium, fontSize: 16 },
 });
