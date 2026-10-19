@@ -1,12 +1,15 @@
+import { fetch as expoFetch } from 'expo/fetch';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AppState } from 'react-native';
 import { API_URL } from '@/config';
 import { generateIdentity, initCrypto } from '@/crypto';
 import { wipe } from '@/crypto/encoding';
-import { Api } from '@/services/api';
+import { Api, type BinaryFetch } from '@/services/api';
 import { ProfileCache, type GroupKeys, type Session } from '@/services/groups';
+import { imageCache } from '@/services/images';
 import { secureStore } from '@/services/secureStore';
 import { prepareVault, Vault } from '@/services/vault';
+import { systemUiOpen } from './autoLock';
 
 /*
  * App-wide lock state. Keys only exist in memory while unlocked; locking
@@ -70,18 +73,20 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     wipe(s.identity.signSecretKey);
     for (const g of openGroups.values()) for (const k of g.keys.values()) wipe(k);
     openGroups.clear();
+    imageCache.clear();
   }, [openGroups]);
 
   // Re-lock as soon as the app leaves the foreground.
   useEffect(() => {
     const sub = AppState.addEventListener('change', (state) => {
-      if (state === 'background') lock();
+      if (state === 'background' && !systemUiOpen()) lock();
     });
     return () => sub.remove();
   }, [lock]);
 
   const start = useCallback((u: Awaited<ReturnType<Vault['unlock']>>) => {
-    const api = new Api(API_URL, { userId: u.account.userId, identity: u.identity });
+    // expo/fetch: sends and reads raw bytes (encrypted images), which RN's fetch cannot.
+    const api = new Api(API_URL, { userId: u.account.userId, identity: u.identity }, expoFetch as unknown as BinaryFetch);
     setSession({ ...u, api, vault });
     setStatus({ kind: 'unlocked' });
   }, []);

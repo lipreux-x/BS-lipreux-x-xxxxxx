@@ -1,26 +1,34 @@
 import { router, Stack, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { FlatList, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, FlatList, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { API_URL } from '@/config';
+import type { ImageBody } from '@/crypto';
 import { useUnlocked, type OpenGroup } from '@/session/SessionProvider';
 import { ApiError, NetworkError, type WireMessage } from '@/services/api';
 import {
   decryptMessages,
   fetchSince,
+  ImageTooLargeError,
   listGroups,
   newClientId,
+  sendImage,
   sendText,
   shareMissingKeys,
   relockGroup,
   syncGroup,
   unlockGroup,
+  uploadImage,
   type ChatMessage,
   type GroupLockState,
+  type PreparedImage,
 } from '@/services/groups';
+import { imageCache, pickImage } from '@/services/images';
 import { RealtimeClient } from '@/services/realtime';
 import { LockedOutError, WrongCodeError } from '@/services/vault';
 import { CodeEntry, type CodeResult } from '@/ui/CodeEntry';
+import { ImageBubble, LocalImage } from '@/ui/ImageBubble';
+import { ImageViewer } from '@/ui/ImageViewer';
 import { colors, space, type } from '@/ui/theme';
 
 export default function GroupScreen() {
@@ -175,17 +183,19 @@ function GroupUnlock({ groupId, onOpen }: { groupId: string; onOpen(g: OpenGroup
 
 // ---- Chat (SPEC §2.4) ------------------------------------------------------------------
 
-interface Pending {
-  clientId: string;
-  text: string;
-  failed: boolean;
-}
+type Pending = { clientId: string; failed: boolean; error?: string } & (
+  | { kind: 'text'; text: string }
+  // `body` is set once the encrypted file is uploaded: a retry only resends the message.
+  | { kind: 'image'; image: PreparedImage; body?: ImageBody }
+);
 
 function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup; onUpdate(g: OpenGroup): void }) {
   const { session, profiles } = useUnlocked();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [pending, setPending] = useState<Pending[]>([]);
   const [draft, setDraft] = useState('');
+  const [picking, setPicking] = useState(false);
+  const [viewing, setViewing] = useState<Uint8Array | null>(null);
   const [online, setOnline] = useState(true);
   const [removed, setRemoved] = useState(false);
   const lastSeq = useRef(0);
@@ -263,10 +273,21 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
     return () => rt.stop();
   }, [session, groupId, resync, decrypt, merge]);
 
-  async function send(text: string, clientId = newClientId()) {
-    setPending((p) => [...p.filter((x) => x.clientId !== clientId), { clientId, text, failed: false }]);
-    const attempt = (g: OpenGroup) => sendText(session, groupId, g.keys.get(g.keyVersion)!, g.keyVersion, text, clientId);
+  async function send(item: Pending) {
+    const { clientId } = item;
+    setPending((p) => [...p.filter((x) => x.clientId !== clientId), { ...item, failed: false, error: undefined }]);
     try {
+      let ready = item;
+      if (ready.kind === 'image' && !ready.body) {
+        // Encrypted on the phone with a fresh file key, then uploaded: the server only stores the blob.
+        const body = await uploadImage(session, groupId, ready.image);
+        ready = { ...ready, body };
+        setPending((p) => p.map((x) => (x.clientId === clientId && x.kind === 'image' ? { ...x, body } : x)));
+      }
+      const attempt = (g: OpenGroup) =>
+        ready.kind === 'text'
+          ? sendText(session, groupId, g.keys.get(g.keyVersion)!, g.keyVersion, ready.text, clientId)
+          : sendImage(session, groupId, g.keys.get(g.keyVersion)!, g.keyVersion, ready.body!, clientId);
       let wire: WireMessage;
       try {
         wire = await attempt(current.current);
@@ -275,10 +296,25 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
         if (!(e instanceof ApiError && e.code === 'stale_key_version')) throw e;
         wire = await attempt(await sync());
       }
+      // Our own image: no need to download what we just sent.
+      if (ready.kind === 'image') imageCache.set(ready.body!.attachmentId, ready.image.jpeg);
       merge(await decrypt([wire]));
-    } catch {
+    } catch (e) {
       // Same clientId on retry: the server de-duplicates if the first send did land.
-      setPending((p) => p.map((x) => (x.clientId === clientId ? { ...x, failed: true } : x)));
+      const error = e instanceof ImageTooLargeError ? 'Image trop lourde' : undefined;
+      setPending((p) => p.map((x) => (x.clientId === clientId ? { ...x, failed: true, error } : x)));
+    }
+  }
+
+  async function sendPhoto() {
+    setPicking(true);
+    try {
+      const image = await pickImage();
+      if (image) void send({ clientId: newClientId(), kind: 'image', image, failed: false });
+    } catch {
+      // Picker or re-encoding failed: nothing was sent.
+    } finally {
+      setPicking(false);
     }
   }
 
@@ -292,10 +328,26 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
     );
   }
 
-  type Row = { key: string; mine: boolean; text: string | null; author?: string; status?: 'sending' | 'failed'; pending?: Pending };
+  type Row = {
+    key: string;
+    mine: boolean;
+    text: string | null;
+    image?: ImageBody;
+    local?: PreparedImage;
+    author?: string;
+    status?: 'sending' | 'failed';
+    pending?: Pending;
+  };
   const rows: Row[] = [
-    ...messages.map((m) => ({ key: m.id, mine: m.mine, text: m.text, author: m.mine ? undefined : m.senderName })),
-    ...pending.map((p) => ({ key: p.clientId, mine: true, text: p.text, status: p.failed ? ('failed' as const) : ('sending' as const), pending: p })),
+    ...messages.map((m) => ({ key: m.id, mine: m.mine, text: m.text, image: m.image ?? undefined, author: m.mine ? undefined : m.senderName })),
+    ...pending.map((p) => ({
+      key: p.clientId,
+      mine: true,
+      text: p.kind === 'text' ? p.text : null,
+      local: p.kind === 'image' ? p.image : undefined,
+      status: p.failed ? ('failed' as const) : ('sending' as const),
+      pending: p,
+    })),
   ].reverse();
 
   return (
@@ -320,16 +372,35 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
           renderItem={({ item }) => (
             <Pressable
               disabled={item.status !== 'failed'}
-              onPress={() => item.pending && void send(item.pending.text, item.pending.clientId)}
-              style={[styles.bubble, item.mine ? styles.mine : styles.theirs]}
+              onPress={() => item.pending && void send(item.pending)}
+              style={[styles.bubble, item.mine ? styles.mine : styles.theirs, (item.image || item.local) && styles.imageBubble]}
             >
               {item.author ? <Text style={styles.author}>{item.author}</Text> : null}
-              <Text style={item.text === null ? styles.unreadable : type.body}>{item.text ?? 'Message illisible (signature ou clé invalide)'}</Text>
-              {item.status ? <Text style={styles.status}>{item.status === 'sending' ? '⏳' : 'Échec — touche pour renvoyer'}</Text> : null}
+              {item.image ? (
+                <ImageBubble session={session} groupId={groupId} body={item.image} onOpen={setViewing} />
+              ) : item.local ? (
+                <LocalImage jpeg={item.local.jpeg} width={item.local.width} height={item.local.height} />
+              ) : (
+                <Text style={item.text === null ? styles.unreadable : type.body}>{item.text ?? 'Message illisible (signature ou clé invalide)'}</Text>
+              )}
+              {item.status ? (
+                <Text style={styles.status}>
+                  {item.status === 'sending' ? '⏳' : `${item.pending?.error ?? 'Échec'} — touche pour renvoyer`}
+                </Text>
+              ) : null}
             </Pressable>
           )}
         />
         <View style={styles.composer}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Envoyer une photo"
+            disabled={picking}
+            onPress={() => void sendPhoto()}
+            style={styles.attach}
+          >
+            {picking ? <ActivityIndicator color={colors.accentFg} /> : <Text style={styles.attachLabel}>＋</Text>}
+          </Pressable>
           <TextInput
             value={draft}
             onChangeText={setDraft}
@@ -344,9 +415,9 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
             accessibilityLabel="Envoyer"
             disabled={!draft.trim()}
             onPress={() => {
-              const text = draft.trim();
+              const text = draft.trim().replace(/^\u0000+/, ''); // a leading NUL marks image bodies
               setDraft('');
-              void send(text);
+              if (text) void send({ clientId: newClientId(), kind: 'text', text, failed: false });
             }}
             style={[styles.send, !draft.trim() && { opacity: 0.4 }]}
           >
@@ -354,6 +425,7 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
           </Pressable>
         </View>
       </KeyboardAvoidingView>
+      <ImageViewer jpeg={viewing} onClose={() => setViewing(null)} />
     </SafeAreaView>
   );
 }
@@ -368,8 +440,11 @@ const styles = StyleSheet.create({
   author: { color: colors.accentFg, fontSize: 12, marginBottom: 2 },
   unreadable: { color: colors.textDim, fontStyle: 'italic' },
   status: { color: colors.textDim, fontSize: 11, marginTop: 4, textAlign: 'right' },
+  imageBubble: { padding: 4 },
   composer: { flexDirection: 'row', alignItems: 'flex-end', gap: space.sm, padding: space.sm, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
   input: { flex: 1, minHeight: 44, maxHeight: 140, borderRadius: 22, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, color: colors.text, paddingHorizontal: 16, paddingVertical: 10, fontSize: 16 },
   send: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.accent, borderWidth: 1, borderColor: colors.accentFg, alignItems: 'center', justifyContent: 'center' },
   sendLabel: { color: colors.text, fontSize: 22, fontWeight: '700' },
+  attach: { width: 44, height: 44, borderRadius: 22, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
+  attachLabel: { color: colors.accentFg, fontSize: 22 },
 });

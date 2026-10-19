@@ -69,7 +69,14 @@ export interface Credentials {
 
 type Init = { method?: string; json?: unknown; auth?: boolean };
 
+/** fetch able to send and read raw bytes (the app passes expo/fetch; Node's fetch works as is). */
+export type BinaryFetch = (
+  url: string,
+  init: { method: string; headers?: Record<string, string>; body?: Uint8Array; signal?: AbortSignal },
+) => Promise<{ ok: boolean; status: number; bytes(): Promise<Uint8Array> }>;
+
 const REQUEST_TIMEOUT_MS = 15_000;
+const TRANSFER_TIMEOUT_MS = 120_000;
 
 export class Api {
   private token: string | null = null;
@@ -78,6 +85,7 @@ export class Api {
   constructor(
     readonly baseUrl: string,
     private readonly credentials: Credentials | null = null,
+    private readonly binaryFetch: BinaryFetch = fetch as unknown as BinaryFetch,
   ) {}
 
   // ---- transport -------------------------------------------------------------
@@ -215,7 +223,11 @@ export class Api {
 
   // ---- messages ----------------------------------------------------------------
 
-  sendMessage(groupId: string, msg: { clientId: string; keyVersion: number; nonce: string; ciphertext: string; signature: string }) {
+  /** `attachmentId`: the upload an image message refers to (the server ties its lifetime to the message). */
+  sendMessage(
+    groupId: string,
+    msg: { clientId: string; keyVersion: number; nonce: string; ciphertext: string; signature: string; attachmentId?: string },
+  ) {
     return this.request<WireMessage>(`/groups/${groupId}/messages`, { method: 'POST', json: msg });
   }
 
@@ -223,5 +235,44 @@ export class Api {
     return this.request<{ messages: WireMessage[]; hasMore: boolean }>(
       `/groups/${groupId}/messages?after=${after}&limit=${limit}`,
     );
+  }
+
+  // ---- attachments (already-encrypted blobs) ---------------------------------------
+
+  /** Reserves an attachment id; the URL accepts exactly `size` bytes for a few minutes. */
+  createAttachment(groupId: string, size: number) {
+    return this.request<{ id: string; uploadUrl: string }>(`/groups/${groupId}/attachments`, { method: 'POST', json: { size } });
+  }
+
+  attachmentUrl(groupId: string, attachmentId: string) {
+    return this.request<{ url: string }>(`/groups/${groupId}/attachments/${attachmentId}`);
+  }
+
+  /** PUT to a presigned storage URL (no API token: the signature is the authorization). */
+  async uploadBlob(url: string, blob: Uint8Array): Promise<void> {
+    const res = await this.transfer(url, { method: 'PUT', headers: { 'content-type': 'application/octet-stream' }, body: blob });
+    if (!res.ok) throw new ApiError(res.status, 'upload_failed');
+  }
+
+  async downloadBlob(url: string): Promise<Uint8Array> {
+    const res = await this.transfer(url, { method: 'GET' });
+    if (!res.ok) throw new ApiError(res.status, 'download_failed');
+    try {
+      return await res.bytes();
+    } catch {
+      throw new NetworkError();
+    }
+  }
+
+  private async transfer(url: string, init: Parameters<BinaryFetch>[1]) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), TRANSFER_TIMEOUT_MS);
+    try {
+      return await this.binaryFetch(url, { ...init, signal: controller.signal });
+    } catch {
+      throw new NetworkError();
+    } finally {
+      clearTimeout(timer);
+    }
   }
 }

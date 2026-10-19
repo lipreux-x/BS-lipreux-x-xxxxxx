@@ -26,7 +26,24 @@
       "expo-router",
       "expo-status-bar",
       "expo-secure-store",
-      "expo-font"
+      "expo-font",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "BaseSecrète accède à tes photos pour que tu puisses en envoyer, chiffrées, dans tes groupes.",
+          "cameraPermission": false,
+          "microphonePermission": false
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "BaseSecrète accède à tes photos pour enregistrer celles que tu télécharges depuis un groupe.",
+          "savePhotosPermission": "BaseSecrète enregistre dans ta galerie les photos que tu choisis de télécharger depuis un groupe.",
+          "isAccessMediaLocationEnabled": false,
+          "granularPermissions": ["photo"]
+        }
+      ]
     ],
     "backgroundColor": "#000000",
     "scheme": "basesecrete"

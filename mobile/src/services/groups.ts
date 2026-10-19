@@ -1,15 +1,21 @@
 import { randomUUID } from 'expo-crypto';
 import {
   b64,
+  decryptAttachment,
   decryptGroupMeta,
   decryptMessage,
+  encodeMessageBody,
+  encryptAttachment,
   encryptGroupMeta,
   encryptMessage,
   generateGroupKey,
+  MAX_ATTACHMENT_BYTES,
   openGroupKey as openSealedGroupKey,
+  parseMessageBody,
   parsePublicIdentity,
   sealGroupKeyFor,
   type GroupMeta,
+  type ImageBody,
 } from '@/crypto';
 import { ApiError, type Api, type GroupSummary, type Profile, type WireMessage } from './api';
 import type { UnlockedVault, Vault } from './vault';
@@ -270,7 +276,9 @@ export interface ChatMessage {
   clientId: string;
   senderId: string;
   senderName: string;
-  text: string | null; // null: could not be verified/decrypted
+  // Both null: could not be verified/decrypted (or a malformed image body).
+  text: string | null;
+  image: ImageBody | null;
   createdAt: string;
   mine: boolean;
 }
@@ -281,16 +289,21 @@ export async function decryptMessages(s: Session, profiles: ProfileCache, keys: 
     const p = known.get(m.senderId);
     const groupKey = keys.get(m.keyVersion);
     let text: string | null = null;
+    let image: ImageBody | null = null;
     if (p && groupKey) {
       try {
-        text = decryptMessage(
-          { nonce: m.nonce, ciphertext: m.ciphertext, signature: m.signature },
-          { groupId: m.groupId, senderId: m.senderId, clientId: m.clientId, keyVersion: m.keyVersion },
-          groupKey,
-          b64.decode(p.publicKeySign),
+        const body = parseMessageBody(
+          decryptMessage(
+            { nonce: m.nonce, ciphertext: m.ciphertext, signature: m.signature },
+            { groupId: m.groupId, senderId: m.senderId, clientId: m.clientId, keyVersion: m.keyVersion },
+            groupKey,
+            b64.decode(p.publicKeySign),
+          ),
         );
+        if (body?.kind === 'text') text = body.text;
+        if (body?.kind === 'image') image = body;
       } catch {
-        text = null; // tampered, forged or other key version: shown as unreadable
+        // tampered, forged or other key version: shown as unreadable
       }
     }
     return {
@@ -300,6 +313,7 @@ export async function decryptMessages(s: Session, profiles: ProfileCache, keys: 
       senderId: m.senderId,
       senderName: p?.username ?? '?',
       text,
+      image,
       createdAt: m.createdAt,
       mine: m.senderId === s.account.userId,
     };
@@ -323,6 +337,58 @@ export function newClientId(): string {
 }
 
 export async function sendText(s: Session, groupId: string, groupKey: Uint8Array, keyVersion: number, text: string, clientId: string): Promise<WireMessage> {
-  const encrypted = encryptMessage(text, { groupId, senderId: s.account.userId, clientId, keyVersion }, groupKey, s.identity);
+  const body = encodeMessageBody({ kind: 'text', text });
+  const encrypted = encryptMessage(body, { groupId, senderId: s.account.userId, clientId, keyVersion }, groupKey, s.identity);
   return s.api.sendMessage(groupId, { clientId, keyVersion, ...encrypted });
+}
+
+// ---- Images (SPEC §4.3) ----------------------------------------------------------
+
+/** An image ready to send: re-encoded JPEG (no metadata) and a tiny preview. */
+export interface PreparedImage {
+  jpeg: Uint8Array;
+  width: number;
+  height: number;
+  preview?: string; // base64url JPEG, a few hundred bytes
+}
+
+export class ImageTooLargeError extends Error {
+  constructor() {
+    super('image_too_large');
+    this.name = 'ImageTooLargeError';
+  }
+}
+
+/**
+ * Encrypts the image under a fresh file key and uploads the blob. Returns the
+ * message body to send; keep it to retry the send without uploading again.
+ */
+export async function uploadImage(s: Session, groupId: string, image: PreparedImage): Promise<ImageBody> {
+  const size = image.jpeg.length + 24 + 16; // nonce + Poly1305 tag
+  if (size > MAX_ATTACHMENT_BYTES) throw new ImageTooLargeError();
+  const { id, uploadUrl } = await s.api.createAttachment(groupId, size);
+  const { blob, fileKey } = encryptAttachment(image.jpeg, { groupId, attachmentId: id });
+  await s.api.uploadBlob(uploadUrl, blob);
+  return {
+    kind: 'image',
+    attachmentId: id,
+    fileKey: b64.encode(fileKey),
+    mime: 'image/jpeg',
+    width: image.width,
+    height: image.height,
+    size: blob.length,
+    ...(image.preview && { preview: image.preview }),
+  };
+}
+
+export async function sendImage(s: Session, groupId: string, groupKey: Uint8Array, keyVersion: number, body: ImageBody, clientId: string): Promise<WireMessage> {
+  const encrypted = encryptMessage(encodeMessageBody(body), { groupId, senderId: s.account.userId, clientId, keyVersion }, groupKey, s.identity);
+  return s.api.sendMessage(groupId, { clientId, keyVersion, ...encrypted, attachmentId: body.attachmentId });
+}
+
+/** Downloads and decrypts an image. Throws CryptoError if the blob was tampered with or swapped. */
+export async function loadImage(s: Session, groupId: string, body: ImageBody): Promise<Uint8Array> {
+  const { url } = await s.api.attachmentUrl(groupId, body.attachmentId);
+  const blob = await s.api.downloadBlob(url);
+  return decryptAttachment(blob, b64.decode(body.fileKey), { groupId, attachmentId: body.attachmentId });
 }
