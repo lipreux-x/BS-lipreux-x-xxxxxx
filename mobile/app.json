@@ -6,8 +6,10 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
+    "owner": "8max",
     "ios": {
-      "supportsTablet": true
+      "bundleIdentifier": "com.lipreux.basesecrete",
+      "supportsTablet": false
     },
     "android": {
       "adaptiveIcon": {
@@ -16,7 +18,13 @@
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.READ_MEDIA_VISUAL_USER_SELECTED",
+        "android.permission.READ_MEDIA_IMAGES"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -41,11 +49,23 @@
           "photosPermission": "BaseSecrète accède à tes photos pour enregistrer celles que tu télécharges depuis un groupe.",
           "savePhotosPermission": "BaseSecrète enregistre dans ta galerie les photos que tu choisis de télécharger depuis un groupe.",
           "isAccessMediaLocationEnabled": false,
-          "granularPermissions": ["photo"]
+          "granularPermissions": [
+            "photo"
+          ]
         }
       ]
     ],
     "backgroundColor": "#000000",
-    "scheme": "basesecrete"
+    "scheme": "basesecrete",
+    "extra": {
+      "router": {
+        "asyncRoutes": {
+          "web": true
+        }
+      },
+      "eas": {
+        "projectId": "e1a7f270-2953-4e39-b07b-d30ff420e85e"
+      }
+    }
   }
 }
