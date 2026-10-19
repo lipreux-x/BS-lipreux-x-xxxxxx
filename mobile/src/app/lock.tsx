@@ -116,7 +116,7 @@ function beforeWipe(n: number): string {
 const styles = StyleSheet.create({
   screen: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   title: { ...type.title, textAlign: 'center' },
-  subtitle: { ...type.dim, textAlign: 'center', marginTop: space.xs, marginBottom: space.xl },
+  subtitle: { ...type.dim, textAlign: 'center', marginTop: space.xs, marginBottom: space.lg },
   switch: { alignSelf: 'center', marginTop: space.lg, paddingVertical: space.sm, paddingHorizontal: space.md },
   switchText: { color: colors.accentFg, fontFamily: fonts.medium, fontSize: 16 },
 });

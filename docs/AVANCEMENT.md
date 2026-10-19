@@ -12,7 +12,7 @@
 ### Ouvrir l'app avec l'empreinte (20/10)
 
 - **Réglages → Sécurité → Empreinte → Activer** : le code de l'app est redemandé, puis le téléphone demande le doigt une fois pour vérifier.
-- Ensuite, la porte du coffre s'ouvre sur un **lecteur d'empreinte façon coffre-fort**, **à la place du clavier du code app**. Il y a une empreinte verte qui respire : on la touche, une ligne de scan la balaie pendant qu'on pose le doigt, puis le voyant passe au vert et le coffre s'ouvre. En cas d'échec, le voyant passe au rouge et l'empreinte tremble. « Taper le code » ramène au clavier.
+- Ensuite, la porte du coffre s'ouvre sur un **lecteur d'empreinte façon coffre-fort**, **à la place du clavier du code app**. C'est une plaque métal vissée comme le clavier, avec une fenêtre de capteur carrée en verre sombre rétroéclairé en vert, une trame et des repères de visée, et un écran LCD d'état (PRÊT, LECTURE…, ACCÈS OK, REFUSÉ) avec son voyant. On touche la fenêtre : une barre de scan la balaie de haut en bas pendant qu'on pose le doigt, puis la fenêtre flashe en vert et le coffre s'ouvre. En cas d'échec, elle flashe en rouge et la plaque tremble. « Taper le code » ramène au clavier.
 - La vérification passe toujours par la fenêtre d'empreinte du système : aucune app ne peut lire le capteur elle-même, et c'est ce qui garantit que seul le vrai doigt libère la clé.
 - **Empreinte seulement**, pas de reconnaissance faciale : l'option n'apparaît que sur un téléphone avec un capteur d'empreinte et un doigt enregistré.
 - Comment c'est protégé : une copie de la clé maître est gardée par le Keychain (iOS, Touch ID) ou le Keystore (Android), qui ne la rend qu'après la vérification faite par le système. L'app ne voit jamais le doigt.
