@@ -2,7 +2,8 @@ import type { ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Avatar, isAvatarId } from '../avatars';
 import { Led, type LedState } from '../Led';
-import { colors, fonts, mono, space } from '../theme';
+import { colors, fonts, led, mono, space } from '../theme';
+import type { Quote } from './replies';
 
 export type DeliveryStatus = 'sending' | 'sent' | 'failed';
 
@@ -18,6 +19,9 @@ const STATUS_LABEL: Record<DeliveryStatus, string> = { sending: 'Envoi en cours'
  *
  * Others' messages have a column on the left with the sender's avatar, and
  * their name above the bubble, on every message.
+ *
+ * A reply opens with the quoted message in a small recessed screen; tapping
+ * it jumps to the original. A long press opens the message's actions.
  */
 export function MessageBubble({
   mine,
@@ -28,7 +32,11 @@ export function MessageBubble({
   error,
   last,
   media,
+  quote,
+  highlighted,
   onRetry,
+  onQuotePress,
+  onLongPress,
   children,
 }: {
   mine: boolean;
@@ -44,7 +52,14 @@ export function MessageBubble({
   last: boolean;
   /** Image content: thin frame instead of text padding. */
   media?: boolean;
+  /** The message this one answers. */
+  quote?: Quote;
+  /** Briefly lit after jumping here from a quote. */
+  highlighted?: boolean;
   onRetry?(): void;
+  onQuotePress?(): void;
+  /** Actions (reply, copy); absent for messages still on their way. */
+  onLongPress?(): void;
   children: ReactNode;
 }) {
   const failed = status === 'failed';
@@ -56,17 +71,21 @@ export function MessageBubble({
         </Text>
       ) : null}
       <Pressable
-        disabled={!failed}
-        onPress={onRetry}
-        accessibilityHint={failed ? 'Touche pour renvoyer' : undefined}
+        disabled={!failed && !onLongPress}
+        onPress={failed ? onRetry : undefined}
+        onLongPress={onLongPress}
+        delayLongPress={300}
+        accessibilityHint={failed ? 'Touche pour renvoyer' : onLongPress ? 'Appui long pour répondre' : undefined}
         style={[
           styles.plate,
           mine ? styles.mine : styles.theirs,
           media && styles.media,
           last && (mine ? styles.tailMine : styles.tailTheirs),
           failed && styles.failed,
+          highlighted && styles.highlighted,
         ]}
       >
+        {quote ? <QuoteBlock quote={quote} media={media} onPress={onQuotePress} /> : null}
         {children}
         <View style={[styles.footer, media && styles.footerMedia]}>
           <Text style={[styles.time, mine && styles.timeMine]}>{time}</Text>
@@ -86,6 +105,26 @@ export function MessageBubble({
       <View style={styles.avatarSlot}>{author ? <Avatar id={isAvatarId(avatar) ? avatar : null} size={AVATAR} /> : null}</View>
       {bubble}
     </View>
+  );
+}
+
+/** The quoted message, in a recessed screen with a lit edge on the left. */
+export function QuoteBlock({ quote, media, onPress }: { quote: Quote; media?: boolean; onPress?(): void }) {
+  return (
+    <Pressable
+      disabled={!quote.found || !onPress}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`Réponse à ${quote.author}`}
+      style={[styles.quote, media && styles.quoteMedia]}
+    >
+      <Text style={styles.quoteAuthor} numberOfLines={1}>
+        {quote.author}
+      </Text>
+      <Text style={styles.quoteText} numberOfLines={2}>
+        {quote.image ? '📷 Photo' : quote.excerpt}
+      </Text>
+    </Pressable>
   );
 }
 
@@ -145,6 +184,26 @@ const styles = StyleSheet.create({
   time: { fontFamily: mono, fontSize: 10, color: colors.textDim },
   timeMine: { color: 'rgba(255,255,255,0.65)' },
   failure: { color: colors.danger, fontSize: 11 },
+  highlighted: {
+    borderTopColor: led.amber,
+    borderLeftColor: led.amber,
+    borderBottomColor: led.amber,
+    borderRightColor: led.amber,
+  },
+  // Recessed like the code display, with the edge lit in the accent.
+  quote: {
+    marginBottom: 6,
+    paddingVertical: 5,
+    paddingHorizontal: 8,
+    borderRadius: 6,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    borderLeftWidth: 3,
+    borderLeftColor: colors.accentFg,
+    minWidth: 140,
+  },
+  quoteMedia: { margin: 3, marginBottom: 3 },
+  quoteAuthor: { color: colors.text, fontSize: 12, fontFamily: fonts.semibold },
+  quoteText: { color: colors.textDim, fontSize: 13 },
   day: { flexDirection: 'row', alignItems: 'center', gap: space.sm, marginVertical: space.sm },
   rule: { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: colors.border },
   dayLabel: { fontFamily: mono, fontSize: 10, letterSpacing: 2, color: colors.textDim },

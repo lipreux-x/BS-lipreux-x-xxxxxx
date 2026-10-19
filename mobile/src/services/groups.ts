@@ -16,6 +16,7 @@ import {
   sealGroupKeyFor,
   type GroupMeta,
   type ImageBody,
+  type ReplyRef,
 } from '@/crypto';
 import { ApiError, type Api, type GroupSummary, type Profile, type WireMessage } from './api';
 import type { UnlockedVault, Vault } from './vault';
@@ -286,6 +287,8 @@ export interface ChatMessage {
   // Both null: could not be verified/decrypted (or a malformed image body).
   text: string | null;
   image: ImageBody | null;
+  /** The message this one answers (quoted inside the encrypted body). */
+  replyTo: ReplyRef | null;
   createdAt: string;
   mine: boolean;
 }
@@ -297,6 +300,7 @@ export async function decryptMessages(s: Session, profiles: ProfileCache, keys: 
     const groupKey = keys.get(m.keyVersion);
     let text: string | null = null;
     let image: ImageBody | null = null;
+    let replyTo: ReplyRef | null = null;
     if (p && groupKey) {
       try {
         const body = parseMessageBody(
@@ -309,6 +313,7 @@ export async function decryptMessages(s: Session, profiles: ProfileCache, keys: 
         );
         if (body?.kind === 'text') text = body.text;
         if (body?.kind === 'image') image = body;
+        replyTo = body?.replyTo ?? null;
       } catch {
         // tampered, forged or other key version: shown as unreadable
       }
@@ -322,6 +327,7 @@ export async function decryptMessages(s: Session, profiles: ProfileCache, keys: 
       senderAvatar: p?.avatar ?? null,
       text,
       image,
+      replyTo,
       createdAt: m.createdAt,
       mine: m.senderId === s.account.userId,
     };
@@ -344,8 +350,16 @@ export function newClientId(): string {
   return randomUUID();
 }
 
-export async function sendText(s: Session, groupId: string, groupKey: Uint8Array, keyVersion: number, text: string, clientId: string): Promise<WireMessage> {
-  const body = encodeMessageBody({ kind: 'text', text });
+export async function sendText(
+  s: Session,
+  groupId: string,
+  groupKey: Uint8Array,
+  keyVersion: number,
+  text: string,
+  clientId: string,
+  replyTo?: ReplyRef,
+): Promise<WireMessage> {
+  const body = encodeMessageBody({ kind: 'text', text, ...(replyTo && { replyTo }) });
   const encrypted = encryptMessage(body, { groupId, senderId: s.account.userId, clientId, keyVersion }, groupKey, s.identity);
   return s.api.sendMessage(groupId, { clientId, keyVersion, ...encrypted });
 }

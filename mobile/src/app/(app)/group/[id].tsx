@@ -1,9 +1,10 @@
+import * as Haptics from 'expo-haptics';
 import { router, Stack, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { FlatList, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { FlatList, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { API_URL } from '@/config';
-import type { ImageBody } from '@/crypto';
+import type { ImageBody, ReplyRef } from '@/crypto';
 import { useUnlocked, type OpenGroup } from '@/session/SessionProvider';
 import { ApiError, NetworkError, type WireMessage } from '@/services/api';
 import {
@@ -27,7 +28,10 @@ import { imageCache, pickImage } from '@/services/images';
 import { RealtimeClient } from '@/services/realtime';
 import { LockedOutError, WrongCodeError } from '@/services/vault';
 import { Composer } from '@/ui/chat/Composer';
+import { MessageActions } from '@/ui/chat/MessageActions';
 import { DaySeparator, MessageBubble, type DeliveryStatus } from '@/ui/chat/MessageBubble';
+import { replyRefFor, resolveQuote } from '@/ui/chat/replies';
+import { SwipeToReply } from '@/ui/chat/SwipeToReply';
 import { buildTimeline, timeLabel } from '@/ui/chat/timeline';
 import { CodeEntry, type CodeResult } from '@/ui/CodeEntry';
 import { ImageBubble, LocalImage } from '@/ui/ImageBubble';
@@ -187,7 +191,7 @@ function GroupUnlock({ groupId, onOpen }: { groupId: string; onOpen(g: OpenGroup
 
 // ---- Chat (SPEC §2.4) ------------------------------------------------------------------
 
-type Pending = { clientId: string; at: string; failed: boolean; error?: string } & (
+type Pending = { clientId: string; at: string; failed: boolean; error?: string; replyTo?: ReplyRef } & (
   | { kind: 'text'; text: string }
   // `body` is set once the encrypted file is uploaded: a retry only resends the message.
   | { kind: 'image'; image: PreparedImage; body?: ImageBody }
@@ -200,6 +204,16 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
   const [draft, setDraft] = useState('');
   const [picking, setPicking] = useState(false);
   const [viewing, setViewing] = useState<Uint8Array | null>(null);
+  // The message being answered (composer strip), and the one long-pressed (action sheet).
+  const [replying, setReplying] = useState<ChatMessage | null>(null);
+  const [pressed, setPressed] = useState<ChatMessage | null>(null);
+  const input = useRef<React.ComponentRef<typeof TextInput>>(null);
+
+  /** Answer `m`: reply strip above the composer, keyboard up. */
+  function startReply(m: ChatMessage) {
+    setReplying(m);
+    input.current?.focus();
+  }
   const [online, setOnline] = useState(true);
   const [removed, setRemoved] = useState(false);
   // History fetched once: until then an empty list means "loading", not "no messages".
@@ -297,8 +311,8 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
       }
       const attempt = (g: OpenGroup) =>
         ready.kind === 'text'
-          ? sendText(session, groupId, g.keys.get(g.keyVersion)!, g.keyVersion, ready.text, clientId)
-          : sendImage(session, groupId, g.keys.get(g.keyVersion)!, g.keyVersion, ready.body!, clientId);
+          ? sendText(session, groupId, g.keys.get(g.keyVersion)!, g.keyVersion, ready.text, clientId, ready.replyTo)
+          : sendImage(session, groupId, g.keys.get(g.keyVersion)!, g.keyVersion, { ...ready.body!, ...(ready.replyTo && { replyTo: ready.replyTo }) }, clientId);
       let wire: WireMessage;
       try {
         wire = await attempt(current.current);
@@ -317,11 +331,18 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
     }
   }
 
+  /** The reply to attach to the next message, and clear it from the composer. */
+  function takeReply(): ReplyRef | undefined {
+    const ref = replying ? (replyRefFor(replying) ?? undefined) : undefined;
+    setReplying(null);
+    return ref;
+  }
+
   async function sendPhoto() {
     setPicking(true);
     try {
       const image = await pickImage();
-      if (image) void send({ clientId: newClientId(), at: new Date().toISOString(), kind: 'image', image, failed: false });
+      if (image) void send({ clientId: newClientId(), at: new Date().toISOString(), kind: 'image', image, failed: false, replyTo: takeReply() });
     } catch {
       // Picker or re-encoding failed: nothing was sent.
     } finally {
@@ -383,26 +404,37 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
             ) : item.text === null ? (
               <Text style={styles.unreadable}>Message illisible (signature ou clé invalide)</Text>
             ) : (
-              <Text style={styles.text} selectable>
-                {item.text}
-              </Text>
+              <Text style={styles.text}>{item.text}</Text>
             )
           }
           onRetry={(p) => void send(p)}
+          onLongPress={(m) => {
+            void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            setPressed(m);
+          }}
+          onReply={startReply}
         />
         <Composer
           value={draft}
           onChange={setDraft}
           attaching={picking}
           onAttach={() => void sendPhoto()}
+          replyTo={replying ? resolveQuote(replyRefFor(replying)!, messages, session.account.userId) : null}
+          onCancelReply={() => setReplying(null)}
+          inputRef={input}
           onSend={() => {
-            const text = draft.trim().replace(/^\u0000+/, ''); // a leading NUL marks image bodies
+            const text = draft.trim().replace(/^\u0000+/, ''); // a leading NUL marks structured bodies
             setDraft('');
-            if (text) void send({ clientId: newClientId(), at: new Date().toISOString(), kind: 'text', text, failed: false });
+            if (text) void send({ clientId: newClientId(), at: new Date().toISOString(), kind: 'text', text, failed: false, replyTo: takeReply() });
           }}
         />
       </KeyboardAvoidingView>
       <ImageViewer jpeg={viewing} onClose={() => setViewing(null)} />
+      <MessageActions
+        target={pressed ? { quote: resolveQuote(replyRefFor(pressed)!, messages, session.account.userId), text: pressed.text } : null}
+        onReply={() => pressed && startReply(pressed)}
+        onClose={() => setPressed(null)}
+      />
     </SafeAreaView>
   );
 }
@@ -422,6 +454,9 @@ interface Line {
   local?: PreparedImage;
   status?: DeliveryStatus;
   pending?: Pending;
+  replyTo?: ReplyRef;
+  /** Delivered message: can be answered (long press). */
+  message?: ChatMessage;
 }
 
 type Item = ReturnType<typeof buildTimeline<Line>>[number];
@@ -433,6 +468,8 @@ function Timeline({
   pending,
   renderContent,
   onRetry,
+  onLongPress,
+  onReply,
 }: {
   listRef: React.RefObject<FlatList<Item> | null>;
   loaded: boolean;
@@ -440,9 +477,16 @@ function Timeline({
   pending: Pending[];
   renderContent(line: Line): React.ReactNode;
   onRetry(p: Pending): void;
+  onLongPress(m: ChatMessage): void;
+  /** Swipe right on a delivered message. */
+  onReply(m: ChatMessage): void;
 }) {
   const { session } = useUnlocked();
   const me = session.account.userId;
+  // Original lit for a moment after tapping a quote.
+  const [highlight, setHighlight] = useState<string | null>(null);
+  const highlightTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(highlightTimer.current), []);
   // Newest first: the list is inverted so it opens on the latest message.
   const items = useMemo(() => {
     const lines: Line[] = [
@@ -456,6 +500,9 @@ function Timeline({
         text: m.text,
         image: m.image ?? undefined,
         status: m.mine ? ('sent' as const) : undefined,
+        replyTo: m.replyTo ?? undefined,
+        // Unreadable messages cannot be quoted.
+        message: m.text !== null || m.image ? m : undefined,
       })),
       ...pending.map((p) => ({
         key: p.clientId,
@@ -467,10 +514,20 @@ function Timeline({
         local: p.kind === 'image' ? p.image : undefined,
         status: p.failed ? ('failed' as const) : ('sending' as const),
         pending: p,
+        replyTo: p.replyTo,
       })),
     ];
     return buildTimeline(lines, new Date()).reverse();
   }, [messages, pending, me]);
+
+  function jumpTo(messageId: string) {
+    const index = items.findIndex((i) => i.kind === 'message' && i.key === messageId);
+    if (index < 0) return;
+    listRef.current?.scrollToIndex({ index, viewPosition: 0.5, animated: true });
+    setHighlight(messageId);
+    clearTimeout(highlightTimer.current);
+    highlightTimer.current = setTimeout(() => setHighlight(null), 1500);
+  }
 
   return (
     <FlatList
@@ -478,6 +535,11 @@ function Timeline({
       inverted
       data={items}
       keyExtractor={(i) => i.key}
+      onScrollToIndexFailed={(info) => {
+        // Row not measured yet: get close, then aim again once it is rendered.
+        listRef.current?.scrollToOffset({ offset: info.averageItemLength * info.index, animated: false });
+        setTimeout(() => listRef.current?.scrollToIndex({ index: info.index, viewPosition: 0.5, animated: true }), 100);
+      }}
       keyboardShouldPersistTaps="handled"
       contentContainerStyle={styles.timeline}
       ListEmptyComponent={
@@ -498,19 +560,25 @@ function Timeline({
         const last = !line.mine || item.last;
         return (
           <View style={last ? styles.runEnd : undefined}>
-            <MessageBubble
-              mine={line.mine}
-              author={line.mine ? undefined : line.author}
-              avatar={line.avatar}
-              time={timeLabel(line.at)}
-              status={line.status}
-              error={line.pending?.error}
-              last={last}
-              media={!!(line.image || line.local)}
-              onRetry={line.pending ? () => onRetry(line.pending!) : undefined}
-            >
-              {renderContent(line)}
-            </MessageBubble>
+            <SwipeToReply onReply={line.message ? () => onReply(line.message!) : undefined}>
+              <MessageBubble
+                mine={line.mine}
+                author={line.mine ? undefined : line.author}
+                avatar={line.avatar}
+                time={timeLabel(line.at)}
+                status={line.status}
+                error={line.pending?.error}
+                last={last}
+                media={!!(line.image || line.local)}
+                quote={line.replyTo ? resolveQuote(line.replyTo, messages, me) : undefined}
+                highlighted={highlight === line.key}
+                onRetry={line.pending ? () => onRetry(line.pending!) : undefined}
+                onQuotePress={line.replyTo ? () => jumpTo(line.replyTo!.messageId) : undefined}
+                onLongPress={line.message ? () => onLongPress(line.message!) : undefined}
+              >
+                {renderContent(line)}
+              </MessageBubble>
+            </SwipeToReply>
           </View>
         );
       }}

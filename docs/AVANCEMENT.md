@@ -114,7 +114,7 @@ Le changement s'applique à tous les écrans de code : verrouillage, inscription
 
 | | Fonction | État |
 |---|---|---|
-| ⬜ | Biométrie, empreinte de sécurité, réactions, réponses | À faire |
+| 🟡 | Biométrie, empreinte de sécurité, réactions, réponses | Réponses faites : appui long sur un message → Répondre (ou Copier), la citation est chiffrée dans la réponse et un tap dessus ramène au message d'origine. Le reste est à faire. |
 | ⬜ | Blocage des captures d'écran, auto-destruction après X échecs | À faire |
 | ⬜ | Multi-appareils via QR code | À faire |
 | ⬜ | Mode « à côté » sans internet (Bluetooth / Wi-Fi Direct) | À faire |

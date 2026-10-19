@@ -120,6 +120,12 @@ run('app services against the deployed API', () => {
     const history = await decryptMessages(alice, aliceProfiles, aliceUnlock!.keys, await fetchSince(alice, groupId, 0));
     expect(history.map((m) => m.text)).toEqual(['rdv à la base 🔒']);
 
+    // Alice answers Bob's message: the quote travels inside the encrypted, signed body.
+    const replyTo = { messageId: sent!.id, senderId: bob.account.userId, excerpt: 'rdv à la base 🔒' };
+    const reply = await sendText(alice, groupId, aliceUnlock!.groupKey, 1, 'J’y serai', newClientId(), replyTo);
+    const [bobSees] = await decryptMessages(bob, new ProfileCache(bob.api), bobUnlock!.keys, [reply]);
+    expect(bobSees).toMatchObject({ text: 'J’y serai', replyTo });
+
     // Bob sends an image: encrypted on his phone, blob in object storage, key in the message.
     const jpeg = new Uint8Array(200_000).map((_, i) => (i * 7) & 0xff);
     const imageBody = await uploadImage(bob, groupId, { jpeg, width: 800, height: 600, preview: 'AAAA' });
@@ -143,7 +149,7 @@ run('app services against the deployed API', () => {
     expect(synced.summary.rotationPending).toBe(false);
     await sendText(alice, groupId, synced.keys.get(2)!, 2, 'sans Bob', newClientId());
     const both = await decryptMessages(alice, aliceProfiles, synced.keys, await fetchSince(alice, groupId, 0));
-    expect(both.map((m) => m.text ?? m.image?.attachmentId)).toEqual(['rdv à la base 🔒', imageBody.attachmentId, 'sans Bob']);
+    expect(both.map((m) => m.text ?? m.image?.attachmentId)).toEqual(['rdv à la base 🔒', 'J’y serai', imageBody.attachmentId, 'sans Bob']);
     await expect(fetchSince(bob, groupId, 0)).rejects.toMatchObject({ status: 404 });
 
     // Next unlock: the code still opens (v1 on the phone), v2 gets locked under it.

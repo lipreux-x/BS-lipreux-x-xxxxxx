@@ -1,6 +1,7 @@
 import * as Haptics from 'expo-haptics';
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { colors, fonts } from '../theme';
+import type { Quote } from './replies';
 
 const MAX_LENGTH = 4000;
 
@@ -8,6 +9,7 @@ const MAX_LENGTH = 4000;
  * The bottom bar as a strip of the safe's control panel: a metal key for
  * photos, the message typed into a recessed screen, and a green key to send
  * (lit only when there is something to send). Keys press in like the keypad.
+ * When answering a message, a strip above shows what is being answered.
  */
 export function Composer({
   value,
@@ -15,6 +17,9 @@ export function Composer({
   onSend,
   onAttach,
   attaching,
+  replyTo,
+  onCancelReply,
+  inputRef,
 }: {
   value: string;
   onChange(text: string): void;
@@ -22,47 +27,71 @@ export function Composer({
   onAttach(): void;
   /** The photo picker or the image re-encoding is running. */
   attaching: boolean;
+  /** The message being answered, if any. */
+  replyTo?: Quote | null;
+  onCancelReply?(): void;
+  /** To bring the keyboard up when a reply starts. */
+  inputRef?: React.Ref<React.ComponentRef<typeof TextInput>>;
 }) {
   const canSend = value.trim().length > 0;
   return (
-    <View style={styles.bar}>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Envoyer une photo"
-        disabled={attaching}
-        onPress={() => {
-          void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-          onAttach();
-        }}
-        style={({ pressed }) => [styles.key, styles.metal, pressed && styles.metalPressed]}
-      >
-        {attaching ? <ActivityIndicator color={colors.accentFg} /> : <Text style={styles.attachLabel}>+</Text>}
-      </Pressable>
-      <View style={styles.screen}>
-        <TextInput
-          value={value}
-          onChangeText={onChange}
-          placeholder="Message chiffré"
-          placeholderTextColor="#4F5A52"
-          selectionColor={colors.forest}
-          multiline
-          maxLength={MAX_LENGTH}
-          style={styles.input}
-        />
+    <View>
+      {replyTo ? (
+        <View style={styles.reply}>
+          <View style={styles.replyEdge} />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.replyTitle} numberOfLines={1}>
+              Réponse à {replyTo.author}
+            </Text>
+            <Text style={styles.replyText} numberOfLines={1}>
+              {replyTo.image ? '📷 Photo' : replyTo.excerpt}
+            </Text>
+          </View>
+          <Pressable accessibilityRole="button" accessibilityLabel="Annuler la réponse" hitSlop={12} onPress={onCancelReply}>
+            <Text style={styles.replyClose}>✕</Text>
+          </Pressable>
+        </View>
+      ) : null}
+      <View style={styles.bar}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Envoyer une photo"
+          disabled={attaching}
+          onPress={() => {
+            void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            onAttach();
+          }}
+          style={({ pressed }) => [styles.key, styles.metal, pressed && styles.metalPressed]}
+        >
+          {attaching ? <ActivityIndicator color={colors.accentFg} /> : <Text style={styles.attachLabel}>+</Text>}
+        </Pressable>
+        <View style={styles.screen}>
+          <TextInput
+            ref={inputRef}
+            value={value}
+            onChangeText={onChange}
+            placeholder="Message chiffré"
+            placeholderTextColor="#4F5A52"
+            selectionColor={colors.forest}
+            multiline
+            maxLength={MAX_LENGTH}
+            style={styles.input}
+          />
+        </View>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Envoyer"
+          accessibilityState={{ disabled: !canSend }}
+          disabled={!canSend}
+          onPress={() => {
+            void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            onSend();
+          }}
+          style={({ pressed }) => [styles.key, canSend ? styles.green : styles.metal, pressed && (canSend ? styles.greenPressed : styles.metalPressed)]}
+        >
+          <Text style={[styles.sendLabel, !canSend && styles.sendOff]}>↑</Text>
+        </Pressable>
       </View>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Envoyer"
-        accessibilityState={{ disabled: !canSend }}
-        disabled={!canSend}
-        onPress={() => {
-          void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-          onSend();
-        }}
-        style={({ pressed }) => [styles.key, canSend ? styles.green : styles.metal, pressed && (canSend ? styles.greenPressed : styles.metalPressed)]}
-      >
-        <Text style={[styles.sendLabel, !canSend && styles.sendOff]}>↑</Text>
-      </Pressable>
     </View>
   );
 }
@@ -134,5 +163,19 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.border,
     borderRightColor: colors.border,
   },
+  reply: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: colors.surface,
+    borderTopWidth: 1,
+    borderTopColor: '#2E2E2E',
+  },
+  replyEdge: { width: 3, alignSelf: 'stretch', borderRadius: 2, backgroundColor: colors.accentFg },
+  replyTitle: { color: colors.text, fontSize: 13, fontFamily: fonts.semibold },
+  replyText: { color: colors.textDim, fontSize: 13 },
+  replyClose: { color: colors.accentFg, fontSize: 18, paddingHorizontal: 4 },
   input: { color: colors.text, fontSize: 16, paddingHorizontal: 12, paddingTop: 10, paddingBottom: 10, maxHeight: 136 },
 });

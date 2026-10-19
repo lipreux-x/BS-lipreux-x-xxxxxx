@@ -123,6 +123,7 @@
   - Serveur : table `attachments` + bucket privé `attachments` (clé d'objet `<groupe>/<id>`). URL d'upload valable 5 min et limitée à la taille annoncée (10 Mo max, 60 envois/h). Téléchargement réservé aux membres tant que le message existe. Le fichier est supprimé avec le message éphémère, à la fermeture du groupe, ou après 24 h s'il n'a jamais été envoyé.
   - Téléphone : images déchiffrées gardées en mémoire seulement (vidées au verrouillage). « Enregistrer dans la galerie » est un choix explicite ; l'image n'y est plus chiffrée.
 - Photo de profil : jamais de vraie photo. On choisit dans Réglages une icône de la bibliothèque Lucide (lucide.dev, licence ISC) : silhouette par défaut, ou masque, espion, banque, coffre-fort, diamant, pièces d'or, butin, tirelire, clé, perceuse, guetteur. Le serveur ne stocke que l'identifiant (`profiles.avatar`, liste fermée), visible par les membres des groupes comme le pseudo. Dans le chat, l'avatar et le nom ouvrent chaque série de messages d'un membre.
+- Réponses : la réponse embarque dans son corps chiffré et signé l'id, l'auteur et un extrait (140 caractères max) du message cité. Quand l'original est encore chargé, l'app affiche l'original et non l'extrait, pour qu'un membre ne puisse pas faire dire autre chose à quelqu'un.
 - Vérification des contacts : afficher une **empreinte de sécurité** (safety number) comparable en vrai entre amis.
 - Aucun log contenant des données déchiffrées. Pas d'analytics tiers.
 - Multi-appareils : hors MVP (chaque appareil = une identité ; ajout d'appareil via QR code plus tard).
