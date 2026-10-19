@@ -1,14 +1,27 @@
 // Removes accounts created by the mobile end-to-end test (usernames `e2e_*`),
-// with their groups, memberships, keys, messages and invites.
+// with their groups, memberships, keys, messages, images and invites.
 // Usage: npx tsx scripts/cleanup-test-users.ts
+// Bucket credentials: neon env pull --file .env.local -s object-storage (git-ignored).
 process.loadEnvFile('.env');
+try {
+  process.loadEnvFile('.env.local');
+} catch {
+  // no bucket credentials: stored images are left for the bucket owner
+}
 
 const { db, pool } = await import('../src/db/client');
-const { groups, invites, profiles } = await import('../src/db/schema');
+const { attachments, groups, invites, profiles } = await import('../src/db/schema');
+const { deleteObjects, objectKey } = await import('../src/lib/storage');
 const { inArray, like, or } = await import('drizzle-orm');
 
 const ids = (await db.select({ id: profiles.id }).from(profiles).where(like(profiles.username, 'e2e\\_%'))).map((p) => p.id);
 if (ids.length) {
+  const files = await db
+    .select({ id: attachments.id, groupId: attachments.groupId })
+    .from(attachments)
+    .where(inArray(attachments.uploaderId, ids));
+  await deleteObjects(files.map((f) => objectKey(f.groupId, f.id)));
+  console.log(`Removed ${files.length} stored image(s).`);
   await db.delete(groups).where(inArray(groups.createdBy, ids));
   await db.delete(invites).where(or(inArray(invites.usedBy, ids), inArray(invites.createdBy, ids)));
   await db.delete(profiles).where(inArray(profiles.id, ids));

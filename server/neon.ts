@@ -11,6 +11,10 @@ export default defineConfig({
       env: { JWT_SECRET: process.env.JWT_SECRET!, GROUP_CODE_PEPPER: process.env.GROUP_CODE_PEPPER! },
     },
   },
+  buckets: {
+    // Encrypted images (src/lib/storage.ts). Private: phones go through presigned URLs.
+    attachments: {},
+  },
   triggers: {
     'purge-expired': {
       type: 'schedule',

@@ -5,7 +5,7 @@ import { bodyLimit } from 'hono/body-limit';
 import { HTTPException } from 'hono/http-exception';
 import { z } from 'zod';
 import { db } from './db/client';
-import { groupKeys, groupMembers, groups, invites, joinAttempts, messages, profiles } from './db/schema';
+import { attachments, groupKeys, groupMembers, groups, invites, joinAttempts, messages, profiles } from './db/schema';
 import {
   frame,
   fromB64,
@@ -22,6 +22,7 @@ import {
   verifyGroupCode,
   verifyKeywords,
 } from './lib/crypto';
+import { deleteObjects, downloadUrl, objectKey, uploadUrl } from './lib/storage';
 import { issueAccessToken, issueChallenge, verifyAccessToken, verifyChallenge } from './lib/tokens';
 import { realtime } from './realtime';
 
@@ -30,6 +31,8 @@ type Env = { Variables: { userId: string } };
 const INVITE_TTL_DAYS = 7;
 const JOIN_ATTEMPTS_PER_HOUR = 5; // SPEC §4.4: per user, all groups combined
 const MAX_CIPHERTEXT_BYTES = 64 * 1024;
+const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024; // encrypted size, same limit as mobile crypto/attachment.ts
+const UPLOADS_PER_HOUR = 60;
 
 // ---- Validation --------------------------------------------------------------
 
@@ -398,7 +401,7 @@ app.post('/groups/:groupId/keys', async (c) => {
  * deletes the group; if the last admin leaves, the oldest member becomes admin.
  */
 async function removeMember(groupId: string, userId: string) {
-  await db.transaction(async (tx) => {
+  const orphaned = await db.transaction(async (tx): Promise<string[]> => {
     await tx.select({ id: groups.id }).from(groups).where(eq(groups.id, groupId)).for('update');
     await tx.delete(groupMembers).where(and(eq(groupMembers.groupId, groupId), eq(groupMembers.userId, userId)));
     await tx.delete(groupKeys).where(and(eq(groupKeys.groupId, groupId), eq(groupKeys.userId, userId)));
@@ -408,8 +411,9 @@ async function removeMember(groupId: string, userId: string) {
       .where(eq(groupMembers.groupId, groupId))
       .orderBy(groupMembers.joinedAt);
     if (rest.length === 0) {
+      const files = await tx.select({ id: attachments.id }).from(attachments).where(eq(attachments.groupId, groupId));
       await tx.delete(groups).where(eq(groups.id, groupId));
-      return;
+      return files.map((f) => objectKey(groupId, f.id));
     }
     if (!rest.some((m) => m.role === 'admin')) {
       await tx
@@ -418,7 +422,11 @@ async function removeMember(groupId: string, userId: string) {
         .where(and(eq(groupMembers.groupId, groupId), eq(groupMembers.userId, rest[0]!.userId)));
     }
     await tx.update(groups).set({ rotationPending: true }).where(eq(groups.id, groupId));
+    return [];
   });
+  // After the commit: a storage failure must not keep the group alive. Blobs are
+  // encrypted with keys only the members held, so a leftover is unreadable.
+  if (orphaned.length) await deleteObjects(orphaned).catch((e: Error) => console.error('[storage]', e.name));
 }
 
 async function requireAdmin(groupId: string, userId: string) {
@@ -536,28 +544,51 @@ app.post('/groups/:groupId/messages', async (c) => {
       nonce: b64Bytes({ exact: 24 }),
       ciphertext: b64Bytes({ max: MAX_CIPHERTEXT_BYTES }),
       signature: b64Bytes({ exact: 64 }),
+      // Image message: the upload it refers to (the file key is inside the ciphertext).
+      attachmentId: z.uuid().optional(),
     }),
   );
   const me = c.get('userId');
   const { currentKeyVersion, ephemeralSeconds } = await requireMember(groupId, me);
   if (input.keyVersion !== currentKeyVersion) throw new HTTPException(409, { message: 'stale_key_version' });
+  const { attachmentId, ...msg } = input;
 
-  await db
-    .insert(messages)
-    .values({
-      ...input,
-      groupId,
-      senderId: me,
-      expiresAt: ephemeralSeconds ? new Date(Date.now() + ephemeralSeconds * 1000) : null,
-    })
-    .onConflictDoNothing({ target: [messages.senderId, messages.clientId] });
-  // Idempotent: a replayed send returns the row stored the first time.
-  const [row] = await db
-    .select()
-    .from(messages)
-    .where(and(eq(messages.senderId, me), eq(messages.clientId, input.clientId)));
+  const row = await db.transaction(async (tx) => {
+    await tx
+      .insert(messages)
+      .values({
+        ...msg,
+        groupId,
+        senderId: me,
+        expiresAt: ephemeralSeconds ? new Date(Date.now() + ephemeralSeconds * 1000) : null,
+      })
+      .onConflictDoNothing({ target: [messages.senderId, messages.clientId] });
+    // Idempotent: a replayed send returns the row stored the first time.
+    const [stored] = await tx
+      .select()
+      .from(messages)
+      .where(and(eq(messages.senderId, me), eq(messages.clientId, input.clientId)));
+    if (attachmentId) {
+      // Only our own upload, in this group, not used by another message yet (or
+      // by this same message, on a replay). It now lives as long as the message.
+      const linked = await tx
+        .update(attachments)
+        .set({ messageId: stored!.id })
+        .where(
+          and(
+            eq(attachments.id, attachmentId),
+            eq(attachments.groupId, groupId),
+            eq(attachments.uploaderId, me),
+            or(isNull(attachments.messageId), eq(attachments.messageId, stored!.id)),
+          ),
+        )
+        .returning({ id: attachments.id });
+      if (linked.length === 0) throw new HTTPException(400, { message: 'invalid_attachment' });
+    }
+    return stored!;
+  });
   realtime.nudge();
-  return c.json(toWireMessage(row!), 201);
+  return c.json(toWireMessage(row), 201);
 });
 
 /** Resync: everything after a cursor, oldest first. */
@@ -579,6 +610,47 @@ app.get('/groups/:groupId/messages', async (c) => {
     .orderBy(messages.seq)
     .limit(limit);
   return c.json({ messages: rows.map(toWireMessage), hasMore: rows.length === limit });
+});
+
+// ---- Attachments (encrypted on the phone, SPEC §4.3) -------------------------
+
+/** Reserves an attachment id and returns a short-lived URL to PUT exactly `size` encrypted bytes. */
+app.post('/groups/:groupId/attachments', async (c) => {
+  const groupId = groupIdParam(c);
+  const { size } = await body(c, z.object({ size: z.number().int().min(1).max(MAX_ATTACHMENT_BYTES) }));
+  const me = c.get('userId');
+  await requireMember(groupId, me);
+  const [{ count } = { count: 0 }] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(attachments)
+    .where(and(eq(attachments.uploaderId, me), gt(attachments.createdAt, sql`now() - interval '1 hour'`)));
+  if (count >= UPLOADS_PER_HOUR) {
+    c.header('Retry-After', '3600');
+    throw new HTTPException(429, { message: 'too_many_uploads' });
+  }
+  const [row] = await db.insert(attachments).values({ groupId, uploaderId: me, size }).returning({ id: attachments.id });
+  return c.json({ id: row!.id, uploadUrl: await uploadUrl(objectKey(groupId, row!.id), size) }, 201);
+});
+
+/** Short-lived URL to GET the encrypted blob of an image message that is still visible. */
+app.get('/groups/:groupId/attachments/:attachmentId', async (c) => {
+  const groupId = groupIdParam(c);
+  const attachmentId = z.uuid().safeParse(c.req.param('attachmentId'));
+  if (!attachmentId.success) throw new HTTPException(404, { message: 'not_found' });
+  await requireMember(groupId, c.get('userId'));
+  const [row] = await db
+    .select({ id: attachments.id })
+    .from(attachments)
+    .innerJoin(messages, eq(messages.id, attachments.messageId))
+    .where(
+      and(
+        eq(attachments.id, attachmentId.data),
+        eq(attachments.groupId, groupId),
+        or(isNull(messages.expiresAt), gt(messages.expiresAt, sql`now()`)),
+      ),
+    );
+  if (!row) throw new HTTPException(404, { message: 'not_found' });
+  return c.json({ url: await downloadUrl(objectKey(groupId, row.id)) });
 });
 
 // ---- Realtime ----------------------------------------------------------------
@@ -607,9 +679,23 @@ app.get(
 
 app.post('/internal/purge', async (c) => {
   await parseTrigger(c); // 401/400 unless it is a signed Neon trigger delivery
+  // Files of expired messages, and uploads never sent within a day. Storage
+  // first: if it fails, the rows stay and the next run retries.
+  const files = await db
+    .select({ id: attachments.id, groupId: attachments.groupId })
+    .from(attachments)
+    .leftJoin(messages, eq(messages.id, attachments.messageId))
+    .where(
+      or(
+        lt(messages.expiresAt, sql`now()`),
+        and(isNull(attachments.messageId), lt(attachments.createdAt, sql`now() - interval '1 day'`)),
+      ),
+    );
+  await deleteObjects(files.map((f) => objectKey(f.groupId, f.id)));
+  if (files.length) await db.delete(attachments).where(inArray(attachments.id, files.map((f) => f.id)));
   const deleted = await db
     .delete(messages)
     .where(lt(messages.expiresAt, sql`now()`))
     .returning({ id: messages.id });
-  return c.json({ deleted: deleted.length });
+  return c.json({ deleted: deleted.length, files: files.length });
 });

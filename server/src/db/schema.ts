@@ -109,6 +109,33 @@ export const messages = pgTable(
   ],
 );
 
+/**
+ * Encrypted files (images) in object storage, at key `<group_id>/<id>`. The
+ * server never sees the file key: it travels inside the message. A row is
+ * created before the upload and linked to its message when that is sent;
+ * the object is deleted with the message (expiry) or when never linked.
+ */
+export const attachments = pgTable(
+  'attachments',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    groupId: uuid('group_id')
+      .notNull()
+      .references(() => groups.id, { onDelete: 'cascade' }),
+    uploaderId: uuid('uploader_id')
+      .notNull()
+      .references(() => profiles.id, { onDelete: 'cascade' }),
+    size: integer('size').notNull(), // encrypted bytes, signed into the upload URL
+    messageId: uuid('message_id').references(() => messages.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('attachments_group_idx').on(t.groupId),
+    index('attachments_message_idx').on(t.messageId),
+    index('attachments_unlinked_idx').on(t.createdAt).where(sql`${t.messageId} is null`),
+  ],
+);
+
 export const joinAttempts = pgTable(
   'join_attempts',
   {
