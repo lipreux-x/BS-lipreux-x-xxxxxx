@@ -1,4 +1,5 @@
 import * as Clipboard from 'expo-clipboard';
+import type { ReactNode } from 'react';
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, fonts, space } from '../theme';
@@ -20,37 +21,46 @@ export function MessageActions({
   onClose(): void;
 }) {
   return (
-    <Modal visible={target !== null} transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent>
-      <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="Fermer" />
-      <SafeAreaView edges={['bottom']} style={styles.sheet}>
-        <View style={styles.grip} />
-        {target ? <QuoteBlock quote={target.quote} /> : null}
+    <ActionSheet visible={target !== null} onClose={onClose}>
+      {target ? <QuoteBlock quote={target.quote} /> : null}
+      <ActionKey
+        label="Répondre"
+        onPress={() => {
+          onReply();
+          onClose();
+        }}
+      />
+      {target?.text ? (
         <ActionKey
-          label="Répondre"
+          label="Copier le texte"
           onPress={() => {
-            onReply();
+            void Clipboard.setStringAsync(target.text!);
             onClose();
           }}
         />
-        {target?.text ? (
-          <ActionKey
-            label="Copier le texte"
-            onPress={() => {
-              void Clipboard.setStringAsync(target.text!);
-              onClose();
-            }}
-          />
-        ) : null}
-        <ActionKey label="Annuler" dim onPress={onClose} />
+      ) : null}
+      <ActionKey label="Annuler" dim onPress={onClose} />
+    </ActionSheet>
+  );
+}
+
+/** Panel sliding up from the bottom, closed by tapping outside. */
+export function ActionSheet({ visible, onClose, children }: { visible: boolean; onClose(): void; children: ReactNode }) {
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent>
+      <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="Fermer" />
+      <SafeAreaView edges={['bottom']} style={styles.sheet}>
+        <View style={styles.grip} />
+        {children}
       </SafeAreaView>
     </Modal>
   );
 }
 
-function ActionKey({ label, onPress, dim }: { label: string; onPress(): void; dim?: boolean }) {
+export function ActionKey({ label, onPress, dim, danger }: { label: string; onPress(): void; dim?: boolean; danger?: boolean }) {
   return (
     <Pressable accessibilityRole="button" onPress={onPress} style={({ pressed }) => [styles.key, pressed && styles.pressed]}>
-      <Text style={[styles.label, dim && { color: colors.textDim }]}>{label}</Text>
+      <Text style={[styles.label, dim && { color: colors.textDim }, danger && { color: colors.danger }]}>{label}</Text>
     </Pressable>
   );
 }

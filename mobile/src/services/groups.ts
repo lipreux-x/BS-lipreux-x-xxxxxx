@@ -58,10 +58,21 @@ export interface GroupListItem {
   keyVersion: number;
   role: 'admin' | 'member';
   state: GroupLockState;
+  /** Self-destruct date (ISO), null for a permanent group. */
+  expiresAt: string | null;
 }
 
+/**
+ * The groups we belong to. A group this phone kept keys for that the server
+ * no longer lists (self-destructed, or we were removed) is erased from the
+ * phone too: keys, name, counters.
+ */
 export async function listGroups(s: Session): Promise<GroupListItem[]> {
   const groups = await s.api.groups();
+  const alive = new Set(groups.map((g) => g.id));
+  for (const [id, upTo] of Object.entries(await s.vault.knownGroups())) {
+    if (!alive.has(id)) await s.vault.forgetGroup(id, upTo);
+  }
   return Promise.all(
     groups.map(async (g) => ({
       id: g.id,
@@ -69,6 +80,7 @@ export async function listGroups(s: Session): Promise<GroupListItem[]> {
       keyVersion: g.currentKeyVersion,
       role: g.role,
       state: await lockState(s, g),
+      expiresAt: g.expiresAt ?? null,
     })),
   );
 }
@@ -80,7 +92,14 @@ async function lockState(s: Session, g: GroupSummary): Promise<GroupLockState> {
   return { kind: 'waiting-key' };
 }
 
-export async function createGroup(s: Session, name: string, groupCode: string, keywords: string[]): Promise<{ id: string; groupKey: Uint8Array }> {
+/** `expiresAt`: self-destruct date (the group and everything in it is deleted for everyone), or null. */
+export async function createGroup(
+  s: Session,
+  name: string,
+  groupCode: string,
+  keywords: string[],
+  expiresAt: Date | null = null,
+): Promise<{ id: string; groupKey: Uint8Array }> {
   const id = randomUUID();
   const groupKey = generateGroupKey();
   const meta: GroupMeta = { name, keywords };
@@ -90,6 +109,7 @@ export async function createGroup(s: Session, name: string, groupCode: string, k
     groupCode,
     keywords,
     sealedKey: sealGroupKeyFor(groupKey, s.identity.boxPublicKey),
+    ...(expiresAt && { expiresAt: expiresAt.toISOString() }),
   });
   await s.vault.saveGroupKey(id, 1, groupKey, groupCode, s.masterKey);
   await s.vault.saveMeta(id, meta, s.masterKey);
@@ -334,14 +354,17 @@ export async function decryptMessages(s: Session, profiles: ProfileCache, keys: 
   });
 }
 
-/** All messages after `after`, following pagination. */
-export async function fetchSince(s: Session, groupId: string, after: number): Promise<WireMessage[]> {
+/**
+ * All messages after `after`, following pagination, and the group's latest
+ * erase (`purgeSeq`): when it moved, messages already shown may be gone.
+ */
+export async function fetchSince(s: Session, groupId: string, after: number): Promise<{ messages: WireMessage[]; purgeSeq: number }> {
   const out: WireMessage[] = [];
   let cursor = after;
   for (;;) {
     const page = await s.api.messages(groupId, cursor, 200);
     out.push(...page.messages);
-    if (!page.hasMore || page.messages.length === 0) return out;
+    if (!page.hasMore || page.messages.length === 0) return { messages: out, purgeSeq: page.purgeSeq ?? 0 };
     cursor = page.messages[page.messages.length - 1]!.seq;
   }
 }

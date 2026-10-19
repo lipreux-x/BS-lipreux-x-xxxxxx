@@ -40,6 +40,8 @@ export interface GroupSummary {
   rotationPending: boolean;
   /** Bumped when the admin changes the code. */
   codeVersion: number;
+  /** Self-destruct date (ISO): the group and everything in it is then deleted. */
+  expiresAt: string | null;
   role: 'admin' | 'member';
   sealedKeys: { keyVersion: number; sealedKey: string }[];
 }
@@ -200,7 +202,15 @@ export class Api {
     return this.request<GroupSummary[]>('/groups');
   }
 
-  createGroup(input: { id: string; encryptedMeta: string; groupCode: string; keywords: string[]; sealedKey: string; ephemeralSeconds?: number | null }) {
+  createGroup(input: {
+    id: string;
+    encryptedMeta: string;
+    groupCode: string;
+    keywords: string[];
+    sealedKey: string;
+    ephemeralSeconds?: number | null;
+    expiresAt?: string | null;
+  }) {
     return this.request<{ id: string; currentKeyVersion: number }>('/groups', { method: 'POST', json: input });
   }
 
@@ -248,10 +258,19 @@ export class Api {
     return this.request<WireMessage>(`/groups/${groupId}/messages`, { method: 'POST', json: msg });
   }
 
+  /** `purgeSeq`: latest erase of the group's history (bumped by eraseMessages). */
   messages(groupId: string, after: number, limit = 100) {
-    return this.request<{ messages: WireMessage[]; hasMore: boolean }>(
+    return this.request<{ messages: WireMessage[]; hasMore: boolean; purgeSeq: number }>(
       `/groups/${groupId}/messages?after=${after}&limit=${limit}`,
     );
+  }
+
+  /** Admin: erases every message sent in [from, to) for everyone, images included. */
+  eraseMessages(groupId: string, from: Date, to: Date) {
+    return this.request<{ deleted: number }>(`/groups/${groupId}/messages/erase`, {
+      method: 'POST',
+      json: { from: from.toISOString(), to: to.toISOString() },
+    });
   }
 
   // ---- attachments (already-encrypted blobs) ---------------------------------------

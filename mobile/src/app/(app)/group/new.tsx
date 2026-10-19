@@ -7,15 +7,22 @@ import { createGroup } from '@/services/groups';
 import { Button } from '@/ui/Button';
 import { CodeEntry } from '@/ui/CodeEntry';
 import { KeywordsForm } from '@/ui/KeywordsForm';
+import { LifetimePicker } from '@/ui/LifetimePicker';
 import { colors, space, type } from '@/ui/theme';
 
 /*
  * Key flow: the group key is drawn on this phone. Name and keywords are
  * encrypted with it; the server receives them encrypted, plus the code and
  * the keywords (to check future joins) and the key sealed for us. Locally
- * the key is locked by code + master key.
+ * the key is locked by code + master key. An ephemeral group also gets its
+ * self-destruct date, which the server enforces.
  */
-type Step = { kind: 'name' } | { kind: 'keywords' } | { kind: 'code'; notice?: string } | { kind: 'confirm'; code: string };
+type Step =
+  | { kind: 'name' }
+  | { kind: 'keywords' }
+  | { kind: 'lifetime' }
+  | { kind: 'code'; notice?: string }
+  | { kind: 'confirm'; code: string };
 
 export default function NewGroup() {
   const { session, openGroups } = useUnlocked();
@@ -23,6 +30,8 @@ export default function NewGroup() {
   const [step, setStep] = useState<Step>({ kind: 'name' });
   const [name, setName] = useState('');
   const [keywords, setKeywords] = useState<string[] | undefined>();
+  // Days before self-destruction, null for a permanent group.
+  const [lifetime, setLifetime] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   if (step.kind === 'keywords') {
@@ -33,8 +42,20 @@ export default function NewGroup() {
         initial={keywords}
         onSubmit={async (words) => {
           setKeywords(words);
-          setStep({ kind: 'code' });
+          setStep({ kind: 'lifetime' });
           return null;
+        }}
+      />
+    );
+  }
+
+  if (step.kind === 'lifetime') {
+    return (
+      <LifetimePicker
+        initial={lifetime}
+        onSubmit={(days) => {
+          setLifetime(days);
+          setStep({ kind: 'code' });
         }}
       />
     );
@@ -69,7 +90,9 @@ export default function NewGroup() {
               return null;
             }
             try {
-              const { id, groupKey } = await createGroup(session, name.trim(), code, keywords!);
+              // Counted from now, so the time spent typing the code does not shorten it.
+              const expiresAt = lifetime === null ? null : new Date(Date.now() + lifetime * 86_400_000);
+              const { id, groupKey } = await createGroup(session, name.trim(), code, keywords!, expiresAt);
               openGroups.set(id, { keys: new Map([[1, groupKey]]), keyVersion: 1, name: name.trim() });
               return () => router.replace({ pathname: '/group/[id]', params: { id } });
             } catch (e) {

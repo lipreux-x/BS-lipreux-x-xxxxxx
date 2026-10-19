@@ -30,6 +30,9 @@ import { FREE_ATTEMPTS, parseLockout, registerFailure, remainingMs, type Lockout
  *   meta_<id>            decrypted group name, sealed with the master key
  *   lockout_g_<id>       failed-attempt counter for that group's code
  *   codever_<id>         version of the group code the local lock uses
+ *   groups               { <id>: highest key version } of every group this
+ *                        phone keeps something for, to forget the ones that
+ *                        are gone from the server (self-destructed, removed)
  */
 
 /** Minimal key/value interface, so the vault can be tested without a device. */
@@ -92,6 +95,7 @@ const K = {
   meta: (id: string) => `bs.meta_${id}`,
   lockoutGroup: (id: string) => `bs.lockout_g_${id}`,
   codeVersion: (id: string) => `bs.codever_${id}`,
+  groups: 'bs.groups',
 };
 
 export class Vault {
@@ -170,6 +174,17 @@ export class Vault {
     await this.store.delete(K.meta(groupId));
     await this.store.delete(K.lockoutGroup(groupId));
     await this.store.delete(K.codeVersion(groupId));
+    const known = await this.knownGroups();
+    if (groupId in known) {
+      delete known[groupId];
+      await this.store.set(K.groups, JSON.stringify(known));
+    }
+  }
+
+  /** Groups this phone keeps a key for, with the highest version saved (groups saved before this index are missing). */
+  async knownGroups(): Promise<Record<string, number>> {
+    const raw = await this.store.get(K.groups);
+    return raw ? (JSON.parse(raw) as Record<string, number>) : {};
   }
 
   /** Version of the group code the local lock uses (1 until the admin first changes it). */
@@ -184,6 +199,11 @@ export class Vault {
   async saveGroupKey(groupId: string, keyVersion: number, groupKey: Uint8Array, groupCode: string, masterKey: Uint8Array) {
     const locked = lockGroupKey(groupKey, groupCode, masterKey, groupId, keyVersion);
     await this.store.set(K.group(groupId, keyVersion), JSON.stringify(locked));
+    const known = await this.knownGroups();
+    if ((known[groupId] ?? 0) < keyVersion) {
+      known[groupId] = keyVersion;
+      await this.store.set(K.groups, JSON.stringify(known));
+    }
   }
 
   /** Throws LockedOutError / WrongCodeError like the app code. */

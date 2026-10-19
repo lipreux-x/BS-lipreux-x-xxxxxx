@@ -11,6 +11,8 @@ const MAX_BACKOFF_MS = 30_000;
 
 export interface RealtimeHandlers {
   onMessage(message: WireMessage): void;
+  /** An admin erased part of this group's history: reload it. */
+  onPurge?(groupId: string): void;
   /** Socket (re)opened: resync anything missed while disconnected. */
   onConnected(): void;
   onStatus?(online: boolean): void;
@@ -68,7 +70,7 @@ export class RealtimeClient {
     const ws = new WebSocket(`${this.baseUrl.replace(/^http/, 'ws')}/ws?token=${encodeURIComponent(token)}`);
     this.ws = ws;
     ws.onmessage = (event) => {
-      let data: { type?: string; message?: WireMessage };
+      let data: { type?: string; message?: WireMessage; groupId?: string };
       try {
         data = JSON.parse(String(event.data));
       } catch {
@@ -80,6 +82,8 @@ export class RealtimeClient {
         this.handlers.onConnected();
       } else if (data.type === 'message' && data.message) {
         this.handlers.onMessage(data.message);
+      } else if (data.type === 'purge' && data.groupId) {
+        this.handlers.onPurge?.(data.groupId);
       }
     };
     ws.onclose = () => {

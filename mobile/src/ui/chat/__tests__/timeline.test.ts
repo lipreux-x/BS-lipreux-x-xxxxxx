@@ -1,4 +1,4 @@
-import { buildTimeline, dayLabel, timeLabel } from '../timeline';
+import { buildTimeline, countdownLabel, dateTimeLabel, dayLabel, dayRange, timeLabel } from '../timeline';
 
 const now = new Date(2026, 9, 19, 15, 0); // Mon 19 Oct 2026, 15:00 local
 const at = (d: number, h: number, m: number) => new Date(2026, 9, d, h, m);
@@ -10,6 +10,27 @@ describe('labels', () => {
     expect(dayLabel(at(18, 23, 59), now)).toBe('HIER');
     expect(dayLabel(at(14, 12, 0), now)).toBe('MER. 14 OCT.');
     expect(dayLabel(new Date(2025, 11, 31), now)).toBe('MER. 31 DÉC. 2025');
+  });
+});
+
+describe('self-destruct dates', () => {
+  it('formats the date and the time left', () => {
+    expect(dateTimeLabel(at(22, 14, 5), now)).toBe('jeu. 22 oct. à 14:05');
+    expect(dateTimeLabel(new Date(2027, 0, 2, 9, 0), now)).toBe('sam. 2 janv. 2027 à 09:00');
+    expect(countdownLabel(new Date(now.getTime() + 30_000), now)).toBe('dans 1 min');
+    expect(countdownLabel(at(19, 15, 12), now)).toBe('dans 12 min');
+    expect(countdownLabel(at(20, 20, 0), now)).toBe('dans 29 h');
+    expect(countdownLabel(at(26, 15, 0), now)).toBe('dans 7 j');
+  });
+});
+
+describe('dayRange', () => {
+  it('spans whole local days ending with the chosen one', () => {
+    expect(dayRange(at(14, 12, 30), 1)).toEqual({ from: at(14, 0, 0), to: at(15, 0, 0) });
+    expect(dayRange(at(14, 12, 30), 2)).toEqual({ from: at(13, 0, 0), to: at(15, 0, 0) });
+    expect(dayRange(at(14, 12, 30), 7)).toEqual({ from: at(8, 0, 0), to: at(15, 0, 0) });
+    // Across a month boundary.
+    expect(dayRange(new Date(2026, 10, 2, 8), 7)).toEqual({ from: at(27, 0, 0), to: new Date(2026, 10, 3) });
   });
 });
 

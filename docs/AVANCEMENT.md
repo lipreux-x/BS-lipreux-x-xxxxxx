@@ -1,8 +1,24 @@
 # BaseSecrète — Avancement
 
-État du projet au 19/10/2026 (mis à jour après les réglages du groupe) : les derniers ajouts et changements, puis le plan du projet avec ce qui est fait et ce qui reste. La spec de référence est [SPEC.md](SPEC.md).
+État du projet au 19/10/2026 (mis à jour après l'effacement de l'historique et les groupes éphémères) : les derniers ajouts et changements, puis le plan du projet avec ce qui est fait et ce qui reste. La spec de référence est [SPEC.md](SPEC.md).
 
 ## Derniers ajouts et changements
+
+### Effacer des jours de conversation
+
+- Dans la conversation, l'**admin** fait un **appui long sur une date** (« LUN. 19 OCT. ») et choisit : **ce jour**, **ce jour et la veille**, ou **les 7 jours jusqu'à ce jour**. Une confirmation suit.
+- Les messages **et les photos** de la période sont effacés **pour tous les membres**, sur le serveur comme dans le stockage des images.
+- Les téléphones qui ont la conversation ouverte la rechargent tout de suite. Ceux qui étaient hors ligne la rechargent à leur retour.
+- Le serveur ne garde aucune trace de la période effacée, seulement le fait que l'historique a changé (table `group_purges`).
+- Un membre qui n'est pas admin ne peut rien effacer.
+
+### Groupes éphémères (autodestruction)
+
+- **À la création**, une étape « Durée de vie » arrive entre les mots-clés et le code. Choix : permanent, 24 h, 3 jours, 1 semaine, 1 mois, puis réglage au jour près avec − / + (365 jours au maximum).
+- Un bandeau « AUTODESTRUCTION DANS 3 J » s'affiche dans la conversation. La liste des groupes montre « 💣 dans 3 j » et les réglages affichent la date.
+- **À la date prévue**, le serveur cache le groupe à tout le monde : plus de messages, et il ne peut plus être rejoint. La purge horaire supprime ensuite définitivement le groupe, ses membres, ses clés, ses messages, ses photos et ses tentatives d'adhésion.
+- Sur les téléphones, les clés, le nom et les compteurs du groupe sont effacés. Une conversation ouverte affiche « Ce groupe n'existe plus ». C'est aussi le cas pour un groupe dont on a été retiré.
+- La date ne peut pas être changée après la création.
 
 ### Réglages du groupe
 
@@ -50,6 +66,7 @@ Le changement s'applique à tous les écrans de code : verrouillage, inscription
 
 ### Mise en production (branche Neon `dev`)
 
+- Effacement + groupes éphémères (19/10) : migration `0007_group_expiry_purges` appliquée, API redéployée, smoke test passé contre l'API déployée (effacement réservé à l'admin, rechargement signalé, date d'autodestruction vérifiée, groupe expiré caché et impossible à rejoindre).
 - Migration `0002_group_keywords` appliquée.
 - Avatars (19/10) : migrations `0005_profile_avatar` et `0006_avatar_icons` (passage aux icônes Lucide, anciens choix convertis) appliquées, API redéployée, test e2e passé (choix visible par un membre du groupe, valeur hors liste refusée).
 - Images (19/10) : migration `0004_attachments` appliquée, bucket privé `attachments` créé, API redéployée. Test e2e passé contre l'API déployée (envoi, réception et déchiffrement d'une image, réutilisation refusée). Un upload d'une taille différente de celle annoncée est bien refusé (403).

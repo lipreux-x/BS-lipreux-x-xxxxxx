@@ -128,14 +128,19 @@ export function QuoteBlock({ quote, media, onPress }: { quote: Quote; media?: bo
   );
 }
 
-/** Engraved day label between runs of messages: "— AUJOURD'HUI —". */
-export function DaySeparator({ label }: { label: string }) {
+/** Engraved day label between runs of messages: "— AUJOURD'HUI —". Long press: the admin's erase menu. */
+export function DaySeparator({ label, onLongPress }: { label: string; onLongPress?(): void }) {
   return (
-    <View style={styles.day}>
+    <Pressable
+      style={styles.day}
+      disabled={!onLongPress}
+      onLongPress={onLongPress}
+      accessibilityHint={onLongPress ? 'Appui long pour effacer les messages de ce jour' : undefined}
+    >
       <View style={styles.rule} />
       <Text style={styles.dayLabel}>{label}</Text>
       <View style={styles.rule} />
-    </View>
+    </Pressable>
   );
 }
 

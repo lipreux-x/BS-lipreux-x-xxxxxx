@@ -2,10 +2,11 @@ import * as Haptics from 'expo-haptics';
 import { router, Stack, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useHeaderHeight } from 'expo-router/react-navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { FlatList, KeyboardAvoidingView, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, FlatList, KeyboardAvoidingView, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { API_URL } from '@/config';
 import type { ImageBody, ReplyRef } from '@/crypto';
+import { wipe } from '@/crypto/encoding';
 import { useUnlocked, type OpenGroup } from '@/session/SessionProvider';
 import { ApiError, NetworkError, type WireMessage } from '@/services/api';
 import {
@@ -29,11 +30,11 @@ import { imageCache, pickImage } from '@/services/images';
 import { RealtimeClient } from '@/services/realtime';
 import { LockedOutError, WrongCodeError } from '@/services/vault';
 import { Composer } from '@/ui/chat/Composer';
-import { MessageActions } from '@/ui/chat/MessageActions';
+import { ActionKey, ActionSheet, MessageActions } from '@/ui/chat/MessageActions';
 import { DaySeparator, MessageBubble, type DeliveryStatus } from '@/ui/chat/MessageBubble';
 import { replyRefFor, resolveQuote } from '@/ui/chat/replies';
 import { SwipeToReply } from '@/ui/chat/SwipeToReply';
-import { buildTimeline, timeLabel } from '@/ui/chat/timeline';
+import { buildTimeline, countdownLabel, dateTimeLabel, dayLabel, dayRange, timeLabel } from '@/ui/chat/timeline';
 import { CodeEntry, type CodeResult } from '@/ui/CodeEntry';
 import { ImageBubble, LocalImage } from '@/ui/ImageBubble';
 import { ImageViewer } from '@/ui/ImageViewer';
@@ -65,10 +66,16 @@ function GroupUnlock({ groupId, onOpen }: { groupId: string; onOpen(g: OpenGroup
   const [lockedFor, setLockedFor] = useState(0);
   // Unlocked with the old code, but the admin changed it: ask for the new one.
   const [relock, setRelock] = useState<{ group: OpenGroup; first: string | null; mismatch: boolean } | null>(null);
+  // No longer listed: self-destructed, or we were removed (listGroups erased what the phone kept).
+  const [gone, setGone] = useState(false);
 
   useEffect(() => {
     listGroups(session)
-      .then((gs) => setState(gs.find((g) => g.id === groupId)?.state ?? { kind: 'waiting-key' }))
+      .then((gs) => {
+        const g = gs.find((x) => x.id === groupId);
+        if (!g) setGone(true);
+        setState(g?.state ?? { kind: 'locked' });
+      })
       .catch(() => setState({ kind: 'locked' }));
   }, [session, groupId]);
 
@@ -134,6 +141,8 @@ function GroupUnlock({ groupId, onOpen }: { groupId: string; onOpen(g: OpenGroup
     );
   }
 
+  if (gone) return <GroupGone />;
+
   if (!state) return <SafeAreaView style={styles.center} />;
 
   if (state.kind === 'waiting-key') {
@@ -198,8 +207,28 @@ type Pending = { clientId: string; at: string; failed: boolean; error?: string; 
   | { kind: 'image'; image: PreparedImage; body?: ImageBody }
 );
 
+/** The group no longer exists for us: self-destructed (or we were removed). */
+function GroupGone() {
+  return (
+    <View style={[styles.center, { padding: space.lg, gap: space.md }]}>
+      <Stack.Screen options={{ title: 'Groupe effacé' }} />
+      <Text style={styles.emptyIcon}>💥</Text>
+      <Text style={type.heading}>Ce groupe n’existe plus</Text>
+      <Text style={[type.dim, { textAlign: 'center' }]}>
+        Il s’est autodétruit ou tu n’en fais plus partie. Ses messages, ses photos et ses clés ont été effacés de ce téléphone.
+      </Text>
+    </View>
+  );
+}
+
+const ERASE_SPANS: { days: number; label: string }[] = [
+  { days: 1, label: 'Ce jour' },
+  { days: 2, label: 'Ce jour et la veille' },
+  { days: 7, label: 'Les 7 jours jusqu’à ce jour' },
+];
+
 function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup; onUpdate(g: OpenGroup): void }) {
-  const { session, profiles } = useUnlocked();
+  const { session, profiles, openGroups } = useUnlocked();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [pending, setPending] = useState<Pending[]>([]);
   const [draft, setDraft] = useState('');
@@ -220,6 +249,15 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
   }
   const [online, setOnline] = useState(true);
   const [removed, setRemoved] = useState(false);
+  // From the server at each sync: only admins erase days; self-destruct date if any.
+  const [role, setRole] = useState<'admin' | 'member'>('member');
+  const [expiresAt, setExpiresAt] = useState<Date | null>(null);
+  const [destroyed, setDestroyed] = useState(false);
+  const [now, setNow] = useState(() => new Date());
+  // Day long-pressed by an admin: the erase menu is open for it.
+  const [eraseDay, setEraseDay] = useState<Date | null>(null);
+  // Latest erase of the history we have seen; null until the first fetch.
+  const purgeSeq = useRef<number | null>(null);
   // History fetched once: until then an empty list means "loading", not "no messages".
   const [loaded, setLoaded] = useState(false);
   const lastSeq = useRef(0);
@@ -234,6 +272,8 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
   const sync = useCallback(async (): Promise<OpenGroup> => {
     try {
       const r = await syncGroup(session, profiles, groupId, current.current.keys);
+      setRole(r.summary.role);
+      setExpiresAt(r.summary.expiresAt ? new Date(r.summary.expiresAt) : null);
       const g = { keys: r.keys, keyVersion: r.keyVersion, name: r.meta.name };
       current.current = g;
       onUpdate(g);
@@ -262,11 +302,12 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
     }, [sync]),
   );
 
-  const merge = useCallback((incoming: ChatMessage[]) => {
-    if (!incoming.length) return;
+  /** `replace`: the whole history was fetched again (after an erase), drop what is no longer in it. */
+  const merge = useCallback((incoming: ChatMessage[], replace = false) => {
+    if (!incoming.length && !replace) return;
     lastSeq.current = Math.max(lastSeq.current, ...incoming.map((m) => m.seq));
     setMessages((prev) => {
-      const byId = new Map(prev.map((m) => [m.id, m]));
+      const byId = new Map((replace ? [] : prev).map((m) => [m.id, m]));
       for (const m of incoming) byId.set(m.id, m);
       return [...byId.values()].sort((a, b) => a.seq - b.seq);
     });
@@ -274,22 +315,35 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
     setPending((p) => p.filter((x) => !done.has(x.clientId)));
   }, []);
 
-  const resync = useCallback(async () => {
-    try {
-      const wire = await fetchSince(session, groupId, lastSeq.current);
-      merge(await decrypt(wire));
-      setLoaded(true);
-      setOnline(true);
-    } catch (e) {
-      if (e instanceof NetworkError) setOnline(false);
-    }
-  }, [session, groupId, decrypt, merge]);
+  /** New messages since the last fetch; the whole history again if part of it was erased meanwhile. */
+  const resync = useCallback(
+    async (opts: { full?: boolean } = {}) => {
+      try {
+        let full = !!opts.full;
+        let res = await fetchSince(session, groupId, full ? 0 : lastSeq.current);
+        if (!full && purgeSeq.current !== null && res.purgeSeq > purgeSeq.current) {
+          full = true;
+          res = await fetchSince(session, groupId, 0);
+        }
+        purgeSeq.current = res.purgeSeq;
+        merge(await decrypt(res.messages), full);
+        setLoaded(true);
+        setOnline(true);
+      } catch (e) {
+        if (e instanceof NetworkError) setOnline(false);
+      }
+    },
+    [session, groupId, decrypt, merge],
+  );
 
   useEffect(() => {
     void resync();
     const rt = new RealtimeClient(API_URL, () => session.api.accessToken(), {
       onConnected: () => void resync(),
       onStatus: setOnline,
+      onPurge: (id) => {
+        if (id === groupId) void resync({ full: true });
+      },
       onMessage: (m) => {
         if (m.groupId !== groupId) return;
         decrypt([m])
@@ -300,6 +354,64 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
     rt.start();
     return () => rt.stop();
   }, [session, groupId, resync, decrypt, merge]);
+
+  /** Self-destructed: keys out of memory and off the phone, nothing left to show. */
+  const destroy = useCallback(() => {
+    const open = openGroups.get(groupId);
+    if (open) for (const k of open.keys.values()) wipe(k);
+    openGroups.delete(groupId);
+    void session.vault.forgetGroup(groupId, current.current.keyVersion);
+    setMessages([]);
+    setPending([]);
+    setDestroyed(true);
+  }, [openGroups, groupId, session]);
+
+  // Countdown refresh, and the end of the group when its date comes.
+  useEffect(() => {
+    if (!expiresAt) return;
+    const tick = () => {
+      const t = new Date();
+      setNow(t);
+      if (t >= expiresAt) destroy();
+    };
+    tick();
+    const timer = setInterval(tick, 15_000);
+    return () => clearInterval(timer);
+  }, [expiresAt, destroy]);
+
+  function confirmErase(day: Date, days: number) {
+    const { from } = dayRange(day, days);
+    const today = new Date();
+    const span =
+      days === 1
+        ? `du ${dayLabel(day, today).toLowerCase()}`
+        : `du ${dayLabel(from, today).toLowerCase()} au ${dayLabel(day, today).toLowerCase()}`;
+    Alert.alert(`Effacer les messages ${span} ?`, 'Les messages et les photos de cette période seront effacés pour tous les membres. C’est définitif.', [
+      { text: 'Annuler', style: 'cancel' },
+      {
+        text: 'Effacer',
+        style: 'destructive',
+        onPress: () => void erase(day, days),
+      },
+    ]);
+  }
+
+  async function erase(day: Date, days: number) {
+    const { from, to } = dayRange(day, days);
+    try {
+      await session.api.eraseMessages(groupId, from, to);
+      await resync({ full: true });
+    } catch (e) {
+      Alert.alert(
+        'Impossible d’effacer',
+        e instanceof NetworkError
+          ? 'Pas de réseau.'
+          : e instanceof ApiError && e.code === 'admin_only'
+            ? 'Seul un admin peut effacer des messages.'
+            : 'Réessaie plus tard.',
+      );
+    }
+  }
 
   async function send(item: Pending) {
     const { clientId } = item;
@@ -354,6 +466,8 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
     }
   }
 
+  if (destroyed) return <GroupGone />;
+
   if (removed) {
     return (
       <View style={[styles.center, { padding: space.lg, gap: space.md }]}>
@@ -394,6 +508,14 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
           <Text style={styles.bannerText}>HORS LIGNE — ENVOI AU RETOUR DU RÉSEAU</Text>
         </View>
       ) : null}
+      {expiresAt ? (
+        <View style={styles.banner}>
+          <Led state="red" size={7} />
+          <Text style={styles.bannerText} numberOfLines={1}>
+            AUTODESTRUCTION {countdownLabel(expiresAt, now).toUpperCase()} — {dateTimeLabel(expiresAt, now).toUpperCase()}
+          </Text>
+        </View>
+      ) : null}
       {/* 'padding' on both platforms: with edge-to-edge (always on since SDK 54),
           Android no longer shrinks the window for the keyboard by itself. */}
       <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding" keyboardVerticalOffset={headerHeight}>
@@ -419,6 +541,14 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
             setPressed(m);
           }}
           onReply={startReply}
+          onDayLongPress={
+            role === 'admin'
+              ? (day) => {
+                  void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                  setEraseDay(day);
+                }
+              : undefined
+          }
         />
         <Composer
           value={draft}
@@ -441,6 +571,22 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
         onReply={() => pressed && startReply(pressed)}
         onClose={() => setPressed(null)}
       />
+      <ActionSheet visible={eraseDay !== null} onClose={() => setEraseDay(null)}>
+        <Text style={styles.sheetTitle}>EFFACER POUR TOUS · {eraseDay ? dayLabel(eraseDay, now) : ''}</Text>
+        {ERASE_SPANS.map((span) => (
+          <ActionKey
+            key={span.days}
+            label={span.label}
+            danger
+            onPress={() => {
+              const day = eraseDay!;
+              setEraseDay(null);
+              confirmErase(day, span.days);
+            }}
+          />
+        ))}
+        <ActionKey label="Annuler" dim onPress={() => setEraseDay(null)} />
+      </ActionSheet>
     </SafeAreaView>
   );
 }
@@ -476,6 +622,7 @@ function Timeline({
   onRetry,
   onLongPress,
   onReply,
+  onDayLongPress,
 }: {
   listRef: React.RefObject<FlatList<Item> | null>;
   loaded: boolean;
@@ -486,6 +633,8 @@ function Timeline({
   onLongPress(m: ChatMessage): void;
   /** Swipe right on a delivered message. */
   onReply(m: ChatMessage): void;
+  /** Long press on a day separator (admins: erase menu). */
+  onDayLongPress?(day: Date): void;
 }) {
   const { session } = useUnlocked();
   const me = session.account.userId;
@@ -559,7 +708,9 @@ function Timeline({
         </View>
       }
       renderItem={({ item }) => {
-        if (item.kind === 'day') return <DaySeparator label={item.label} />;
+        if (item.kind === 'day') {
+          return <DaySeparator label={item.label} onLongPress={onDayLongPress ? () => onDayLongPress(item.at) : undefined} />;
+        }
         const { message: line } = item;
         // Others' messages each carry the sender's avatar and name, so who wrote
         // what is never in doubt; only mine are grouped in runs.
@@ -616,4 +767,5 @@ const styles = StyleSheet.create({
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: space.sm, padding: space.xl },
   emptyIcon: { fontSize: 32 },
   emptyTitle: { color: colors.text, fontSize: 18, fontFamily: fonts.semibold },
+  sheetTitle: { fontFamily: mono, fontSize: 11, letterSpacing: 1.5, color: colors.textDim, textAlign: 'center', marginBottom: space.xs },
 });

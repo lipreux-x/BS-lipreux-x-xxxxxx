@@ -117,7 +117,7 @@ run('app services against the deployed API', () => {
     expect(chat).toMatchObject({ text: 'rdv à la base 🔒', senderName: bob.account.username, mine: false });
 
     // Resync over HTTP gives the same message.
-    const history = await decryptMessages(alice, aliceProfiles, aliceUnlock!.keys, await fetchSince(alice, groupId, 0));
+    const history = await decryptMessages(alice, aliceProfiles, aliceUnlock!.keys, (await fetchSince(alice, groupId, 0)).messages);
     expect(history.map((m) => m.text)).toEqual(['rdv à la base 🔒']);
 
     // Alice answers Bob's message: the quote travels inside the encrypted, signed body.
@@ -148,7 +148,7 @@ run('app services against the deployed API', () => {
     expect(synced.keyVersion).toBe(2);
     expect(synced.summary.rotationPending).toBe(false);
     await sendText(alice, groupId, synced.keys.get(2)!, 2, 'sans Bob', newClientId());
-    const both = await decryptMessages(alice, aliceProfiles, synced.keys, await fetchSince(alice, groupId, 0));
+    const both = await decryptMessages(alice, aliceProfiles, synced.keys, (await fetchSince(alice, groupId, 0)).messages);
     expect(both.map((m) => m.text ?? m.image?.attachmentId)).toEqual(['rdv à la base 🔒', 'J’y serai', imageBody.attachmentId, 'sans Bob']);
     await expect(fetchSince(bob, groupId, 0)).rejects.toMatchObject({ status: 404 });
 

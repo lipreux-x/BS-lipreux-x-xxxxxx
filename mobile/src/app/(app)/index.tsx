@@ -1,9 +1,11 @@
 import { Stack, useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { FlatList, Platform, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { wipe } from '@/crypto/encoding';
 import { useUnlocked } from '@/session/SessionProvider';
 import { NetworkError } from '@/services/api';
 import { listGroups, type GroupListItem } from '@/services/groups';
+import { countdownLabel } from '@/ui/chat/timeline';
 import { colors, space, type } from '@/ui/theme';
 import { Wordmark } from '@/ui/Wordmark';
 
@@ -20,12 +22,20 @@ export default function GroupsList() {
 
   const load = useCallback(async () => {
     try {
-      setGroups(await listGroups(session));
+      const list = await listGroups(session);
+      // Groups gone from the server (self-destructed, removed): their keys leave memory too.
+      const alive = new Set(list.map((g) => g.id));
+      for (const [id, g] of openGroups) {
+        if (alive.has(id)) continue;
+        for (const k of g.keys.values()) wipe(k);
+        openGroups.delete(id);
+      }
+      setGroups(list);
       setProblem(null);
     } catch (e) {
       setProblem(e instanceof NetworkError ? 'offline' : 'error');
     }
-  }, [session]);
+  }, [session, openGroups]);
 
   useFocusEffect(
     useCallback(() => {
@@ -118,6 +128,7 @@ export default function GroupsList() {
                       : item.state.kind === 'first-unlock'
                         ? 'Clé reçue — entre le code du groupe'
                         : 'Fermé'}
+                  {item.expiresAt ? <Text style={styles.expiry}>{`  ·  💣 ${countdownLabel(new Date(item.expiresAt), new Date())}`}</Text> : null}
                 </Text>
               </View>
               <Text style={styles.chevron}>›</Text>
@@ -168,6 +179,7 @@ const styles = StyleSheet.create({
   closedText: { color: colors.danger },
   ledClosed: { backgroundColor: colors.danger, shadowColor: colors.danger, shadowOpacity: 0.9, shadowRadius: 4, shadowOffset: { width: 0, height: 0 } },
   chevron: { color: colors.textDim, fontSize: 24 },
+  expiry: { color: colors.textDim },
   section: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: space.md, paddingTop: space.md, paddingBottom: space.sm },
   sectionLabel: { color: colors.textDim, fontFamily: MONO, fontSize: 12, letterSpacing: 2, textTransform: 'uppercase' },
   empty: { alignItems: 'center', gap: space.md, padding: space.xl, marginTop: space.xl },

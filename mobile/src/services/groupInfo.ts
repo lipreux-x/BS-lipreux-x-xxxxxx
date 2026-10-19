@@ -17,6 +17,8 @@ export interface GroupInfo {
   myRole: 'admin' | 'member';
   ephemeralSeconds: number | null;
   keyVersion: number;
+  /** Self-destruct date (ISO), null for a permanent group. */
+  expiresAt: string | null;
 }
 
 /**
@@ -45,6 +47,7 @@ export async function groupInfo(s: Session, profiles: ProfileCache, groupId: str
     myRole: g.role,
     ephemeralSeconds: g.ephemeralSeconds,
     keyVersion: g.currentKeyVersion,
+    expiresAt: g.expiresAt ?? null,
   };
 }
 

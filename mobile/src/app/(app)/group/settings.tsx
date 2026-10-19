@@ -7,6 +7,7 @@ import { NetworkError } from '@/services/api';
 import { groupInfo, leaveGroup, type GroupInfo, type GroupInfoMember } from '@/services/groupInfo';
 import { syncGroup } from '@/services/groups';
 import { Avatar, isAvatarId } from '@/ui/avatars';
+import { countdownLabel, dateTimeLabel } from '@/ui/chat/timeline';
 import { colors, space, type } from '@/ui/theme';
 
 const EPHEMERAL: { label: string; seconds: number | null }[] = [
@@ -186,6 +187,31 @@ export default function GroupSettings() {
           {admin ? 'Les nouveaux messages s’effaceront après ce délai.' : 'Seul un admin peut changer ce réglage.'}
         </Text>
       </View>
+
+      {info.expiresAt ? (
+        <>
+          <Text style={styles.section}>Autodestruction</Text>
+          <View style={styles.card}>
+            <Text style={type.body}>
+              {dateTimeLabel(new Date(info.expiresAt), new Date())} ({countdownLabel(new Date(info.expiresAt), new Date())})
+            </Text>
+            <Text style={[type.dim, styles.note]}>
+              À cette date, le groupe, ses messages et ses photos sont effacés de partout, pour tous les membres.
+            </Text>
+          </View>
+        </>
+      ) : null}
+
+      {admin ? (
+        <>
+          <Text style={styles.section}>Effacer des messages</Text>
+          <View style={styles.card}>
+            <Text style={type.dim}>
+              Dans la conversation, appuie longuement sur une date pour effacer ce jour, ce jour et la veille, ou la semaine jusqu’à ce jour. Effacé pour tous les membres, photos comprises.
+            </Text>
+          </View>
+        </>
+      ) : null}
 
       <View style={[styles.card, styles.actions]}>
         <Pressable disabled={busy} onPress={close} style={[styles.action, styles.separator]}>
