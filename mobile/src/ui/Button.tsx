@@ -1,5 +1,5 @@
 import { ActivityIndicator, Pressable, StyleSheet, Text } from 'react-native';
-import { colors } from './theme';
+import { colors, fonts } from './theme';
 
 export function Button({
   title,
@@ -40,5 +40,5 @@ const styles = StyleSheet.create({
   base: { height: 52, borderRadius: 14, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 20 },
   primary: { backgroundColor: colors.accent, borderWidth: 1, borderColor: colors.accentFg },
   ghost: { borderWidth: 1, borderColor: colors.accentFg },
-  label: { fontSize: 16, fontWeight: '600' },
+  label: { fontSize: 16, fontFamily: fonts.semibold, letterSpacing: 0.3 },
 });

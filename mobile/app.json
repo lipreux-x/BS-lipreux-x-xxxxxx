@@ -25,7 +25,8 @@
       "react-native-libsodium",
       "expo-router",
       "expo-status-bar",
-      "expo-secure-store"
+      "expo-secure-store",
+      "expo-font"
     ],
     "backgroundColor": "#000000",
     "scheme": "basesecrete"

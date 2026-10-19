@@ -71,8 +71,7 @@ export default function NewGroup() {
             try {
               const { id, groupKey } = await createGroup(session, name.trim(), code, keywords!);
               openGroups.set(id, { keys: new Map([[1, groupKey]]), keyVersion: 1, name: name.trim() });
-              router.replace({ pathname: '/group/[id]', params: { id } });
-              return null;
+              return () => router.replace({ pathname: '/group/[id]', params: { id } });
             } catch (e) {
               if (e instanceof ApiError && e.code === 'code_taken') {
                 setStep({ kind: 'code', notice: 'Ce code est déjà pris par un autre groupe, choisis-en un autre' });

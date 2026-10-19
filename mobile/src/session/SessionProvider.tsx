@@ -34,7 +34,8 @@ interface SessionContextValue {
   profiles: ProfileCache | null;
   /** Groups unlocked with their code during this session. */
   openGroups: Map<string, OpenGroup>;
-  unlock(appCode: string): Promise<void>;
+  /** Checks the code; resolves with `enter`, which opens the app (so the UI can show success first). */
+  unlock(appCode: string): Promise<() => void>;
   register(input: { inviteCode: string; username: string; appCode: string }): Promise<void>;
   lock(): void;
 }
@@ -85,7 +86,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setStatus({ kind: 'unlocked' });
   }, []);
 
-  const unlock = useCallback(async (appCode: string) => start(await vault.unlock(appCode)), [start]);
+  const unlock = useCallback(
+    async (appCode: string) => {
+      const u = await vault.unlock(appCode);
+      return () => start(u);
+    },
+    [start],
+  );
 
   const register = useCallback(
     async ({ inviteCode, username, appCode }: { inviteCode: string; username: string; appCode: string }) => {

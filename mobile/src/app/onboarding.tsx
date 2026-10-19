@@ -5,6 +5,7 @@ import { useSession } from '@/session/SessionProvider';
 import { ApiError, NetworkError } from '@/services/api';
 import { Button } from '@/ui/Button';
 import { CodeEntry } from '@/ui/CodeEntry';
+import { Wordmark } from '@/ui/Wordmark';
 import { colors, space, type } from '@/ui/theme';
 
 /*
@@ -79,7 +80,7 @@ export default function Onboarding() {
         ))}
       </View>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.form}>
-        <Text style={type.title}>BaseSecrète</Text>
+        <Wordmark />
         <Text style={type.dim}>Entrée sur invitation uniquement.</Text>
 
         <Text style={styles.label}>Code d’invitation</Text>

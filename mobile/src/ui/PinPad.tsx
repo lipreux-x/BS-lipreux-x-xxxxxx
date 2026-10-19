@@ -1,6 +1,6 @@
 import * as Haptics from 'expo-haptics';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { colors } from './theme';
+import { colors, fonts } from './theme';
 
 const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '⌫'] as const;
 
@@ -104,6 +104,6 @@ const styles = StyleSheet.create({
     transform: [{ translateY: 1 }],
   },
   disabled: { opacity: 0.35 },
-  label: { color: colors.text, fontSize: 26, fontWeight: '600' },
+  label: { color: colors.text, fontSize: 28, fontFamily: fonts.medium },
   fn: { fontSize: 20, color: colors.accentFg },
 });

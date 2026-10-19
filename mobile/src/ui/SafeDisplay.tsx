@@ -6,14 +6,14 @@ export interface SafeDisplayHandle {
   shake(): void;
 }
 
-export type SafeDisplayState = 'idle' | 'busy' | 'error';
+export type SafeDisplayState = 'idle' | 'busy' | 'success' | 'error';
 
 const MONO = Platform.select({ ios: 'Menlo', default: 'monospace' });
 
 /**
  * Safe-style backlit screen: one `-` per empty slot, `*` per typed digit
  * (never the digit itself), plus a status LED: grey idle, amber while the
- * code is checked, red on error.
+ * code is checked, green when it is right, red on error.
  */
 export const SafeDisplay = forwardRef<SafeDisplayHandle, { length: number; filled: number; state?: SafeDisplayState }>(
   function SafeDisplay({ length, filled, state = 'idle' }, ref) {
@@ -29,16 +29,20 @@ export const SafeDisplay = forwardRef<SafeDisplayHandle, { length: number; fille
       },
     }));
     const error = state === 'error';
+    const success = state === 'success';
     return (
       <Animated.View style={[styles.bezel, { transform: [{ translateX: x }] }]}>
         <View style={styles.screen} accessibilityLabel={`${filled} chiffres sur ${length}`}>
           {Array.from({ length }, (_, i) => (
-            <Text key={i} style={[styles.char, i < filled ? styles.on : styles.off, error && styles.errorChar]}>
+            <Text
+              key={i}
+              style={[styles.char, i < filled ? styles.on : styles.off, error && styles.errorChar, success && styles.successChar]}
+            >
               {i < filled ? '*' : '-'}
             </Text>
           ))}
         </View>
-        <View style={[styles.led, state === 'busy' && styles.ledBusy, error && styles.ledError]} />
+        <View style={[styles.led, state === 'busy' && styles.ledBusy, success && styles.ledSuccess, error && styles.ledError]} />
       </Animated.View>
     );
   },
@@ -46,6 +50,7 @@ export const SafeDisplay = forwardRef<SafeDisplayHandle, { length: number; fille
 
 const LCD_ON = '#C8D3C0';
 const AMBER = '#E8A33D';
+const GREEN = '#3DD68C';
 
 const styles = StyleSheet.create({
   bezel: {
@@ -79,7 +84,9 @@ const styles = StyleSheet.create({
   on: { color: LCD_ON, textShadowColor: LCD_ON, textShadowRadius: 6 },
   off: { color: '#26302A' },
   errorChar: { color: colors.danger, textShadowColor: colors.danger },
+  successChar: { color: GREEN, textShadowColor: GREEN },
   led: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#2E2E2E', borderWidth: 1, borderColor: '#000000' },
   ledBusy: { backgroundColor: AMBER, shadowColor: AMBER, shadowOpacity: 0.9, shadowRadius: 6, shadowOffset: { width: 0, height: 0 } },
+  ledSuccess: { backgroundColor: GREEN, shadowColor: GREEN, shadowOpacity: 0.9, shadowRadius: 6, shadowOffset: { width: 0, height: 0 } },
   ledError: { backgroundColor: colors.danger, shadowColor: colors.danger, shadowOpacity: 0.9, shadowRadius: 6, shadowOffset: { width: 0, height: 0 } },
 });

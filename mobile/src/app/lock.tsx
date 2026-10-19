@@ -4,7 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useSession } from '@/session/SessionProvider';
 import { remainingMs } from '@/services/lockout';
 import { LockedOutError, WrongCodeError } from '@/services/vault';
-import { CodeEntry } from '@/ui/CodeEntry';
+import { CodeEntry, type CodeResult } from '@/ui/CodeEntry';
 import { calm } from '@/ui/theme';
 import { VaultDoor } from '@/ui/VaultDoor';
 
@@ -25,10 +25,9 @@ export default function LockScreen() {
     void vault.appLockout().then((s) => setLockedFor(remainingMs(s, Date.now())));
   }, [vault]);
 
-  async function submit(code: string): Promise<string | null> {
+  async function submit(code: string): Promise<CodeResult> {
     try {
-      await unlock(code);
-      return null;
+      return await unlock(code);
     } catch (e) {
       if (e instanceof LockedOutError) {
         setLockedFor(e.retryInMs);

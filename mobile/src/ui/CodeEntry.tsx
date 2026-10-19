@@ -6,11 +6,15 @@ import { SafeDisplay, type SafeDisplayHandle } from './SafeDisplay';
 import { colors, space, type } from './theme';
 
 /**
- * Title + safe display + safe keypad. `onComplete` returns null on success or
- * an error message to show (the display shakes and resets). While it runs, the
- * pad is disabled and the display's LED turns amber: Argon2id takes a moment
- * on the phone.
+ * Title + safe display + safe keypad. `onComplete` returns an error message to
+ * show (the display shakes, its LED goes red), null to move on, or an `open`
+ * callback: the LED goes green for a beat, then `open` runs. While it runs, the
+ * pad is disabled and the LED turns amber: Argon2id takes a moment on the phone.
  */
+export type CodeResult = string | null | (() => void);
+
+const GREEN_BEAT_MS = 550;
+
 export function CodeEntry({
   title,
   subtitle,
@@ -22,16 +26,26 @@ export function CodeEntry({
   title: string;
   subtitle?: string;
   length?: number;
-  onComplete(code: string): Promise<string | null>;
+  onComplete(code: string): Promise<CodeResult>;
   lockedForMs?: number;
   /** Shown until the first key press, e.g. "codes do not match" from the previous step. */
   initialError?: string;
 }) {
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
+  const [success, setSuccess] = useState(false);
   const [error, setError] = useState<string | null>(initialError ?? null);
   const [wait, setWait] = useState(lockedForMs);
   const display = useRef<SafeDisplayHandle>(null);
+
+  // Arriving with an error (e.g. sent back from the confirm step): red LED, shake.
+  useEffect(() => {
+    if (!initialError) return;
+    display.current?.shake();
+    void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    // Mount only: the error belongs to the step that sent us here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => setWait(lockedForMs), [lockedForMs]);
   useEffect(() => {
@@ -44,7 +58,15 @@ export function CodeEntry({
     setBusy(true);
     // Let the spinner render before the (synchronous) key derivation starts.
     await new Promise((r) => setTimeout(r, 50));
-    const message = await onComplete(full).catch(() => 'Erreur inattendue');
+    const result = await onComplete(full).catch(() => 'Erreur inattendue');
+    if (typeof result === 'function') {
+      setSuccess(true);
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      await new Promise((r) => setTimeout(r, GREEN_BEAT_MS));
+      result();
+      return;
+    }
+    const message = result;
     setBusy(false);
     // Always clear: on success the parent often shows the next step in this
     // same component instance, which must start empty.
@@ -74,7 +96,7 @@ export function CodeEntry({
           ref={display}
           length={length}
           filled={busy ? length : code.length}
-          state={busy ? 'busy' : error ? 'error' : 'idle'}
+          state={success ? 'success' : busy ? 'busy' : error ? 'error' : 'idle'}
         />
       </View>
       <Text style={[styles.error, styles.center]}>

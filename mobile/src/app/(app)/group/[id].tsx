@@ -20,7 +20,7 @@ import {
 } from '@/services/groups';
 import { RealtimeClient } from '@/services/realtime';
 import { LockedOutError, WrongCodeError } from '@/services/vault';
-import { CodeEntry } from '@/ui/CodeEntry';
+import { CodeEntry, type CodeResult } from '@/ui/CodeEntry';
 import { colors, space, type } from '@/ui/theme';
 
 export default function GroupScreen() {
@@ -55,7 +55,7 @@ function GroupUnlock({ groupId, onOpen }: { groupId: string; onOpen(g: OpenGroup
       .catch(() => setState({ kind: 'locked' }));
   }, [session, groupId]);
 
-  async function attempt(code: string): Promise<string | null> {
+  async function attempt(code: string): Promise<CodeResult> {
     try {
       const res = await unlockGroup(session, groupId, code);
       if (!res) {
@@ -63,9 +63,11 @@ function GroupUnlock({ groupId, onOpen }: { groupId: string; onOpen(g: OpenGroup
         return null;
       }
       const group = { keys: res.keys, keyVersion: res.keyVersion, name: res.meta.name };
-      if (res.codeChanged) setRelock({ group, first: null, mismatch: false });
-      else onOpen(group);
-      return null;
+      if (res.codeChanged) {
+        setRelock({ group, first: null, mismatch: false });
+        return null;
+      }
+      return () => onOpen(group);
     } catch (e) {
       if (e instanceof WrongCodeError) return 'Code incorrect';
       if (e instanceof LockedOutError) {
@@ -104,8 +106,7 @@ function GroupUnlock({ groupId, onOpen }: { groupId: string; onOpen(g: OpenGroup
               }
               try {
                 await relockGroup(session, groupId, group.keyVersion, group.keys.get(group.keyVersion)!, code);
-                onOpen(group);
-                return null;
+                return () => onOpen(group);
               } catch (e) {
                 return e instanceof NetworkError ? 'Pas de réseau' : 'Impossible d’enregistrer le code';
               }

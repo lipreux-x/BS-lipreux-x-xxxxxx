@@ -12,11 +12,23 @@ export const colors = {
   danger: '#E5484D',
 } as const;
 
+/**
+ * Space Grotesk (geometric, "tech") for the wordmark, titles, keypad digits
+ * and buttons; body text stays on the system font for readability. Each
+ * weight is its own family: set `fontFamily`, never `fontWeight`, with these.
+ */
+export const fonts = {
+  regular: 'SpaceGrotesk_400Regular',
+  medium: 'SpaceGrotesk_500Medium',
+  semibold: 'SpaceGrotesk_600SemiBold',
+  bold: 'SpaceGrotesk_700Bold',
+} as const;
+
 export const space = { xs: 4, sm: 8, md: 16, lg: 24, xl: 40 } as const;
 
 export const type = {
-  title: { color: colors.text, fontSize: 28, fontWeight: '700' as const, letterSpacing: 0.5 },
-  heading: { color: colors.text, fontSize: 20, fontWeight: '600' as const },
+  title: { color: colors.text, fontSize: 28, fontFamily: fonts.bold, letterSpacing: 0.5 },
+  heading: { color: colors.text, fontSize: 20, fontFamily: fonts.semibold },
   body: { color: colors.text, fontSize: 16 },
   dim: { color: colors.textDim, fontSize: 14 },
 };

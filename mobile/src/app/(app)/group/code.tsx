@@ -81,8 +81,7 @@ export default function ChangeGroupCode() {
           if (!open) return 'Rouvre le groupe puis réessaie';
           try {
             await changeGroupCode(session, id, open.keys, open.keyVersion, code, keywords);
-            router.back();
-            return null;
+            return () => router.back();
           } catch (e) {
             if (e instanceof ApiError && e.code === 'code_taken') {
               setStep({ kind: 'code', notice: 'Ce code est déjà pris par un autre groupe, choisis-en un autre' });

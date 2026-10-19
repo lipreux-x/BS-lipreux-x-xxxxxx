@@ -1,12 +1,26 @@
+import {
+  SpaceGrotesk_400Regular,
+  SpaceGrotesk_500Medium,
+  SpaceGrotesk_600SemiBold,
+  SpaceGrotesk_700Bold,
+  useFonts,
+} from '@expo-google-fonts/space-grotesk';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { ActivityIndicator, View } from 'react-native';
 import { SessionProvider, useSession } from '@/session/SessionProvider';
-import { colors } from '@/ui/theme';
+import { colors, fonts } from '@/ui/theme';
 
 function RootStack() {
   const { status } = useSession();
-  if (status.kind === 'loading') {
+  // A font that fails to load falls back to the system one: never block the app on it.
+  const [fontsLoaded, fontError] = useFonts({
+    SpaceGrotesk_400Regular,
+    SpaceGrotesk_500Medium,
+    SpaceGrotesk_600SemiBold,
+    SpaceGrotesk_700Bold,
+  });
+  if (status.kind === 'loading' || (!fontsLoaded && !fontError)) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center' }}>
         <ActivityIndicator color={colors.accentFg} />
@@ -18,7 +32,7 @@ function RootStack() {
       screenOptions={{
         headerStyle: { backgroundColor: colors.bg },
         headerTintColor: colors.accentFg,
-        headerTitleStyle: { color: colors.text },
+        headerTitleStyle: { color: colors.text, fontFamily: fonts.semibold },
         contentStyle: { backgroundColor: colors.bg },
       }}
     >
