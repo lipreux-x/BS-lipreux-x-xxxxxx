@@ -19,7 +19,7 @@ export default defineConfig({
     'purge-expired': {
       type: 'schedule',
       function: 'api',
-      cron: '0 * * * *', // hourly: delete expired ephemeral messages
+      cron: '0 * * * *', // hourly: delete expired ephemeral messages and self-destructed groups
       functionPath: '/internal/purge',
     },
   },

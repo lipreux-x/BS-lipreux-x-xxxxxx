@@ -1,11 +1,11 @@
 import { parseTrigger, upgradeWebSocket } from '@neon/functions/hono';
-import { and, eq, gt, inArray, isNull, lt, or, sql } from 'drizzle-orm';
+import { and, eq, gt, gte, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 import { Hono, type Context, type MiddlewareHandler } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { HTTPException } from 'hono/http-exception';
 import { z } from 'zod';
 import { db } from './db/client';
-import { attachments, groupKeys, groupMembers, groups, invites, joinAttempts, messages, profiles } from './db/schema';
+import { attachments, groupKeys, groupMembers, groupPurges, groups, invites, joinAttempts, messages, profiles } from './db/schema';
 import {
   frame,
   fromB64,
@@ -33,6 +33,8 @@ const JOIN_ATTEMPTS_PER_HOUR = 5; // SPEC §4.4: per user, all groups combined
 const MAX_CIPHERTEXT_BYTES = 64 * 1024;
 const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024; // encrypted size, same limit as mobile crypto/attachment.ts
 const UPLOADS_PER_HOUR = 60;
+const MAX_GROUP_LIFETIME_DAYS = 366;
+const MIN_GROUP_LIFETIME_MS = 10 * 60_000;
 
 // ---- Validation --------------------------------------------------------------
 
@@ -68,6 +70,9 @@ async function body<T extends z.ZodType>(c: Context, schema: T): Promise<z.infer
 
 // ---- Helpers -----------------------------------------------------------------
 
+/** A self-destructing group past its date is gone for everyone, even before the purge deletes it. */
+const groupAlive = or(isNull(groups.expiresAt), gt(groups.expiresAt, sql`now()`));
+
 const requireAuth: MiddlewareHandler<Env> = async (c, next) => {
   const header = c.req.header('authorization');
   const token = header?.startsWith('Bearer ') ? header.slice(7) : undefined;
@@ -83,7 +88,7 @@ async function requireMember(groupId: string, userId: string) {
     .select({ role: groupMembers.role, currentKeyVersion: groups.currentKeyVersion, ephemeralSeconds: groups.ephemeralSeconds })
     .from(groupMembers)
     .innerJoin(groups, eq(groups.id, groupMembers.groupId))
-    .where(and(eq(groupMembers.groupId, groupId), eq(groupMembers.userId, userId)));
+    .where(and(eq(groupMembers.groupId, groupId), eq(groupMembers.userId, userId), groupAlive));
   if (!row) throw new HTTPException(404, { message: 'not_found' });
   return row;
 }
@@ -259,11 +264,12 @@ app.get('/groups', async (c) => {
       ephemeralSeconds: groups.ephemeralSeconds,
       rotationPending: groups.rotationPending,
       codeVersion: groups.codeVersion,
+      expiresAt: groups.expiresAt,
       role: groupMembers.role,
     })
     .from(groupMembers)
     .innerJoin(groups, eq(groups.id, groupMembers.groupId))
-    .where(eq(groupMembers.userId, me));
+    .where(and(eq(groupMembers.userId, me), groupAlive));
   const keys = rows.length
     ? await db
         .select({ groupId: groupKeys.groupId, keyVersion: groupKeys.keyVersion, sealedKey: groupKeys.sealedKey })
@@ -273,6 +279,7 @@ app.get('/groups', async (c) => {
   return c.json(
     rows.map((g) => ({
       ...g,
+      expiresAt: g.expiresAt?.toISOString() ?? null,
       sealedKeys: keys.filter((k) => k.groupId === g.id).map(({ keyVersion, sealedKey }) => ({ keyVersion, sealedKey })),
     })),
   );
@@ -288,9 +295,16 @@ app.post('/groups', async (c) => {
       keywords,
       sealedKey: b64Bytes({ max: 256 }),
       ephemeralSeconds: z.union([z.literal(86_400), z.literal(604_800)]).nullable().optional(),
+      // Self-destruct date, chosen at creation only.
+      expiresAt: z.iso.datetime().nullable().optional(),
     }),
   );
   const me = c.get('userId');
+  const expiresAt = input.expiresAt ? new Date(input.expiresAt) : null;
+  if (expiresAt) {
+    const ms = expiresAt.getTime() - Date.now();
+    if (ms < MIN_GROUP_LIFETIME_MS || ms > MAX_GROUP_LIFETIME_DAYS * 86_400_000) throw new HTTPException(400, { message: 'invalid_expiry' });
+  }
   const [codeHash, keywordsHash] = await Promise.all([hashGroupCode(input.groupCode), hashKeywords(input.keywords)]);
   const codeLookup = groupCodeLookup(input.groupCode);
   await db.transaction(async (tx) => {
@@ -307,6 +321,7 @@ app.post('/groups', async (c) => {
         keywordsHash,
         createdBy: me,
         ephemeralSeconds: input.ephemeralSeconds ?? null,
+        expiresAt,
       })
       .onConflictDoNothing()
       .returning({ id: groups.id });
@@ -330,7 +345,10 @@ app.post('/groups/join', async (c) => {
   // Record first, then count: concurrent requests cannot slip past the limit.
   const lookup = groupCode.safeParse(input.groupCode).success ? groupCodeLookup(input.groupCode) : null;
   const [group] = lookup
-    ? await db.select({ id: groups.id, codeHash: groups.codeHash, keywordsHash: groups.keywordsHash }).from(groups).where(eq(groups.codeLookup, lookup))
+    ? await db
+        .select({ id: groups.id, codeHash: groups.codeHash, keywordsHash: groups.keywordsHash })
+        .from(groups)
+        .where(and(eq(groups.codeLookup, lookup), groupAlive))
     : [];
   await db.insert(joinAttempts).values({ userId: me, groupId: group?.id ?? null });
   const [{ count } = { count: 0 }] = await db
@@ -620,7 +638,43 @@ app.get('/groups/:groupId/messages', async (c) => {
     )
     .orderBy(messages.seq)
     .limit(limit);
-  return c.json({ messages: rows.map(toWireMessage), hasMore: rows.length === limit });
+  // Latest erase of this group's history: a phone that saw a lower one reloads the conversation.
+  const [{ purgeSeq } = { purgeSeq: 0 }] = await db
+    .select({ purgeSeq: sql<number>`coalesce(max(${groupPurges.seq}), 0)::int` })
+    .from(groupPurges)
+    .where(eq(groupPurges.groupId, groupId));
+  return c.json({ messages: rows.map(toWireMessage), hasMore: rows.length === limit, purgeSeq });
+});
+
+/**
+ * Admin: erases every message sent in [from, to) (a day or a few, in the
+ * admin's local time) for everyone, with their images. The span itself is
+ * not recorded: only that the history changed, so phones reload it.
+ */
+app.post('/groups/:groupId/messages/erase', async (c) => {
+  const groupId = groupIdParam(c);
+  const input = await body(c, z.object({ from: z.iso.datetime(), to: z.iso.datetime() }));
+  const from = new Date(input.from);
+  const to = new Date(input.to);
+  if (from >= to) throw new HTTPException(400, { message: 'invalid_range' });
+  await requireAdmin(groupId, c.get('userId'));
+  const inSpan = and(eq(messages.groupId, groupId), gte(messages.createdAt, from), lt(messages.createdAt, to));
+
+  // Storage first: if it fails, nothing is erased and the admin can retry.
+  const files = await db
+    .select({ id: attachments.id })
+    .from(attachments)
+    .innerJoin(messages, eq(messages.id, attachments.messageId))
+    .where(inSpan);
+  await deleteObjects(files.map((f) => objectKey(groupId, f.id)));
+  const deleted = await db.transaction(async (tx) => {
+    // Attachment rows go with their message (on delete cascade).
+    const rows = await tx.delete(messages).where(inSpan).returning({ id: messages.id });
+    if (rows.length) await tx.insert(groupPurges).values({ groupId });
+    return rows.length;
+  });
+  if (deleted) realtime.nudge();
+  return c.json({ deleted });
 });
 
 // ---- Attachments (encrypted on the phone, SPEC §4.3) -------------------------
@@ -686,7 +740,7 @@ app.get(
   }),
 );
 
-// ---- Scheduled purge of expired messages (Neon Function Trigger) ------------
+// ---- Scheduled purge of expired messages and groups (Neon Function Trigger) -
 
 app.post('/internal/purge', async (c) => {
   await parseTrigger(c); // 401/400 unless it is a signed Neon trigger delivery
@@ -708,5 +762,21 @@ app.post('/internal/purge', async (c) => {
     .delete(messages)
     .where(lt(messages.expiresAt, sql`now()`))
     .returning({ id: messages.id });
-  return c.json({ deleted: deleted.length, files: files.length });
+
+  // Self-destructed groups: their files, then the group (members, keys,
+  // messages and attachment rows cascade) and its join attempts.
+  const dead = await db.select({ id: groups.id }).from(groups).where(lt(groups.expiresAt, sql`now()`));
+  const deadIds = dead.map((g) => g.id);
+  if (deadIds.length) {
+    const groupFiles = await db
+      .select({ id: attachments.id, groupId: attachments.groupId })
+      .from(attachments)
+      .where(inArray(attachments.groupId, deadIds));
+    await deleteObjects(groupFiles.map((f) => objectKey(f.groupId, f.id)));
+    await db.transaction(async (tx) => {
+      await tx.delete(joinAttempts).where(inArray(joinAttempts.groupId, deadIds));
+      await tx.delete(groups).where(inArray(groups.id, deadIds));
+    });
+  }
+  return c.json({ deleted: deleted.length, files: files.length, groups: deadIds.length });
 });

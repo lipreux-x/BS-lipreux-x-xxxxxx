@@ -71,6 +71,7 @@ const rnd = () => Math.random().toString(36).slice(2, 8).toUpperCase();
 const GROUP_CODE = `ZZ${rnd()}`;
 const KEYWORDS = ['Été', 'plage', 'soleil'];
 let groupId = '';
+let tempGroupId = '';
 
 try {
   console.log(`Smoke test against ${BASE_URL ?? 'in-process app'}`);
@@ -190,6 +191,26 @@ try {
     step('alice received it live over WebSocket');
   }
 
+  // 9b. Erasing a span of history: admin only, everyone's copy, signalled by purgeSeq
+  const erase = (token: string, from: Date, to: Date) =>
+    call('POST', `/groups/${groupId}/messages/erase`, { token, json: { from: from.toISOString(), to: to.toISOString() } });
+  const purgeBefore = resync.body.purgeSeq;
+  assert.equal(typeof purgeBefore, 'number');
+  const hourAgo = new Date(Date.now() - 3_600_000);
+  const inAnHour = new Date(Date.now() + 3_600_000);
+  assert.equal((await erase(bob.token, hourAgo, inAnHour)).status, 403);
+  assert.equal((await erase(alice.token, inAnHour, hourAgo)).status, 400);
+  const yesterday = await erase(alice.token, new Date(Date.now() - 2 * 86_400_000), new Date(Date.now() - 86_400_000));
+  assert.equal(yesterday.body.deleted, 0);
+  assert.equal((await call('GET', `/groups/${groupId}/messages?after=0`, { token: alice.token })).body.purgeSeq, purgeBefore);
+  const erased = await erase(alice.token, hourAgo, inAnHour);
+  assert.equal(erased.status, 200);
+  assert.equal(erased.body.deleted, 1);
+  const afterErase = await call('GET', `/groups/${groupId}/messages?after=0`, { token: bob.token });
+  assert.equal(afterErase.body.messages.length, 0);
+  assert.ok(afterErase.body.purgeSeq > purgeBefore);
+  step('admin erased a span of history for everyone (members cannot); purgeSeq moved');
+
   // 10. Rate limit on join
   const carol = makePhone('carol');
   const inv2 = await call('POST', '/invites', { token: alice.token });
@@ -232,13 +253,43 @@ try {
   assert.equal(after.rotationPending, false);
   step('admin removed bob; the new key can only be sealed to those who remain');
 
+  // 12. Self-destructing group: date checked at creation, gone for everyone once past
+  const tempCode = `ZZ${rnd()}`;
+  const createTemp = (id: string, expiresAt: Date) =>
+    call('POST', '/groups', {
+      token: alice.token,
+      json: {
+        id,
+        encryptedMeta: b64(sodium.randombytes_buf(64)),
+        groupCode: tempCode,
+        keywords: KEYWORDS,
+        sealedKey: b64(sodium.crypto_box_seal(groupKey, alice.box.publicKey)),
+        expiresAt: expiresAt.toISOString(),
+      },
+    });
+  assert.equal((await createTemp(randomUUID(), new Date(Date.now() + 60_000))).status, 400);
+  assert.equal((await createTemp(randomUUID(), new Date(Date.now() + 400 * 86_400_000))).status, 400);
+  tempGroupId = randomUUID();
+  const expiry = new Date(Date.now() + 86_400_000);
+  assert.equal((await createTemp(tempGroupId, expiry)).status, 201);
+  const listed = (await call('GET', '/groups', { token: alice.token })).body.find((g: { id: string }) => g.id === tempGroupId);
+  assert.equal(listed.expiresAt, expiry.toISOString());
+  // Fast-forward past its date (the hourly purge then deletes it for good).
+  const { eq } = await import('drizzle-orm');
+  await db.update(schema.groups).set({ expiresAt: new Date(Date.now() - 1000) }).where(eq(schema.groups.id, tempGroupId));
+  assert.ok(!(await call('GET', '/groups', { token: alice.token })).body.some((g: { id: string }) => g.id === tempGroupId));
+  assert.equal((await call('GET', `/groups/${tempGroupId}/messages`, { token: alice.token })).status, 404);
+  assert.equal((await call('POST', '/groups/join', { token: bob.token, json: { groupCode: tempCode, keywords: KEYWORDS } })).status, 403);
+  step('self-destruct date validated at creation; past it the group is hidden and cannot be joined');
+
   assert.equal((await call('POST', `/groups/${groupId}/leave`, { token: alice.token })).status, 200);
   assert.equal((await call('GET', '/groups', { token: alice.token })).body.length, 0);
   step('the last member leaving deletes the group');
 
   console.log('Smoke test passed.');
 } finally {
-  if (groupId) await db.delete(schema.groups).where(inArray(schema.groups.id, [groupId]));
+  const testGroups = [groupId, tempGroupId].filter(Boolean);
+  if (testGroups.length) await db.delete(schema.groups).where(inArray(schema.groups.id, testGroups));
   const smokeIds = (
     await db.select({ id: schema.profiles.id }).from(schema.profiles).where(like(schema.profiles.username, 'smoke\\_%'))
   ).map((p) => p.id);

@@ -11,6 +11,9 @@ import { pool } from './db/client';
  * it would be missed by a pure `seq > cursor` query, so each poll also looks
  * back a few seconds and de-duplicates. Clients de-duplicate by id as well and
  * resync over HTTP after every reconnect, so the socket is a fast path only.
+ *
+ * Erased history (group_purges) goes out the same way, as a bare "reload this
+ * group" signal: the phones fetch the conversation again.
  */
 
 const POLL_MS = 1000;
@@ -19,7 +22,9 @@ const HEARTBEAT_MS = 25_000;
 
 const clients = new Map<NeonWSContext, string>(); // socket -> userId
 const recentlySent = new Map<number, number>(); // seq -> time sent
+const recentPurges = new Map<number, number>(); // purge seq -> time sent
 let cursor: number | null = null;
+let purgeCursor: number | null = null;
 let polling = false;
 let pollTimer: ReturnType<typeof setInterval> | undefined;
 let beatTimer: ReturnType<typeof setInterval> | undefined;
@@ -52,6 +57,7 @@ async function poll(): Promise<void> {
       `select m.*, array_agg(gm.user_id::text) as recipients
          from messages m
          join group_members gm on gm.group_id = m.group_id and gm.user_id = any($2::uuid[])
+         join groups g on g.id = m.group_id and (g.expires_at is null or g.expires_at > now())
         where (m.seq > $1 or m.created_at > now() - make_interval(secs => $3))
           and (m.expires_at is null or m.expires_at > now())
         group by m.id
@@ -88,11 +94,41 @@ async function poll(): Promise<void> {
       }
     }
     for (const [seq, t] of recentlySent) if (now - t > (LOOKBACK_SECONDS + 20) * 1000) recentlySent.delete(seq);
+    await pollPurges(userIds, now);
   } catch (err) {
     console.error('[realtime] poll failed', (err as Error).name);
   } finally {
     polling = false;
   }
+}
+
+async function pollPurges(userIds: string[], now: number): Promise<void> {
+  if (purgeCursor === null) {
+    const { rows } = await pool.query<{ seq: string }>('select coalesce(max(seq), 0)::text as seq from group_purges');
+    purgeCursor = Number(rows[0]!.seq);
+  }
+  const { rows } = await pool.query<{ seq: string; group_id: string; recipients: string[] }>(
+    `select p.seq, p.group_id, array_agg(gm.user_id::text) as recipients
+       from group_purges p
+       join group_members gm on gm.group_id = p.group_id and gm.user_id = any($2::uuid[])
+      where p.seq > $1 or p.created_at > now() - make_interval(secs => $3)
+      group by p.seq
+      order by p.seq
+      limit 100`,
+    [purgeCursor, userIds, LOOKBACK_SECONDS],
+  );
+  for (const row of rows) {
+    const seq = Number(row.seq);
+    if (seq > purgeCursor) purgeCursor = seq;
+    if (recentPurges.has(seq)) continue;
+    recentPurges.set(seq, now);
+    const frame = JSON.stringify({ type: 'purge', groupId: row.group_id, seq });
+    const recipients = new Set(row.recipients);
+    for (const [ws, userId] of clients) {
+      if (recipients.has(userId) && ws.readyState === 1) ws.send(frame);
+    }
+  }
+  for (const [seq, t] of recentPurges) if (now - t > (LOOKBACK_SECONDS + 20) * 1000) recentPurges.delete(seq);
 }
 
 function heartbeat(): void {
@@ -112,8 +148,9 @@ function stop(): void {
   clearInterval(pollTimer);
   clearInterval(beatTimer);
   pollTimer = beatTimer = undefined;
-  cursor = null; // re-seed on next connection; clients resync over HTTP anyway
+  cursor = purgeCursor = null; // re-seed on next connection; clients resync over HTTP anyway
   recentlySent.clear();
+  recentPurges.clear();
 }
 
 export const realtime = {
@@ -126,7 +163,7 @@ export const realtime = {
     clients.delete(ws);
     if (clients.size === 0) stop();
   },
-  /** Called after a local insert so this isolate's clients get it without waiting a full tick. */
+  /** Called after a local insert (or erase) so this isolate's clients get it without waiting a full tick. */
   nudge(): void {
     if (clients.size > 0) setTimeout(() => void poll(), 0);
   },

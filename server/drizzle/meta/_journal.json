@@ -50,6 +50,13 @@
       "when": 1792402746614,
       "tag": "0006_avatar_icons",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1792410545541,
+      "tag": "0007_group_expiry_purges",
+      "breakpoints": true
     }
   ]
 }
