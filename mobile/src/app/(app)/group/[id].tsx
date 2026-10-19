@@ -1,7 +1,8 @@
 import * as Haptics from 'expo-haptics';
 import { router, Stack, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { useHeaderHeight } from 'expo-router/react-navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { FlatList, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { FlatList, KeyboardAvoidingView, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { API_URL } from '@/config';
 import type { ImageBody, ReplyRef } from '@/crypto';
@@ -208,6 +209,9 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
   const [replying, setReplying] = useState<ChatMessage | null>(null);
   const [pressed, setPressed] = useState<ChatMessage | null>(null);
   const input = useRef<React.ComponentRef<typeof TextInput>>(null);
+  // Where this screen starts below the top of the display (status bar + header):
+  // what the keyboard avoider needs to keep the composer just above the keyboard.
+  const headerHeight = useHeaderHeight();
 
   /** Answer `m`: reply strip above the composer, keyboard up. */
   function startReply(m: ChatMessage) {
@@ -390,7 +394,9 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
           <Text style={styles.bannerText}>HORS LIGNE — ENVOI AU RETOUR DU RÉSEAU</Text>
         </View>
       ) : null}
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={90}>
+      {/* 'padding' on both platforms: with edge-to-edge (always on since SDK 54),
+          Android no longer shrinks the window for the keyboard by itself. */}
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding" keyboardVerticalOffset={headerHeight}>
         <Timeline
           listRef={list}
           loaded={loaded}

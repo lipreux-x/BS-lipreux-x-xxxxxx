@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, View } from 'react-native';
+import { KeyboardAvoidingView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useSession } from '@/session/SessionProvider';
 import { ApiError, NetworkError } from '@/services/api';
@@ -79,7 +79,8 @@ export default function Onboarding() {
           <View key={i} style={[styles.stripe, { backgroundColor: i % 2 ? colors.bg : colors.text }]} />
         ))}
       </View>
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.form}>
+      {/* 'padding' on both platforms: Android is edge-to-edge and no longer resizes for the keyboard. */}
+      <KeyboardAvoidingView behavior="padding" style={styles.form}>
         <Wordmark />
         <Text style={type.dim}>Entrée sur invitation uniquement.</Text>
 
