@@ -32,6 +32,16 @@ export {
   type GroupMeta,
 } from './group';
 export {
+  MAX_ATTACHMENT_BYTES,
+  encryptAttachment,
+  decryptAttachment,
+  encodeMessageBody,
+  parseMessageBody,
+  type AttachmentContext,
+  type ImageBody,
+  type MessageBody,
+} from './attachment';
+export {
   normalizeInviteCode,
   registrationProof,
   loginSignature,
