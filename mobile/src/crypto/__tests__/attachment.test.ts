@@ -3,6 +3,8 @@ import {
   encodeMessageBody,
   encryptAttachment,
   parseMessageBody,
+  replyExcerpt,
+  type ReplyRef,
   type AttachmentContext,
   type ImageBody,
 } from '../attachment';
@@ -89,5 +91,52 @@ describe('message bodies', () => {
     expect(parseMessageBody(enc({ width: -1 }))).toBeNull();
     expect(parseMessageBody(enc({ size: 50 * 1024 * 1024 }))).toBeNull();
     expect(parseMessageBody(enc({ preview: 'x'.repeat(10_000) }))).toBeNull();
+  });
+});
+
+describe('replies', () => {
+  const replyTo: ReplyRef = {
+    messageId: '1b9d6bcd-0000-4000-8000-0000000000aa',
+    senderId: '2c8e7a00-0000-4000-8000-0000000000bb',
+    excerpt: 'Rdv à la base ce soir ?',
+  };
+
+  it('round-trips a text reply and an image reply', () => {
+    const text = { kind: 'text' as const, text: 'Ok 👍', replyTo };
+    expect(parseMessageBody(encodeMessageBody(text))).toEqual(text);
+    const image = {
+      kind: 'image' as const,
+      attachmentId: ctx.attachmentId,
+      fileKey: 'BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc',
+      mime: 'image/jpeg' as const,
+      width: 10,
+      height: 10,
+      size: 100,
+      replyTo: { ...replyTo, excerpt: '', image: true as const },
+    };
+    expect(parseMessageBody(encodeMessageBody(image))).toEqual(image);
+  });
+
+  it('keeps a text without reply as plain text (readable by older versions)', () => {
+    expect(encodeMessageBody({ kind: 'text', text: 'salut' })).toBe('salut');
+  });
+
+  it('cuts long excerpts and quotes images without text', () => {
+    const long = replyExcerpt({ kind: 'text', text: 'a\n\nb '.repeat(100) });
+    expect(long.excerpt.length).toBe(140);
+    expect(long.excerpt.endsWith('…')).toBe(true);
+    expect(long.excerpt).not.toContain('\n');
+    expect(replyExcerpt({ kind: 'text', text: 'court' })).toEqual({ excerpt: 'court' });
+  });
+
+  it('reads malformed replies as null', () => {
+    const enc = (r: object) => '\u0000' + JSON.stringify({ kind: 'text', text: 'ok', replyTo: { ...replyTo, ...r } });
+    expect(parseMessageBody(enc({ messageId: 'nope' }))).toBeNull();
+    expect(parseMessageBody(enc({ senderId: 42 }))).toBeNull();
+    expect(parseMessageBody(enc({ excerpt: 'x'.repeat(500) }))).toBeNull();
+    expect(parseMessageBody(enc({ image: 'yes' }))).toBeNull();
+    // A structured text must be a reply, and not empty.
+    expect(parseMessageBody('\u0000' + JSON.stringify({ kind: 'text', text: 'ok' }))).toBeNull();
+    expect(parseMessageBody('\u0000' + JSON.stringify({ kind: 'text', text: '', replyTo }))).toBeNull();
   });
 });

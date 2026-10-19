@@ -39,10 +39,23 @@ export function decryptAttachment(blob: Uint8Array, fileKey: Uint8Array, ctx: At
 // ---- Message bodies ----------------------------------------------------------
 
 /*
- * The plaintext of a message is either plain text (every message sent before
- * attachments existed) or, for an image, a NUL byte followed by JSON. The
- * composer never produces a leading NUL, so the two cannot be confused.
+ * The plaintext of a message is either plain text (every plain message, and
+ * all messages sent before attachments existed) or a NUL byte followed by
+ * JSON: an image, or a text that replies to another message. The composer
+ * never produces a leading NUL, so the two cannot be confused.
  */
+
+/**
+ * The message being answered, quoted inside the (encrypted, signed) reply.
+ * The excerpt is what the replier saw; when the original is still loaded,
+ * the app shows the original instead, so a member cannot misquote someone.
+ */
+export interface ReplyRef {
+  messageId: string; // server id of the original
+  senderId: string;
+  excerpt: string; // up to MAX_EXCERPT chars; empty for an image
+  image?: true;
+}
 
 export interface ImageBody {
   kind: 'image';
@@ -53,28 +66,71 @@ export interface ImageBody {
   height: number;
   size: number; // encrypted blob size, shown before downloading
   preview?: string; // tiny JPEG (base64url) shown blurred until the full image is loaded
+  replyTo?: ReplyRef;
 }
 
-export type MessageBody = { kind: 'text'; text: string } | ImageBody;
+export interface TextBody {
+  kind: 'text';
+  text: string;
+  replyTo?: ReplyRef;
+}
 
-const IMAGE_PREFIX = '\u0000';
+export type MessageBody = TextBody | ImageBody;
+
+export const MAX_EXCERPT = 140;
+const STRUCTURED_PREFIX = '\u0000';
 const MAX_PREVIEW_CHARS = 8 * 1024;
+const MAX_TEXT = 4000;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** The excerpt to quote for a message: its text cut to MAX_EXCERPT, empty for an image. */
+export function replyExcerpt(body: MessageBody): Pick<ReplyRef, 'excerpt' | 'image'> {
+  if (body.kind === 'image') return { excerpt: '', image: true };
+  const flat = body.text.replace(/\s+/g, ' ').trim();
+  return { excerpt: flat.length > MAX_EXCERPT ? flat.slice(0, MAX_EXCERPT - 1) + '…' : flat };
+}
 
 export function encodeMessageBody(body: MessageBody): string {
   if (body.kind === 'text') {
-    if (body.text.startsWith(IMAGE_PREFIX)) throw new CryptoError('INVALID_INPUT');
-    return body.text;
+    if (body.text.startsWith(STRUCTURED_PREFIX)) throw new CryptoError('INVALID_INPUT');
+    if (!body.replyTo) return body.text;
+    return STRUCTURED_PREFIX + JSON.stringify({ kind: 'text', text: body.text, replyTo: body.replyTo });
   }
-  const { kind, attachmentId, fileKey, mime, width, height, size, preview } = body;
-  return IMAGE_PREFIX + JSON.stringify({ kind, attachmentId, fileKey, mime, width, height, size, preview });
+  const { kind, attachmentId, fileKey, mime, width, height, size, preview, replyTo } = body;
+  return STRUCTURED_PREFIX + JSON.stringify({ kind, attachmentId, fileKey, mime, width, height, size, preview, replyTo });
 }
 
-/** Never throws: a malformed image body (from a buggy or hostile member) reads as null. */
+function parseReply(v: unknown): ReplyRef | undefined | null {
+  if (v === undefined) return undefined;
+  const r = v as Record<string, unknown>;
+  if (
+    typeof v !== 'object' ||
+    v === null ||
+    typeof r.messageId !== 'string' ||
+    !UUID.test(r.messageId) ||
+    typeof r.senderId !== 'string' ||
+    !UUID.test(r.senderId) ||
+    typeof r.excerpt !== 'string' ||
+    r.excerpt.length > MAX_EXCERPT ||
+    (r.image !== undefined && r.image !== true)
+  ) {
+    return null;
+  }
+  return { messageId: r.messageId, senderId: r.senderId, excerpt: r.excerpt, ...(r.image === true && { image: true as const }) };
+}
+
+/** Never throws: a malformed body (from a buggy or hostile member) reads as null. */
 export function parseMessageBody(plaintext: string): MessageBody | null {
-  if (!plaintext.startsWith(IMAGE_PREFIX)) return { kind: 'text', text: plaintext };
+  if (!plaintext.startsWith(STRUCTURED_PREFIX)) return { kind: 'text', text: plaintext };
   try {
-    const v = JSON.parse(plaintext.slice(IMAGE_PREFIX.length)) as Record<string, unknown>;
+    const v = JSON.parse(plaintext.slice(STRUCTURED_PREFIX.length)) as Record<string, unknown>;
+    const replyTo = parseReply(v.replyTo);
+    if (replyTo === null) return null;
+    const reply = replyTo ? { replyTo } : {};
+    if (v.kind === 'text') {
+      if (typeof v.text !== 'string' || v.text.length === 0 || v.text.length > MAX_TEXT || !replyTo) return null;
+      return { kind: 'text', text: v.text, ...reply };
+    }
     const dim = (n: unknown) => typeof n === 'number' && Number.isInteger(n) && n > 0 && n <= 20_000;
     if (
       v.kind !== 'image' ||
@@ -102,6 +158,7 @@ export function parseMessageBody(plaintext: string): MessageBody | null {
       height: v.height as number,
       size: v.size,
       ...(v.preview !== undefined && { preview: v.preview as string }),
+      ...reply,
     };
   } catch {
     return null;

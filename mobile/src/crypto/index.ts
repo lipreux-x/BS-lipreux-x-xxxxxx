@@ -37,9 +37,13 @@ export {
   decryptAttachment,
   encodeMessageBody,
   parseMessageBody,
+  replyExcerpt,
+  MAX_EXCERPT,
   type AttachmentContext,
   type ImageBody,
   type MessageBody,
+  type ReplyRef,
+  type TextBody,
 } from './attachment';
 export {
   normalizeInviteCode,
