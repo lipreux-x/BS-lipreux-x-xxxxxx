@@ -416,6 +416,7 @@ interface Line {
   at: Date;
   mine: boolean;
   author: string;
+  avatar?: string | null;
   text: string | null;
   image?: ImageBody;
   local?: PreparedImage;
@@ -451,6 +452,7 @@ function Timeline({
         at: new Date(m.createdAt),
         mine: m.mine,
         author: m.senderName,
+        avatar: m.senderAvatar,
         text: m.text,
         image: m.image ?? undefined,
         status: m.mine ? ('sent' as const) : undefined,
@@ -496,6 +498,7 @@ function Timeline({
             <MessageBubble
               mine={line.mine}
               author={!line.mine && item.first ? line.author : undefined}
+              avatar={line.avatar}
               time={timeLabel(line.at)}
               status={line.status}
               error={line.pending?.error}

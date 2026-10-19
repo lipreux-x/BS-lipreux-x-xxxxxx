@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Avatar, isAvatarId } from '../avatars';
 import { Led, type LedState } from '../Led';
 import { colors, fonts, mono, space } from '../theme';
 
@@ -14,10 +15,14 @@ const STATUS_LABEL: Record<DeliveryStatus, string> = { sending: 'Envoi en cours'
  * sender's side is squared off on the last message of a run. Footer: time
  * on the LCD font and, for mine, the delivery LED (amber sending, green
  * stored on the server, red failed).
+ *
+ * Others' messages have a column on the left: their avatar and name open
+ * each run, the following messages of the run line up under the name.
  */
 export function MessageBubble({
   mine,
   author,
+  avatar,
   time,
   status,
   error,
@@ -27,8 +32,10 @@ export function MessageBubble({
   children,
 }: {
   mine: boolean;
-  /** Shown on the first message of a run from someone else. */
+  /** Name of someone else, shown with their avatar on the first message of a run. */
   author?: string;
+  /** Their avatar icon id. */
+  avatar?: string | null;
   time: string;
   status?: DeliveryStatus;
   /** Why the send failed, when known (e.g. "Image trop lourde"). */
@@ -41,9 +48,13 @@ export function MessageBubble({
   children: ReactNode;
 }) {
   const failed = status === 'failed';
-  return (
-    <View style={[styles.row, mine ? styles.rowMine : styles.rowTheirs]}>
-      {author ? <Text style={styles.author}>{author}</Text> : null}
+  const bubble = (
+    <View style={[styles.column, mine ? styles.columnMine : styles.columnTheirs]}>
+      {author ? (
+        <Text style={styles.author} numberOfLines={1}>
+          {author}
+        </Text>
+      ) : null}
       <Pressable
         disabled={!failed}
         onPress={onRetry}
@@ -69,6 +80,14 @@ export function MessageBubble({
       {failed ? <Text style={styles.failure}>{`${error ?? 'Échec de l’envoi'} — touche pour renvoyer`}</Text> : null}
     </View>
   );
+  if (mine) return <View style={styles.rowMine}>{bubble}</View>;
+  return (
+    <View style={styles.rowTheirs}>
+      {/* Avatar on the run's first message; an empty slot keeps the others aligned. */}
+      <View style={styles.avatarSlot}>{author ? <Avatar id={isAvatarId(avatar) ? avatar : null} size={AVATAR} /> : null}</View>
+      {bubble}
+    </View>
+  );
 }
 
 /** Engraved day label between runs of messages: "— AUJOURD'HUI —". */
@@ -82,16 +101,20 @@ export function DaySeparator({ label }: { label: string }) {
   );
 }
 
+const AVATAR = 34;
 const ANTHRACITE_LIGHT = '#565D63';
 const ANTHRACITE_DARK = '#16191B';
 const METAL_LIGHT = '#3A3F44';
 const METAL_DARK = '#050505';
 
 const styles = StyleSheet.create({
-  row: { maxWidth: '82%', gap: 3 },
-  rowMine: { alignSelf: 'flex-end', alignItems: 'flex-end' },
-  rowTheirs: { alignSelf: 'flex-start', alignItems: 'flex-start' },
-  author: { color: colors.accentFg, fontSize: 11, fontFamily: fonts.medium, letterSpacing: 1, textTransform: 'uppercase', marginLeft: 4 },
+  rowMine: { alignSelf: 'flex-end', maxWidth: '82%' },
+  rowTheirs: { alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'flex-start', gap: 8, maxWidth: '88%' },
+  avatarSlot: { width: AVATAR },
+  column: { gap: 3, flexShrink: 1 },
+  columnMine: { alignItems: 'flex-end' },
+  columnTheirs: { alignItems: 'flex-start' },
+  author: { color: colors.text, fontSize: 13, fontFamily: fonts.semibold, marginLeft: 2 },
   plate: { borderRadius: 10, paddingHorizontal: 12, paddingTop: 8, paddingBottom: 6, borderWidth: 1 },
   mine: {
     backgroundColor: colors.accent,
