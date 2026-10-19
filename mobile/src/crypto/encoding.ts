@@ -61,7 +61,7 @@ export function frame(...fields: Uint8Array[]): Uint8Array {
   return concatBytes(...fields.flatMap((f) => [u32(f.length), f]));
 }
 
-/** Constant-time comparison (react-native-libsodium does not expose sodium_memcmp). */
+/** Constant-time comparison (no sodium_memcmp in the JS backend). */
 export function constantTimeEqual(a: Uint8Array, b: Uint8Array): boolean {
   if (a.length !== b.length) return false;
   let diff = 0;

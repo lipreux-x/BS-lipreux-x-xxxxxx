@@ -34,7 +34,6 @@
     },
     "plugins": [
       ["./plugins/withDisplayName", "BaseSecrète"],
-      "react-native-libsodium",
       "expo-router",
       "expo-status-bar",
       "expo-secure-store",
