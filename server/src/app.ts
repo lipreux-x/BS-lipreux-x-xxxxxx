@@ -17,6 +17,7 @@ import {
   loginAttempts,
   messages,
   profiles,
+  pushTokens,
   usedChallenges,
   userActions,
 } from './db/schema';
@@ -35,6 +36,7 @@ import {
   utf8,
   verifyEd25519,
 } from './lib/crypto';
+import { notifyGroup, PUSH_TOKEN } from './lib/push';
 import { deleteObjects, downloadUrl, objectKey, uploadUrl } from './lib/storage';
 import { issueAccessToken, issueChallenge, readAccessToken, verifyAccessToken, verifyChallenge } from './lib/tokens';
 import { realtime } from './realtime';
@@ -336,6 +338,24 @@ app.put('/me/avatar', async (c) => {
   const { avatar } = await body(c, z.object({ avatar: z.enum(AVATARS).nullable() }));
   await db.update(profiles).set({ avatar }).where(eq(profiles.id, c.get('userId')));
   return c.json({ avatar });
+});
+
+/** This phone's push token (the notification is a fixed generic line, see lib/push.ts). */
+app.put('/me/push-token', async (c) => {
+  const { token } = await body(c, z.object({ token: z.string().regex(PUSH_TOKEN) }));
+  const userId = c.get('userId');
+  // A token belongs to one phone: if it was another account's, it moves to this one.
+  await db
+    .insert(pushTokens)
+    .values({ token, userId })
+    .onConflictDoUpdate({ target: pushTokens.token, set: { userId, createdAt: sql`now()` } });
+  return c.json({ ok: true });
+});
+
+app.delete('/me/push-token', async (c) => {
+  const { token } = await body(c, z.object({ token: z.string().regex(PUSH_TOKEN) }));
+  await db.delete(pushTokens).where(and(eq(pushTokens.token, token), eq(pushTokens.userId, c.get('userId'))));
+  return c.json({ ok: true });
 });
 
 app.post('/invites', async (c) => {
@@ -924,6 +944,8 @@ app.post('/groups/:groupId/messages', async (c) => {
     return stored!;
   });
   realtime.nudge();
+  // A replayed send (same clientId, already stored earlier) does not ring again.
+  if (Date.now() - row.createdAt.getTime() < 60_000) await notifyGroup(groupId, me);
   return c.json(toWireMessage(row), 201);
 });
 

@@ -253,3 +253,19 @@ export const usedChallenges = pgTable('used_challenges', {
   nonce: text('nonce').primaryKey(),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
 });
+
+// Push notifications (src/lib/push.ts): one Expo push token per phone. The
+// notification itself is a fixed generic line; the token only says where to ring.
+export const pushTokens = pgTable(
+  'push_tokens',
+  {
+    token: text('token').primaryKey(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => profiles.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    // Last notification sent to this phone (throttle).
+    lastPushAt: timestamp('last_push_at', { withTimezone: true }),
+  },
+  (t) => [index('push_tokens_user_idx').on(t.userId)],
+);
