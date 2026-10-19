@@ -119,6 +119,9 @@
 ### 4.7 Autres règles
 - Notifications push : texte générique, aucun nom de groupe ni contenu.
 - Images/vocaux : chiffrés côté client avant upload dans Neon Storage / R2 (URLs présignées) (clé de fichier aléatoire, elle-même chiffrée avec la clé de groupe).
+  - Images (fait) : recompressées en JPEG 1600 px avant envoi, ce qui retire les métadonnées (GPS, appareil). Fichier chiffré en XChaCha20-Poly1305 avec une clé aléatoire, AD = `bs/v1/attachment` + groupe + id de la pièce jointe (`mobile/src/crypto/attachment.ts`). La clé, les dimensions et un mini-aperçu flou voyagent dans un message de groupe normal (chiffré + signé).
+  - Serveur : table `attachments` + bucket privé `attachments` (clé d'objet `<groupe>/<id>`). URL d'upload valable 5 min et limitée à la taille annoncée (10 Mo max, 60 envois/h). Téléchargement réservé aux membres tant que le message existe. Le fichier est supprimé avec le message éphémère, à la fermeture du groupe, ou après 24 h s'il n'a jamais été envoyé.
+  - Téléphone : images déchiffrées gardées en mémoire seulement (vidées au verrouillage). « Enregistrer dans la galerie » est un choix explicite ; l'image n'y est plus chiffrée.
 - Vérification des contacts : afficher une **empreinte de sécurité** (safety number) comparable en vrai entre amis.
 - Aucun log contenant des données déchiffrées. Pas d'analytics tiers.
 - Multi-appareils : hors MVP (chaque appareil = une identité ; ajout d'appareil via QR code plus tard).

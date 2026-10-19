@@ -51,6 +51,7 @@ Le changement s'applique à tous les écrans de code : verrouillage, inscription
 ### Mise en production (branche Neon `dev`)
 
 - Migration `0002_group_keywords` appliquée.
+- Images (19/10) : migration `0004_attachments` appliquée, bucket privé `attachments` créé, API redéployée. Test e2e passé contre l'API déployée (envoi, réception et déchiffrement d'une image, réutilisation refusée). Un upload d'une taille différente de celle annoncée est bien refusé (403).
 - API déployée : `https://br-muddy-bar-barqix1g-api.compute.c-8.eu-central-1.aws.neon.tech/`.
 - Smoke test passé contre l'API déployée (inscription, groupes, code + mots-clés, chat chiffré, temps réel, limite d'essais).
 
@@ -103,7 +104,7 @@ Le changement s'applique à tous les écrans de code : verrouillage, inscription
 
 | | Fonction | État |
 |---|---|---|
-| ⬜ | Images et vocaux chiffrés | À faire |
+| 🟡 | Images et vocaux chiffrés | Images faites : envoi depuis la galerie (recompressées en JPEG, métadonnées GPS retirées), chiffrées avec une clé par fichier, stockées dans un bucket Neon privé, affichées en mémoire seulement, et enregistrables dans la galerie depuis la vue plein écran. Vocaux à faire. |
 | ⬜ | Notifications push génériques | À faire |
 | ✅ | Messages éphémères | Fait : réglage admin dans les réglages du groupe, purge toutes les heures sur le serveur |
 | ✅ | Rotation de clé quand un membre part | Fait, avec « quitter » et « retirer un membre » |
