@@ -84,6 +84,14 @@ run('app services against the deployed API', () => {
     expect(bobUnlock?.meta.name).toBe('Les Potes');
     expect((await listGroups(bob))[0]).toMatchObject({ name: 'Les Potes', state: { kind: 'locked' } });
 
+    // Alice picks an avatar icon: Bob sees it on her profile; anything outside the list is refused.
+    expect((await alice.api.me()).avatar).toBeNull();
+    await alice.api.setAvatar('mask');
+    expect((await bob.api.profiles([alice.account.userId]))[0]?.avatar).toBe('mask');
+    await expect(alice.api.setAvatar('https://example.com/me.jpg')).rejects.toMatchObject({ status: 400 });
+    await alice.api.setAvatar(null);
+    expect((await alice.api.me()).avatar).toBeNull();
+
     // Alice listens on the WebSocket while Bob sends.
     const live = new Promise<WireMessage>((resolve) => {
       const rt = new RealtimeClient(API_URL!, () => alice.api.accessToken(), {
