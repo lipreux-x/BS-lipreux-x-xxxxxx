@@ -5,9 +5,9 @@ import { Animated, Easing, Platform, Pressable, StyleSheet, Text, View } from 'r
 import { colors, led } from './theme';
 
 /** Sensor window: a square of dark glass set into the plate. */
-const WINDOW = 172;
-const ICON = 104;
-const GRID_STEP = 11;
+const WINDOW = 124;
+const ICON = 74;
+const GRID_STEP = 9;
 const MONO = Platform.select({ ios: 'Menlo', default: 'monospace' });
 
 const METAL = '#24282B';
@@ -162,22 +162,22 @@ export function FingerprintPad({ onScan }: { onScan(): Promise<(() => void) | nu
   );
 }
 
-const CORNER = 22;
+const CORNER = 15;
 const cornerStyles = StyleSheet.create({
-  tl: { top: 8, left: 8, borderTopWidth: 3, borderLeftWidth: 3, borderTopLeftRadius: 4 },
-  tr: { top: 8, right: 8, borderTopWidth: 3, borderRightWidth: 3, borderTopRightRadius: 4 },
-  bl: { bottom: 8, left: 8, borderBottomWidth: 3, borderLeftWidth: 3, borderBottomLeftRadius: 4 },
-  br: { bottom: 8, right: 8, borderBottomWidth: 3, borderRightWidth: 3, borderBottomRightRadius: 4 },
+  tl: { top: 6, left: 6, borderTopWidth: 2.5, borderLeftWidth: 2.5, borderTopLeftRadius: 3 },
+  tr: { top: 6, right: 6, borderTopWidth: 2.5, borderRightWidth: 2.5, borderTopRightRadius: 3 },
+  bl: { bottom: 6, left: 6, borderBottomWidth: 2.5, borderLeftWidth: 2.5, borderBottomLeftRadius: 3 },
+  br: { bottom: 6, right: 6, borderBottomWidth: 2.5, borderRightWidth: 2.5, borderBottomRightRadius: 3 },
 });
 
 const styles = StyleSheet.create({
   // Same plate as the keypad: bevelled, four screws.
   plate: {
-    width: 296,
+    width: 228,
     alignItems: 'center',
-    gap: 16,
-    paddingVertical: 22,
-    paddingHorizontal: 22,
+    gap: 11,
+    paddingVertical: 18,
+    paddingHorizontal: 16,
     borderRadius: 14,
     backgroundColor: colors.surface,
     borderWidth: 1,
@@ -202,11 +202,11 @@ const styles = StyleSheet.create({
   tr: { top: 7, right: 7 },
   bl: { bottom: 7, left: 7 },
   br: { bottom: 7, right: 7 },
-  engraving: { color: '#5A6168', fontFamily: MONO, fontSize: 11, letterSpacing: 3 },
+  engraving: { color: '#5A6168', fontFamily: MONO, fontSize: 9, letterSpacing: 2 },
 
   // Metal frame around the glass, bevelled like a key; pressed: pushed in.
   bezel: {
-    padding: 10,
+    padding: 7,
     borderRadius: 12,
     backgroundColor: METAL,
     borderWidth: 2,
@@ -267,9 +267,9 @@ const styles = StyleSheet.create({
     borderRightColor: '#050505',
   },
   lcd: {
-    width: 150,
+    width: 116,
     alignItems: 'center',
-    paddingVertical: 5,
+    paddingVertical: 3,
     borderRadius: 4,
     backgroundColor: '#0B100C',
     borderWidth: 2,
@@ -278,7 +278,7 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.border,
     borderRightColor: colors.border,
   },
-  lcdText: { color: LCD_ON, fontFamily: MONO, fontSize: 15, letterSpacing: 2 },
-  led: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#2E2E2E', borderWidth: 1, borderColor: '#000000' },
-  hint: { color: colors.textDim, fontSize: 13, textAlign: 'center' },
+  lcdText: { color: LCD_ON, fontFamily: MONO, fontSize: 12, letterSpacing: 1.5 },
+  led: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#2E2E2E', borderWidth: 1, borderColor: '#000000' },
+  hint: { color: colors.textDim, fontSize: 12, textAlign: 'center' },
 });
