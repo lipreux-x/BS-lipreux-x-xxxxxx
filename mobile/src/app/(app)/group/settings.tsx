@@ -6,6 +6,7 @@ import { useUnlocked } from '@/session/SessionProvider';
 import { NetworkError } from '@/services/api';
 import { groupInfo, leaveGroup, type GroupInfo, type GroupInfoMember } from '@/services/groupInfo';
 import { syncGroup } from '@/services/groups';
+import { Avatar, isAvatarId } from '@/ui/avatars';
 import { colors, space, type } from '@/ui/theme';
 
 const EPHEMERAL: { label: string; seconds: number | null }[] = [
@@ -135,6 +136,7 @@ export default function GroupSettings() {
       <View style={styles.card}>
         {info.members.map((m, i) => (
           <View key={m.userId} style={[styles.row, i > 0 && styles.divider]}>
+            <Avatar id={isAvatarId(m.avatar) ? m.avatar : null} size={36} />
             <View style={{ flex: 1 }}>
               <Text style={type.body}>
                 {m.username}

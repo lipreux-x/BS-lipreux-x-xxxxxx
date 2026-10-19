@@ -4,6 +4,7 @@ import type { ProfileCache, Session } from './groups';
 export interface GroupInfoMember {
   userId: string;
   username: string;
+  avatar: string | null;
   role: 'admin' | 'member';
   me: boolean;
   hasKey: boolean; // false: joined, waiting for a member to share the key
@@ -31,6 +32,7 @@ export async function groupInfo(s: Session, profiles: ProfileCache, groupId: str
   const rows = members.map((m) => ({
     userId: m.userId,
     username: known.get(m.userId)?.username ?? '?',
+    avatar: known.get(m.userId)?.avatar ?? null,
     role: m.role,
     me: m.userId === s.account.userId,
     hasKey: m.hasCurrentKey,

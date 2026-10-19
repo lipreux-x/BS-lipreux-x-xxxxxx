@@ -27,6 +27,8 @@ export class NetworkError extends Error {
 export interface Profile extends PublicIdentity {
   id: string;
   username: string;
+  /** Drawn avatar id (ui/avatars.tsx); null or absent: the default silhouette. */
+  avatar?: string | null;
 }
 
 export interface GroupSummary {
@@ -177,6 +179,11 @@ export class Api {
 
   me() {
     return this.request<Profile>('/me');
+  }
+
+  /** One of the drawn avatars, or null for the default silhouette. */
+  setAvatar(avatar: string | null) {
+    return this.request<{ avatar: string | null }>('/me/avatar', { method: 'PUT', json: { avatar } });
   }
 
   createInvite() {

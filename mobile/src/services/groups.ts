@@ -245,6 +245,12 @@ export class ProfileCache {
     if (missing.length) for (const p of await this.api.profiles(missing)) this.byId.set(p.id, p);
     return this.byId;
   }
+
+  /** After changing our own avatar: shown right away in groups and chats. */
+  setAvatar(id: string, avatar: string | null) {
+    const p = this.byId.get(id);
+    if (p) this.byId.set(id, { ...p, avatar });
+  }
 }
 
 /**
@@ -276,6 +282,7 @@ export interface ChatMessage {
   clientId: string;
   senderId: string;
   senderName: string;
+  senderAvatar: string | null;
   // Both null: could not be verified/decrypted (or a malformed image body).
   text: string | null;
   image: ImageBody | null;
@@ -312,6 +319,7 @@ export async function decryptMessages(s: Session, profiles: ProfileCache, keys: 
       clientId: m.clientId,
       senderId: m.senderId,
       senderName: p?.username ?? '?',
+      senderAvatar: p?.avatar ?? null,
       text,
       image,
       createdAt: m.createdAt,
