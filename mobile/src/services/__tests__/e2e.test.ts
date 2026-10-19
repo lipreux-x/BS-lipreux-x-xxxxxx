@@ -6,7 +6,7 @@
  *   E2E_API_URL=https://... E2E_INVITE=XXXX-... npx jest e2e
  *   cd ../server && npx tsx scripts/cleanup-test-users.ts  # removes e2e_* users
  */
-import { generateIdentity } from '@/crypto';
+import { b64, generateIdentity } from '@/crypto';
 import { initCrypto } from '@/crypto/sodium';
 import { Api, type WireMessage } from '../api';
 import {
@@ -16,12 +16,15 @@ import {
   fetchSince,
   joinGroup,
   listGroups,
+  loadImage,
   newClientId,
   ProfileCache,
+  sendImage,
   sendText,
   shareMissingKeys,
   syncGroup,
   unlockGroup,
+  uploadImage,
   type Session,
 } from '../groups';
 import { RealtimeClient } from '../realtime';
@@ -58,7 +61,7 @@ run('app services against the deployed API', () => {
     // Alice creates a group and invites Bob.
     // Letter codes: never collide with a real (digit) group code on the branch.
     const groupCode = `ZZ${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
-    const keywords = ['Ã‰tÃ©', 'plage', 'soleil'];
+    const keywords = ['Été', 'plage', 'soleil'];
     const { id: groupId } = await createGroup(alice, 'Les Potes', groupCode, keywords);
     const { code } = await alice.api.createInvite();
     const bob = await onboard('bob', code, '135790');
@@ -95,19 +98,35 @@ run('app services against the deployed API', () => {
     let sent: WireMessage | undefined;
     const clientId = newClientId();
     const send = async () => {
-      sent = await sendText(bob, groupId, bobUnlock!.groupKey, 1, 'rdv Ã  la base ðŸ”’', clientId);
+      sent = await sendText(bob, groupId, bobUnlock!.groupKey, 1, 'rdv à la base 🔒', clientId);
       // Offline replay of the same message is de-duplicated by the server.
-      expect((await sendText(bob, groupId, bobUnlock!.groupKey, 1, 'rdv Ã  la base ðŸ”’', clientId)).id).toBe(sent.id);
+      expect((await sendText(bob, groupId, bobUnlock!.groupKey, 1, 'rdv à la base 🔒', clientId)).id).toBe(sent.id);
     };
 
     const received = await live;
     expect(received.id).toBe(sent!.id);
     const [chat] = await decryptMessages(alice, aliceProfiles, aliceUnlock!.keys, [received]);
-    expect(chat).toMatchObject({ text: 'rdv Ã  la base ðŸ”’', senderName: bob.account.username, mine: false });
+    expect(chat).toMatchObject({ text: 'rdv à la base 🔒', senderName: bob.account.username, mine: false });
 
     // Resync over HTTP gives the same message.
     const history = await decryptMessages(alice, aliceProfiles, aliceUnlock!.keys, await fetchSince(alice, groupId, 0));
-    expect(history.map((m) => m.text)).toEqual(['rdv Ã  la base ðŸ”’']);
+    expect(history.map((m) => m.text)).toEqual(['rdv à la base 🔒']);
+
+    // Bob sends an image: encrypted on his phone, blob in object storage, key in the message.
+    const jpeg = new Uint8Array(200_000).map((_, i) => (i * 7) & 0xff);
+    const imageBody = await uploadImage(bob, groupId, { jpeg, width: 800, height: 600, preview: 'AAAA' });
+    const imageMsg = await sendImage(bob, groupId, bobUnlock!.groupKey, 1, imageBody, newClientId());
+    const [imageChat] = await decryptMessages(alice, aliceProfiles, aliceUnlock!.keys, [imageMsg]);
+    expect(imageChat).toMatchObject({ text: null, image: { attachmentId: imageBody.attachmentId, width: 800, height: 600 } });
+    expect(await loadImage(alice, groupId, imageChat!.image!)).toEqual(jpeg);
+    // The server holds only ciphertext, and the upload cannot be reused by another message.
+    const { url } = await alice.api.attachmentUrl(groupId, imageBody.attachmentId);
+    const stored = await alice.api.downloadBlob(url);
+    expect(stored.length).toBe(jpeg.length + 40);
+    expect(Buffer.from(stored).includes(Buffer.from(jpeg.subarray(0, 64)))).toBe(false);
+    await expect(sendImage(alice, groupId, aliceUnlock!.groupKey, 1, imageBody, newClientId())).rejects.toMatchObject({ code: 'invalid_attachment' });
+    // A wrong file key does not open it.
+    await expect(loadImage(alice, groupId, { ...imageBody, fileKey: b64.encode(new Uint8Array(32)) })).rejects.toMatchObject({ code: 'DECRYPT_FAILED' });
 
     // Alice removes Bob: her next sync draws key v2 for those who remain.
     await alice.api.removeMember(groupId, bob.account.userId);
@@ -116,7 +135,7 @@ run('app services against the deployed API', () => {
     expect(synced.summary.rotationPending).toBe(false);
     await sendText(alice, groupId, synced.keys.get(2)!, 2, 'sans Bob', newClientId());
     const both = await decryptMessages(alice, aliceProfiles, synced.keys, await fetchSince(alice, groupId, 0));
-    expect(both.map((m) => m.text)).toEqual(['rdv Ã  la base ðŸ”’', 'sans Bob']);
+    expect(both.map((m) => m.text ?? m.image?.attachmentId)).toEqual(['rdv à la base 🔒', imageBody.attachmentId, 'sans Bob']);
     await expect(fetchSince(bob, groupId, 0)).rejects.toMatchObject({ status: 404 });
 
     // Next unlock: the code still opens (v1 on the phone), v2 gets locked under it.
