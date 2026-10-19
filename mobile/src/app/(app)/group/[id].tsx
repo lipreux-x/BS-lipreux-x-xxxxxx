@@ -1,6 +1,6 @@
 import { router, Stack, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, FlatList, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { FlatList, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { API_URL } from '@/config';
 import type { ImageBody } from '@/crypto';
@@ -26,10 +26,14 @@ import {
 import { imageCache, pickImage } from '@/services/images';
 import { RealtimeClient } from '@/services/realtime';
 import { LockedOutError, WrongCodeError } from '@/services/vault';
+import { Composer } from '@/ui/chat/Composer';
+import { DaySeparator, MessageBubble, type DeliveryStatus } from '@/ui/chat/MessageBubble';
+import { buildTimeline, timeLabel } from '@/ui/chat/timeline';
 import { CodeEntry, type CodeResult } from '@/ui/CodeEntry';
 import { ImageBubble, LocalImage } from '@/ui/ImageBubble';
 import { ImageViewer } from '@/ui/ImageViewer';
-import { colors, space, type } from '@/ui/theme';
+import { Led } from '@/ui/Led';
+import { colors, fonts, mono, space, type } from '@/ui/theme';
 
 export default function GroupScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -183,7 +187,7 @@ function GroupUnlock({ groupId, onOpen }: { groupId: string; onOpen(g: OpenGroup
 
 // ---- Chat (SPEC §2.4) ------------------------------------------------------------------
 
-type Pending = { clientId: string; failed: boolean; error?: string } & (
+type Pending = { clientId: string; at: string; failed: boolean; error?: string } & (
   | { kind: 'text'; text: string }
   // `body` is set once the encrypted file is uploaded: a retry only resends the message.
   | { kind: 'image'; image: PreparedImage; body?: ImageBody }
@@ -198,7 +202,10 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
   const [viewing, setViewing] = useState<Uint8Array | null>(null);
   const [online, setOnline] = useState(true);
   const [removed, setRemoved] = useState(false);
+  // History fetched once: until then an empty list means "loading", not "no messages".
+  const [loaded, setLoaded] = useState(false);
   const lastSeq = useRef(0);
+  const list = useRef<FlatList<Item>>(null);
   // Latest keys for callbacks that outlive a render (realtime, retries).
   const current = useRef(group);
   useEffect(() => {
@@ -253,6 +260,7 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
     try {
       const wire = await fetchSince(session, groupId, lastSeq.current);
       merge(await decrypt(wire));
+      setLoaded(true);
       setOnline(true);
     } catch (e) {
       if (e instanceof NetworkError) setOnline(false);
@@ -275,6 +283,7 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
 
   async function send(item: Pending) {
     const { clientId } = item;
+    list.current?.scrollToOffset({ offset: 0, animated: true });
     setPending((p) => [...p.filter((x) => x.clientId !== clientId), { ...item, failed: false, error: undefined }]);
     try {
       let ready = item;
@@ -310,7 +319,7 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
     setPicking(true);
     try {
       const image = await pickImage();
-      if (image) void send({ clientId: newClientId(), kind: 'image', image, failed: false });
+      if (image) void send({ clientId: newClientId(), at: new Date().toISOString(), kind: 'image', image, failed: false });
     } catch {
       // Picker or re-encoding failed: nothing was sent.
     } finally {
@@ -328,123 +337,201 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
     );
   }
 
-  type Row = {
-    key: string;
-    mine: boolean;
-    text: string | null;
-    image?: ImageBody;
-    local?: PreparedImage;
-    author?: string;
-    status?: 'sending' | 'failed';
-    pending?: Pending;
-  };
-  const rows: Row[] = [
-    ...messages.map((m) => ({ key: m.id, mine: m.mine, text: m.text, image: m.image ?? undefined, author: m.mine ? undefined : m.senderName })),
-    ...pending.map((p) => ({
-      key: p.clientId,
-      mine: true,
-      text: p.kind === 'text' ? p.text : null,
-      local: p.kind === 'image' ? p.image : undefined,
-      status: p.failed ? ('failed' as const) : ('sending' as const),
-      pending: p,
-    })),
-  ].reverse();
-
   return (
     <SafeAreaView style={styles.screen} edges={['bottom']}>
       <Stack.Screen
         options={{
-          title: group.name,
+          headerTitle: () => (
+            <View style={styles.title}>
+              <Led state="green" size={7} />
+              <Text style={styles.titleText} numberOfLines={1}>
+                {group.name}
+              </Text>
+            </View>
+          ),
           headerRight: () => (
-            <Pressable hitSlop={12} onPress={() => router.push({ pathname: '/group/settings', params: { id: groupId } })}>
-              <Text style={{ color: colors.accentFg }}>Réglages</Text>
+            <Pressable
+              hitSlop={12}
+              accessibilityRole="button"
+              accessibilityLabel="Réglages du groupe"
+              onPress={() => router.push({ pathname: '/group/settings', params: { id: groupId } })}
+            >
+              <Text style={styles.headerButton}>⚙</Text>
             </Pressable>
           ),
         }}
       />
-      {!online ? <Text style={styles.banner}>Hors ligne — les messages partiront dès le retour du réseau</Text> : null}
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={90}>
-        <FlatList
-          inverted
-          data={rows}
-          keyExtractor={(r) => r.key}
-          contentContainerStyle={{ padding: space.md, gap: space.sm }}
-          renderItem={({ item }) => (
-            <Pressable
-              disabled={item.status !== 'failed'}
-              onPress={() => item.pending && void send(item.pending)}
-              style={[styles.bubble, item.mine ? styles.mine : styles.theirs, (item.image || item.local) && styles.imageBubble]}
-            >
-              {item.author ? <Text style={styles.author}>{item.author}</Text> : null}
-              {item.image ? (
-                <ImageBubble session={session} groupId={groupId} body={item.image} onOpen={setViewing} />
-              ) : item.local ? (
-                <LocalImage jpeg={item.local.jpeg} width={item.local.width} height={item.local.height} />
-              ) : (
-                <Text style={item.text === null ? styles.unreadable : type.body}>{item.text ?? 'Message illisible (signature ou clé invalide)'}</Text>
-              )}
-              {item.status ? (
-                <Text style={styles.status}>
-                  {item.status === 'sending' ? '⏳' : `${item.pending?.error ?? 'Échec'} — touche pour renvoyer`}
-                </Text>
-              ) : null}
-            </Pressable>
-          )}
-        />
-        <View style={styles.composer}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Envoyer une photo"
-            disabled={picking}
-            onPress={() => void sendPhoto()}
-            style={styles.attach}
-          >
-            {picking ? <ActivityIndicator color={colors.accentFg} /> : <Text style={styles.attachLabel}>＋</Text>}
-          </Pressable>
-          <TextInput
-            value={draft}
-            onChangeText={setDraft}
-            placeholder="Message chiffré"
-            placeholderTextColor={colors.textDim}
-            multiline
-            maxLength={4000}
-            style={styles.input}
-          />
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Envoyer"
-            disabled={!draft.trim()}
-            onPress={() => {
-              const text = draft.trim().replace(/^\u0000+/, ''); // a leading NUL marks image bodies
-              setDraft('');
-              if (text) void send({ clientId: newClientId(), kind: 'text', text, failed: false });
-            }}
-            style={[styles.send, !draft.trim() && { opacity: 0.4 }]}
-          >
-            <Text style={styles.sendLabel}>↑</Text>
-          </Pressable>
+      {!online ? (
+        <View style={styles.banner}>
+          <Led state="amber" size={7} />
+          <Text style={styles.bannerText}>HORS LIGNE — ENVOI AU RETOUR DU RÉSEAU</Text>
         </View>
+      ) : null}
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={90}>
+        <Timeline
+          listRef={list}
+          loaded={loaded}
+          messages={messages}
+          pending={pending}
+          renderContent={(item) =>
+            item.image ? (
+              <ImageBubble session={session} groupId={groupId} body={item.image} onOpen={setViewing} />
+            ) : item.local ? (
+              <LocalImage jpeg={item.local.jpeg} width={item.local.width} height={item.local.height} />
+            ) : item.text === null ? (
+              <Text style={styles.unreadable}>Message illisible (signature ou clé invalide)</Text>
+            ) : (
+              <Text style={styles.text} selectable>
+                {item.text}
+              </Text>
+            )
+          }
+          onRetry={(p) => void send(p)}
+        />
+        <Composer
+          value={draft}
+          onChange={setDraft}
+          attaching={picking}
+          onAttach={() => void sendPhoto()}
+          onSend={() => {
+            const text = draft.trim().replace(/^\u0000+/, ''); // a leading NUL marks image bodies
+            setDraft('');
+            if (text) void send({ clientId: newClientId(), at: new Date().toISOString(), kind: 'text', text, failed: false });
+          }}
+        />
       </KeyboardAvoidingView>
       <ImageViewer jpeg={viewing} onClose={() => setViewing(null)} />
     </SafeAreaView>
   );
 }
 
+// ---- Timeline --------------------------------------------------------------------------
+
+/** One line of the chat, sent or still on its way. */
+interface Line {
+  key: string;
+  senderId: string;
+  at: Date;
+  mine: boolean;
+  author: string;
+  text: string | null;
+  image?: ImageBody;
+  local?: PreparedImage;
+  status?: DeliveryStatus;
+  pending?: Pending;
+}
+
+type Item = ReturnType<typeof buildTimeline<Line>>[number];
+
+function Timeline({
+  listRef,
+  loaded,
+  messages,
+  pending,
+  renderContent,
+  onRetry,
+}: {
+  listRef: React.RefObject<FlatList<Item> | null>;
+  loaded: boolean;
+  messages: ChatMessage[];
+  pending: Pending[];
+  renderContent(line: Line): React.ReactNode;
+  onRetry(p: Pending): void;
+}) {
+  const { session } = useUnlocked();
+  const me = session.account.userId;
+  // Newest first: the list is inverted so it opens on the latest message.
+  const items = useMemo(() => {
+    const lines: Line[] = [
+      ...messages.map((m) => ({
+        key: m.id,
+        senderId: m.senderId,
+        at: new Date(m.createdAt),
+        mine: m.mine,
+        author: m.senderName,
+        text: m.text,
+        image: m.image ?? undefined,
+        status: m.mine ? ('sent' as const) : undefined,
+      })),
+      ...pending.map((p) => ({
+        key: p.clientId,
+        senderId: me,
+        at: new Date(p.at),
+        mine: true,
+        author: '',
+        text: p.kind === 'text' ? p.text : null,
+        local: p.kind === 'image' ? p.image : undefined,
+        status: p.failed ? ('failed' as const) : ('sending' as const),
+        pending: p,
+      })),
+    ];
+    return buildTimeline(lines, new Date()).reverse();
+  }, [messages, pending, me]);
+
+  return (
+    <FlatList
+      ref={listRef}
+      inverted
+      data={items}
+      keyExtractor={(i) => i.key}
+      keyboardShouldPersistTaps="handled"
+      contentContainerStyle={styles.timeline}
+      ListEmptyComponent={
+        // Inverted list: flip the empty state back upright.
+        !loaded ? undefined : <View style={[styles.empty, { transform: [{ scaleY: -1 }] }]}>
+          <Text style={styles.emptyIcon}>🔓</Text>
+          <Text style={styles.emptyTitle}>Coffre ouvert</Text>
+          <Text style={[type.dim, { textAlign: 'center' }]}>
+            Les messages et les photos sont chiffrés sur ton téléphone. Seuls les membres du groupe peuvent les lire.
+          </Text>
+        </View>
+      }
+      renderItem={({ item }) => {
+        if (item.kind === 'day') return <DaySeparator label={item.label} />;
+        const { message: line } = item;
+        return (
+          <View style={item.last ? styles.runEnd : undefined}>
+            <MessageBubble
+              mine={line.mine}
+              author={!line.mine && item.first ? line.author : undefined}
+              time={timeLabel(line.at)}
+              status={line.status}
+              error={line.pending?.error}
+              last={item.last}
+              media={!!(line.image || line.local)}
+              onRetry={line.pending ? () => onRetry(line.pending!) : undefined}
+            >
+              {renderContent(line)}
+            </MessageBubble>
+          </View>
+        );
+      }}
+    />
+  );
+}
+
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   center: { flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center' },
-  banner: { backgroundColor: colors.surface2, color: colors.textDim, padding: space.sm, textAlign: 'center', fontSize: 13 },
-  bubble: { maxWidth: '80%', borderRadius: 16, paddingHorizontal: 14, paddingVertical: 10 },
-  mine: { alignSelf: 'flex-end', backgroundColor: colors.forest, borderBottomRightRadius: 4 },
-  theirs: { alignSelf: 'flex-start', backgroundColor: colors.surface2, borderBottomLeftRadius: 4 },
-  author: { color: colors.accentFg, fontSize: 12, marginBottom: 2 },
-  unreadable: { color: colors.textDim, fontStyle: 'italic' },
-  status: { color: colors.textDim, fontSize: 11, marginTop: 4, textAlign: 'right' },
-  imageBubble: { padding: 4 },
-  composer: { flexDirection: 'row', alignItems: 'flex-end', gap: space.sm, padding: space.sm, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
-  input: { flex: 1, minHeight: 44, maxHeight: 140, borderRadius: 22, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, color: colors.text, paddingHorizontal: 16, paddingVertical: 10, fontSize: 16 },
-  send: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.accent, borderWidth: 1, borderColor: colors.accentFg, alignItems: 'center', justifyContent: 'center' },
-  sendLabel: { color: colors.text, fontSize: 22, fontWeight: '700' },
-  attach: { width: 44, height: 44, borderRadius: 22, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
-  attachLabel: { color: colors.accentFg, fontSize: 22 },
+  title: { flexDirection: 'row', alignItems: 'center', gap: 8, maxWidth: 220 },
+  titleText: { color: colors.text, fontSize: 17, fontFamily: fonts.semibold },
+  headerButton: { color: colors.accentFg, fontSize: 24 },
+  banner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 6,
+    backgroundColor: colors.surface2,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+  },
+  bannerText: { fontFamily: mono, fontSize: 10, letterSpacing: 1, color: colors.textDim },
+  timeline: { paddingHorizontal: space.md, paddingVertical: space.sm, gap: 3, flexGrow: 1 },
+  runEnd: { marginBottom: space.sm },
+  text: { color: colors.text, fontSize: 16, lineHeight: 21 },
+  unreadable: { color: colors.textDim, fontStyle: 'italic', fontSize: 14 },
+  empty: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: space.sm, padding: space.xl },
+  emptyIcon: { fontSize: 32 },
+  emptyTitle: { color: colors.text, fontSize: 18, fontFamily: fonts.semibold },
 });

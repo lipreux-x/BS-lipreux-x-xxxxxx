@@ -96,7 +96,7 @@ export function LocalImage({ jpeg, width, height }: { jpeg: Uint8Array; width: n
 }
 
 const styles = StyleSheet.create({
-  frame: { borderRadius: 12, overflow: 'hidden', backgroundColor: colors.surface },
+  frame: { borderRadius: 7, overflow: 'hidden', backgroundColor: colors.surface },
   overlay: { ...StyleSheet.absoluteFill, alignItems: 'center', justifyContent: 'center', padding: 12 },
   error: { color: colors.text, fontSize: 13, textAlign: 'center', textShadowColor: '#000', textShadowRadius: 4 },
 });

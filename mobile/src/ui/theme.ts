@@ -1,4 +1,6 @@
-// SPEC §8: black vault, anthracite grey accent, forest green for my messages.
+import { Platform } from 'react-native';
+
+// SPEC §8: black vault, anthracite grey accent (also my messages), forest green for the send key and "open".
 export const colors = {
   bg: '#000000',
   surface: '#0D0D0D',
@@ -23,6 +25,12 @@ export const fonts = {
   semibold: 'SpaceGrotesk_600SemiBold',
   bold: 'SpaceGrotesk_700Bold',
 } as const;
+
+/** Monospace of the safe's LCD screens (code display, timestamps). */
+export const mono = Platform.select({ ios: 'Menlo', default: 'monospace' });
+
+/** Status LEDs, as on the safe's code display. */
+export const led = { green: '#3DD68C', amber: '#E8A33D' } as const;
 
 export const space = { xs: 4, sm: 8, md: 16, lg: 24, xl: 40 } as const;
 
