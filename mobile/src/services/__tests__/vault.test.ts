@@ -1,9 +1,9 @@
 import { generateGroupKey, generateIdentity } from '@/crypto';
 import { initCrypto } from '@/crypto/sodium';
-import { FREE_ATTEMPTS, initialLockout, registerFailure, remainingMs } from '../lockout';
+import { checkLockout, FREE_ATTEMPTS, initialLockout, registerFailure, remainingMs } from '../lockout';
 import { LockedOutError, Vault, WrongCodeError, type SecretStore } from '../vault';
 
-jest.setTimeout(60_000); // Argon2id at production cost
+jest.setTimeout(60_000);
 
 function memoryStore(): SecretStore & { data: Map<string, string> } {
   const data = new Map<string, string>();
@@ -28,6 +28,22 @@ describe('lockout', () => {
     expect(remainingMs(s, 0)).toBe(60_000);
     for (let i = 0; i < 10; i++) s = registerFailure(s, 0);
     expect(remainingMs(s, 0)).toBe(3_600_000); // capped
+  });
+
+  it('on the uptime clock, setting the date forward skips nothing', () => {
+    let s = initialLockout();
+    for (let i = 0; i < FREE_ATTEMPTS; i++) s = registerFailure(s, 0, 50_000);
+    // Wall clock one year later, uptime 10 s later: 20 s still to wait.
+    expect(remainingMs(s, 365 * 86_400_000, 60_000)).toBe(20_000);
+    expect(remainingMs(s, 0, 80_000)).toBe(0);
+  });
+
+  it('a reboot restarts the wait instead of ending it', () => {
+    let s = initialLockout();
+    for (let i = 0; i < FREE_ATTEMPTS; i++) s = registerFailure(s, 0, 50_000);
+    const after = checkLockout(s, 0, 1_000); // uptime went back: rebooted
+    expect(after.remaining).toBe(30_000);
+    expect(after.rebased?.upAt).toBe(1_000);
   });
 });
 
@@ -102,12 +118,54 @@ describe('vault', () => {
     await expect(vault.unlock('135790')).resolves.toBeDefined();
   });
 
-  it('caches group names sealed with the master key', async () => {
+  it('keeps the verified meta sealed with the master key, with its key version', async () => {
     const store = memoryStore();
     const vault = new Vault(store);
     const { masterKey } = await vault.create(account, generateIdentity(), '482913');
-    await vault.saveMeta('g1', { name: 'Les Potes' }, masterKey);
+    const meta = { name: 'Les Potes', keywords: ['a', 'b', 'c'], admins: ['u1'], members: ['u1'], rev: 2 };
+    await vault.saveMeta('g1', meta, 3, masterKey);
     expect([...store.data.values()].join()).not.toContain('Potes');
-    expect(await vault.meta('g1', masterKey)).toEqual({ name: 'Les Potes' });
+    expect(await vault.metaRecord('g1', masterKey)).toEqual({ meta, keyVersion: 3 });
+  });
+
+  it('keeps the group secret and pinned contact keys sealed', async () => {
+    const store = memoryStore();
+    const vault = new Vault(store);
+    const { masterKey } = await vault.create(account, generateIdentity(), '482913');
+    const wrapKey = generateGroupKey();
+    await vault.saveGroupSecret('g1', { wrapKey, keywords: ['plage', 'été', 'soleil'], codeVersion: 2 }, masterKey);
+    await vault.pin('u2', { signPublicKey: 'SIGN', boxPublicKey: 'BOX' }, masterKey);
+    const all = [...store.data.values()].join();
+    expect(all).not.toContain('plage');
+    expect(all).not.toContain(Buffer.from(wrapKey).toString('base64url'));
+    expect(await vault.groupSecret('g1', masterKey)).toEqual({ wrapKey, keywords: ['plage', 'été', 'soleil'], codeVersion: 2 });
+    expect(await vault.pinned('u2', masterKey)).toEqual({ signPublicKey: 'SIGN', boxPublicKey: 'BOX' });
+    expect(await vault.pinned('u3', masterKey)).toBeNull();
+  });
+
+  it('counts an attempt before running it: killing the app mid-attempt gives no free guess', async () => {
+    const store = memoryStore();
+    const vault = new Vault(store);
+    await vault.create(account, generateIdentity(), '482913');
+    const writes: number[] = [];
+    const set = store.set;
+    store.set = async (k, v) => {
+      if (k === 'bs.lockout_app') writes.push(JSON.parse(v).failures);
+      return set(k, v);
+    };
+    await vault.unlock('482913');
+    // Recorded as a failure first, cleared once the right code was confirmed.
+    expect(writes).toEqual([1, 0]);
+  });
+
+  it('wipeAll erases the account and every group it knows', async () => {
+    const store = memoryStore();
+    const vault = new Vault(store);
+    const { masterKey } = await vault.create(account, generateIdentity(), '482913');
+    await vault.saveGroupKey('g1', 1, generateGroupKey(), '777111', masterKey);
+    await vault.saveGroupSecret('g1', { wrapKey: generateGroupKey(), keywords: ['a', 'b', 'c'], codeVersion: 1 }, masterKey);
+    await vault.wipeAll();
+    expect(await vault.account()).toBeNull();
+    expect([...store.data.keys()]).toEqual([]);
   });
 });

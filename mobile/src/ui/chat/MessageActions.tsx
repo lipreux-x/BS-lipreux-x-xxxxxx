@@ -1,7 +1,7 @@
-import * as Clipboard from 'expo-clipboard';
 import type { ReactNode } from 'react';
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { copySensitive } from '@/services/clipboard';
 import { colors, fonts, space } from '../theme';
 import { QuoteBlock } from './MessageBubble';
 import type { Quote } from './replies';
@@ -34,7 +34,7 @@ export function MessageActions({
         <ActionKey
           label="Copier le texte"
           onPress={() => {
-            void Clipboard.setStringAsync(target.text!);
+            void copySensitive(target.text!);
             onClose();
           }}
         />

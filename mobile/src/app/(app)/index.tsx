@@ -13,7 +13,8 @@ import { Wordmark } from '@/ui/Wordmark';
 // Each group is a safe: same status LED as the code display (green open, amber key received, red closed),
 // and the same word under its name: "Ouvert" in green, "Fermé" in red.
 export default function GroupsList() {
-  const { session, openGroups } = useUnlocked();
+  // groupsVersion: re-render when groups close on their own (10 min out of them).
+  const { session, openGroups, groupsVersion } = useUnlocked();
   const router = useRouter();
   const [groups, setGroups] = useState<GroupListItem[] | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -66,6 +67,7 @@ export default function GroupsList() {
       <FlatList
         data={groups ?? []}
         keyExtractor={(g) => g.id}
+        extraData={groupsVersion}
         ListHeaderComponent={
           groups?.length ? (
             <View style={styles.section}>
@@ -108,7 +110,7 @@ export default function GroupsList() {
         }
         renderItem={({ item }) => {
           const open = openGroups.has(item.id);
-          const closed = !open && item.state.kind !== 'waiting-key' && item.state.kind !== 'first-unlock';
+          const closed = !open && item.state.kind === 'locked';
           return (
             <Pressable
               style={({ pressed }) => [styles.row, pressed && { backgroundColor: colors.surface2 }]}
@@ -119,12 +121,14 @@ export default function GroupsList() {
                 <View style={[styles.led, open ? styles.ledOpen : closed ? styles.ledClosed : item.state.kind === 'first-unlock' && styles.ledKey]} />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={type.body}>{item.name ?? 'Groupe verrouillé'}</Text>
+                <Text style={type.body}>{item.name ?? (item.state.kind === 'pending' ? 'Groupe demandé' : 'Groupe verrouillé')}</Text>
                 <Text style={[type.dim, open ? styles.openText : closed && styles.closedText]}>
                   {open
                     ? 'Ouvert'
-                    : item.state.kind === 'waiting-key'
-                      ? 'En attente de la clé d’un membre'
+                    : item.state.kind === 'pending'
+                      ? 'Demande envoyée — en attente d’un admin'
+                      : item.state.kind === 'waiting-key'
+                      ? 'En attente de la clé d’un admin'
                       : item.state.kind === 'first-unlock'
                         ? 'Clé reçue — entre le code du groupe'
                         : 'Fermé'}

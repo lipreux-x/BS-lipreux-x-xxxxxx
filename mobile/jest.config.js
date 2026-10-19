@@ -13,6 +13,8 @@ const base = {
     // The app has no native libsodium: tests plug in the WASM build, same API.
     '^\./nativeSodium$': 'libsodium-wrappers-sumo',
     '^expo-crypto$': '<rootDir>/test-support/expo-crypto.js',
+    // No native module under Jest: crypto/kdf.ts falls back to JS (tests only).
+    'modules/bs-native$': '<rootDir>/test-support/bs-native.js',
     '^@/(.*)$': '<rootDir>/src/$1',
   },
 };

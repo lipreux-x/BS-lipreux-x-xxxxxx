@@ -122,7 +122,7 @@ export function QuoteBlock({ quote, media, onPress }: { quote: Quote; media?: bo
         {quote.author}
       </Text>
       <Text style={styles.quoteText} numberOfLines={2}>
-        {quote.image ? '📷 Photo' : quote.excerpt}
+        {quote.image ? '📷 Photo' : quote.voice ? '🎤 Vocal' : quote.excerpt}
       </Text>
     </Pressable>
   );

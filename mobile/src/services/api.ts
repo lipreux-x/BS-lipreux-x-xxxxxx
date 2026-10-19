@@ -1,4 +1,12 @@
-import { loginSignature, registrationProof, toPublicIdentity, type Identity, type PublicIdentity } from '@/crypto';
+import {
+  loginSignature,
+  registrationProof,
+  toPublicIdentity,
+  type BackupParams,
+  type Identity,
+  type KeyBackup,
+  type PublicIdentity,
+} from '@/crypto';
 
 /*
  * Typed client for the BaseSecrete API (server/src/app.ts). Only ciphertext,
@@ -31,9 +39,28 @@ export interface Profile extends PublicIdentity {
   avatar?: string | null;
 }
 
+/** A key handout: the group key for one version, wrapped, sealed to us and signed by an admin. */
+export interface WireHandout {
+  keyVersion: number;
+  sealedKey: string;
+  signerId: string;
+  signature: string;
+}
+
+/** A group we asked to join, waiting for an admin: nothing of it is visible yet. */
+export interface PendingGroupSummary {
+  id: string;
+  status: 'pending';
+  expiresAt: string | null;
+}
+
 export interface GroupSummary {
   id: string;
+  status: 'active';
   encryptedMeta: string;
+  /** Who wrote the meta (an admin) and their signature over it. */
+  metaSignerId: string;
+  metaSignature: string;
   currentKeyVersion: number;
   ephemeralSeconds: number | null;
   /** A member left or was removed: the next member who opens the group rotates the key. */
@@ -43,13 +70,28 @@ export interface GroupSummary {
   /** Self-destruct date (ISO): the group and everything in it is then deleted. */
   expiresAt: string | null;
   role: 'admin' | 'member';
-  sealedKeys: { keyVersion: number; sealedKey: string }[];
+  sealedKeys: WireHandout[];
 }
 
 export interface Member {
   userId: string;
   role: 'admin' | 'member';
-  hasCurrentKey: boolean;
+  /** Key versions the server holds a handout of for this member. */
+  keyVersions: number[];
+}
+
+/** Someone who typed the right code + keywords and waits for an admin (admins only see these). */
+export interface JoinRequest {
+  userId: string;
+  requestedAt: string;
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** An id going into a URL path: anything but a UUID is refused before any request. */
+function id(value: string): string {
+  if (!UUID.test(value)) throw new ApiError(400, 'invalid_id');
+  return value;
 }
 
 export interface WireMessage {
@@ -165,7 +207,7 @@ export class Api {
   // ---- auth --------------------------------------------------------------------
 
   /** Consumes an invite. Returns the new user id and a first access token. */
-  async register(inviteCode: string, username: string, identity: Identity) {
+  async register(inviteCode: string, username: string, identity: Identity, backup: KeyBackup) {
     const res = await this.request<{ userId: string; accessToken: string }>('/auth/register', {
       method: 'POST',
       auth: false,
@@ -174,9 +216,20 @@ export class Api {
         username,
         ...toPublicIdentity(identity),
         proof: registrationProof(identity, inviteCode, username),
+        backup,
       },
     });
     return res;
+  }
+
+  /** Argon2id parameters of a username's key backup (a decoy if there is none). */
+  recoverParams(username: string) {
+    return this.request<BackupParams>('/auth/recover/params', { method: 'POST', auth: false, json: { username } });
+  }
+
+  /** The password-sealed identity, once authKey matches. 401 bad_credentials, 429 too_many_attempts. */
+  recover(username: string, authKey: string) {
+    return this.request<{ userId: string; box: string }>('/auth/recover', { method: 'POST', auth: false, json: { username, authKey } });
   }
 
   me() {
@@ -193,59 +246,86 @@ export class Api {
   }
 
   profiles(ids: string[]) {
-    return ids.length ? this.request<Profile[]>(`/profiles?ids=${ids.join(',')}`) : Promise.resolve([]);
+    return ids.length ? this.request<Profile[]>(`/profiles?ids=${ids.map(id).join(',')}`) : Promise.resolve([]);
   }
 
   // ---- groups ------------------------------------------------------------------
 
   groups() {
-    return this.request<GroupSummary[]>('/groups');
+    return this.request<(GroupSummary | PendingGroupSummary)[]>('/groups');
   }
 
+  /** The creator's own handout and the signed meta go up with the group. `joinKey` comes from the code + keywords. */
   createGroup(input: {
     id: string;
     encryptedMeta: string;
-    groupCode: string;
-    keywords: string[];
+    metaSignature: string;
+    joinKey: string;
     sealedKey: string;
+    keySignature: string;
     ephemeralSeconds?: number | null;
     expiresAt?: string | null;
   }) {
     return this.request<{ id: string; currentKeyVersion: number }>('/groups', { method: 'POST', json: input });
   }
 
-  /** The code identifies the group (codes are unique server-side); the keywords are checked with it. */
-  joinGroup(groupCode: string, keywords: string[]) {
-    return this.request<{ groupId: string }>('/groups/join', { method: 'POST', json: { groupCode, keywords } });
+  /** Asks to join: pending until an admin approves. The code and keywords never leave the phone, only `joinKey`. */
+  joinGroup(joinKey: string) {
+    return this.request<{ groupId: string; status: 'pending' | 'active' }>('/groups/join', { method: 'POST', json: { joinKey } });
   }
 
+  /** Active members, and the pending requests (only an admin gets those). */
   members(groupId: string) {
-    return this.request<{ currentKeyVersion: number; members: Member[] }>(`/groups/${groupId}/members`);
+    return this.request<{ currentKeyVersion: number; members: Member[]; pending: JoinRequest[] }>(`/groups/${id(groupId)}/members`);
   }
 
-  shareKeys(groupId: string, keys: { userId: string; keyVersion: number; sealedKey: string }[]) {
-    return this.request<{ stored: number }>(`/groups/${groupId}/keys`, { method: 'POST', json: { keys } });
+  /** Admin: lets a newcomer in with their handout of the current key and the meta that now lists them. */
+  approveMember(groupId: string, userId: string, input: { keyVersion: number; sealedKey: string; keySignature: string; encryptedMeta: string; metaSignature: string }) {
+    return this.request<{ approved: true }>(`/groups/${id(groupId)}/members/${id(userId)}/approve`, { method: 'POST', json: input });
   }
 
-  /** New key sealed to exactly the current members, with the meta re-encrypted under it. */
-  rotateKey(groupId: string, input: { fromKeyVersion: number; encryptedMeta: string; keys: { userId: string; sealedKey: string }[] }) {
-    return this.request<{ currentKeyVersion: number }>(`/groups/${groupId}/rotate`, { method: 'POST', json: input });
+  rejectMember(groupId: string, userId: string) {
+    return this.request<{ rejected: true }>(`/groups/${id(groupId)}/members/${id(userId)}/reject`, { method: 'POST' });
   }
 
+  /** Admin: new key, handed to exactly the active members, with the meta (and admin list) written under it. */
+  rotateKey(
+    groupId: string,
+    input: { fromKeyVersion: number; encryptedMeta: string; metaSignature: string; admins: string[]; keys: { userId: string; sealedKey: string; signature: string }[] },
+  ) {
+    return this.request<{ currentKeyVersion: number }>(`/groups/${id(groupId)}/rotate`, { method: 'POST', json: input });
+  }
+
+  /** Admin: who the admins are (the last admin hands the role over before leaving). */
+  setAdmins(groupId: string, input: { keyVersion: number; admins: string[]; encryptedMeta: string; metaSignature: string }) {
+    return this.request<{ admins: string[] }>(`/groups/${id(groupId)}/admins`, { method: 'PUT', json: input });
+  }
+
+  /** 409 handover_required: the last admin must name another one first. */
   leaveGroup(groupId: string) {
-    return this.request<{ left: true }>(`/groups/${groupId}/leave`, { method: 'POST' });
+    return this.request<{ left: true }>(`/groups/${id(groupId)}/leave`, { method: 'POST' });
   }
 
   removeMember(groupId: string, userId: string) {
-    return this.request<{ removed: true }>(`/groups/${groupId}/members/${userId}/remove`, { method: 'POST' });
+    return this.request<{ removed: true }>(`/groups/${id(groupId)}/members/${id(userId)}/remove`, { method: 'POST' });
   }
 
-  changeGroupCode(groupId: string, input: { groupCode: string; keywords: string[]; keyVersion: number; encryptedMeta: string }) {
-    return this.request<{ codeVersion: number }>(`/groups/${groupId}/code`, { method: 'PUT', json: input });
+  /** Admin: new join key, new meta, and every handout on the server re-wrapped under the new code. */
+  changeGroupCode(
+    groupId: string,
+    input: {
+      joinKey: string;
+      keyVersion: number;
+      encryptedMeta: string;
+      metaSignature: string;
+      keys: { userId: string; keyVersion: number; sealedKey: string; signature: string }[];
+    },
+  ) {
+    return this.request<{ codeVersion: number }>(`/groups/${id(groupId)}/code`, { method: 'PUT', json: input });
   }
 
   setEphemeral(groupId: string, seconds: number | null) {
-    return this.request<{ ephemeralSeconds: number | null }>(`/groups/${groupId}/ephemeral`, { method: 'PUT', json: { seconds } });
+    return this.request<{ ephemeralSeconds: number | null }>(`/groups/${id(groupId)}/ephemeral`, { method: 'PUT', json: { seconds } });
   }
 
   // ---- messages ----------------------------------------------------------------
@@ -255,19 +335,19 @@ export class Api {
     groupId: string,
     msg: { clientId: string; keyVersion: number; nonce: string; ciphertext: string; signature: string; attachmentId?: string },
   ) {
-    return this.request<WireMessage>(`/groups/${groupId}/messages`, { method: 'POST', json: msg });
+    return this.request<WireMessage>(`/groups/${id(groupId)}/messages`, { method: 'POST', json: msg });
   }
 
   /** `purgeSeq`: latest erase of the group's history (bumped by eraseMessages). */
   messages(groupId: string, after: number, limit = 100) {
     return this.request<{ messages: WireMessage[]; hasMore: boolean; purgeSeq: number }>(
-      `/groups/${groupId}/messages?after=${after}&limit=${limit}`,
+      `/groups/${id(groupId)}/messages?after=${after}&limit=${limit}`,
     );
   }
 
   /** Admin: erases every message sent in [from, to) for everyone, images included. */
   eraseMessages(groupId: string, from: Date, to: Date) {
-    return this.request<{ deleted: number }>(`/groups/${groupId}/messages/erase`, {
+    return this.request<{ deleted: number }>(`/groups/${id(groupId)}/messages/erase`, {
       method: 'POST',
       json: { from: from.toISOString(), to: to.toISOString() },
     });
@@ -277,11 +357,11 @@ export class Api {
 
   /** Reserves an attachment id; the URL accepts exactly `size` bytes for a few minutes. */
   createAttachment(groupId: string, size: number) {
-    return this.request<{ id: string; uploadUrl: string }>(`/groups/${groupId}/attachments`, { method: 'POST', json: { size } });
+    return this.request<{ id: string; uploadUrl: string }>(`/groups/${id(groupId)}/attachments`, { method: 'POST', json: { size } });
   }
 
   attachmentUrl(groupId: string, attachmentId: string) {
-    return this.request<{ url: string }>(`/groups/${groupId}/attachments/${attachmentId}`);
+    return this.request<{ url: string }>(`/groups/${id(groupId)}/attachments/${id(attachmentId)}`);
   }
 
   /** PUT to a presigned storage URL (no API token: the signature is the authorization). */

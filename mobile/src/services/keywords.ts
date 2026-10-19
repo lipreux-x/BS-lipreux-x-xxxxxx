@@ -1,14 +1,12 @@
+import { KEYWORD_COUNT, normalizeKeyword } from '@/crypto';
+
 /*
  * Join keywords: 3 words chosen at creation, typed with the group code to
- * join. Same normalization as server/src/lib/crypto.ts (case, accents and
- * extra spaces ignored; the server also ignores the order).
+ * join. Case, accents, extra spaces and order are ignored (crypto/groupSecret.ts
+ * normalizes them before deriving the group's keys).
  */
-export const KEYWORD_COUNT = 3;
+export { KEYWORD_COUNT, normalizeKeyword };
 export const KEYWORD_MAX_LENGTH = 40;
-
-export function normalizeKeyword(word: string): string {
-  return word.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().trim().replace(/\s+/g, ' ');
-}
 
 /** Null if valid, else the problem to show. */
 export function keywordsProblem(words: string[]): string | null {

@@ -9,6 +9,7 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { ActivityIndicator, View } from 'react-native';
 import { SessionProvider, useSession } from '@/session/SessionProvider';
+import { PrivacyCover } from '@/ui/PrivacyCover';
 import { colors, fonts } from '@/ui/theme';
 
 function RootStack() {
@@ -54,6 +55,7 @@ export default function RootLayout() {
     <SessionProvider>
       <StatusBar style="light" />
       <RootStack />
+      <PrivacyCover />
     </SessionProvider>
   );
 }

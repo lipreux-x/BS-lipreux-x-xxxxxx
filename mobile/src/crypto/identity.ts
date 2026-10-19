@@ -82,6 +82,16 @@ export function safetyNumber(
   return halves.join('').match(/.{5}/g)!.join(' ');
 }
 
+/**
+ * One person's own key fingerprint: 30 digits, the same on their phone
+ * (Réglages) and on any phone that received their keys from the server. An
+ * admin compares it in person before letting a newcomer in: a key the
+ * server swapped shows other digits.
+ */
+export function keyFingerprint(keys: { boxPublicKey: Uint8Array; signPublicKey: Uint8Array }): string {
+  return fingerprintDigits(keys).match(/.{5}/g)!.join(' ');
+}
+
 function fingerprintDigits(keys: { boxPublicKey: Uint8Array; signPublicKey: Uint8Array }): string {
   const hash = sodium.crypto_generichash(
     30,

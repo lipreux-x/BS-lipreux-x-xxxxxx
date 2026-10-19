@@ -18,10 +18,10 @@
       "adaptiveIcon": {
         "backgroundColor": "#000000",
         "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
+      "allowBackup": false,
       "permissions": [
         "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.WRITE_EXTERNAL_STORAGE",
@@ -33,7 +33,11 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      ["./plugins/withDisplayName", "BaseSecrète"],
+      [
+        "./plugins/withDisplayName",
+        "BaseSecrète"
+      ],
+      "./plugins/withHiddenRecents",
       "expo-router",
       "expo-status-bar",
       "expo-secure-store",
@@ -55,6 +59,23 @@
           "granularPermissions": [
             "photo"
           ]
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "BaseSecrète utilise le micro pour enregistrer les vocaux que tu envoies, chiffrés, dans tes groupes.",
+          "recordAudioAndroid": true,
+          "enableBackgroundRecording": false
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "backgroundColor": "#000000"
         }
       ]
     ],

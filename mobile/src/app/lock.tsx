@@ -1,15 +1,17 @@
 import { useEffect, useState } from 'react';
 import { Animated, Easing, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { NativeCryptoMissingError } from '@/crypto';
 import { useSession } from '@/session/SessionProvider';
-import { remainingMs } from '@/services/lockout';
 import { LockedOutError, WrongCodeError } from '@/services/vault';
 import { CodeEntry, type CodeResult } from '@/ui/CodeEntry';
 import { calm } from '@/ui/theme';
 import { VaultDoor } from '@/ui/VaultDoor';
 
 // SPEC §2.1: vault door; tap -> it unlocks and opens -> a calm keypad for the 6-digit app code.
-// The vault look is only for the opening; the code screen stays quiet.
+// The vault look is only for the opening; the code screen stays quiet. The door ends with the
+// vault's inside (painted `calm`) filling the screen, so the calm background shows at once and
+// only the keypad fades in, as if it were waiting inside.
 export default function LockScreen() {
   const { status, vault, unlock } = useSession();
   const [opened, setOpened] = useState(false);
@@ -18,11 +20,11 @@ export default function LockScreen() {
 
   useEffect(() => {
     if (!opened) return;
-    Animated.timing(reveal, { toValue: 1, duration: 320, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
+    Animated.timing(reveal, { toValue: 1, duration: 420, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
   }, [opened, reveal]);
 
   useEffect(() => {
-    void vault.appLockout().then((s) => setLockedFor(remainingMs(s, Date.now())));
+    void vault.appLockoutRemainingMs().then(setLockedFor);
   }, [vault]);
 
   async function submit(code: string): Promise<CodeResult> {
@@ -38,18 +40,20 @@ export default function LockScreen() {
           ? `Code incorrect — encore ${e.attemptsBeforeDelay} essai${e.attemptsBeforeDelay > 1 ? 's' : ''} avant blocage`
           : 'Code incorrect';
       }
+      // Expo Go or a build without the native module: keys cannot be protected properly.
+      if (e instanceof NativeCryptoMissingError) return 'Version de l’app incomplète : installe celle du store';
       throw e;
     }
   }
 
   return (
     <SafeAreaView style={styles.screen}>
-      {opened ? <Animated.View style={[StyleSheet.absoluteFill, calm, { opacity: reveal }]} /> : null}
+      {opened ? <Animated.View style={[StyleSheet.absoluteFill, calm]} /> : null}
       {opened ? (
         <Animated.View
           style={{
             opacity: reveal,
-            transform: [{ scale: reveal.interpolate({ inputRange: [0, 1], outputRange: [0.94, 1] }) }],
+            transform: [{ scale: reveal.interpolate({ inputRange: [0, 1], outputRange: [0.9, 1] }) }],
           }}
         >
           <CodeEntry

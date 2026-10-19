@@ -1,5 +1,4 @@
-import { argon2id, argon2Verify } from 'hash-wasm';
-import { createHash, createHmac, createPublicKey, randomBytes, verify } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHash, createHmac, createPublicKey, randomBytes, timingSafeEqual, verify } from 'node:crypto';
 
 /*
  * Server-side crypto is limited to verification and hashing. It must stay
@@ -62,49 +61,51 @@ export function normalizeInviteCode(code: string): string {
 }
 
 /**
- * Index for joining with the code alone. Keyed with a server-only secret so a
- * database dump alone does not reveal which group uses which code.
+ * Finds the group to join. The phone never sends the group code or the
+ * keywords: only `joinKey`, derived from both with Argon2id (64 MiB) on the
+ * phone (mobile src/crypto/groupSecret.ts). Keyed with a server-only secret
+ * so a database dump alone does not even allow testing guesses.
  */
-export function groupCodeLookup(code: string): string {
-  const pepper = process.env.GROUP_CODE_PEPPER;
-  if (!pepper || pepper.length < 32) throw new Error('GROUP_CODE_PEPPER is missing or too short');
-  return createHmac('sha256', pepper).update(code).digest('hex');
+export function joinLookup(joinKey: Uint8Array): string {
+  return createHmac('sha256', pepper()).update(joinKey).digest('hex');
 }
 
-// Group code: low entropy by design, so Argon2id + strict rate limiting.
-export async function hashGroupCode(code: string): Promise<string> {
-  return argon2id({
-    password: code,
-    salt: randomBytes(16),
-    parallelism: 1,
-    iterations: 3,
-    memorySize: 64 * 1024, // KiB
-    hashLength: 32,
-    outputType: 'encoded',
-  });
-}
-
-export async function verifyGroupCode(code: string, encoded: string): Promise<boolean> {
-  try {
-    return await argon2Verify({ password: code, hash: encoded });
-  } catch {
-    return false;
-  }
+function pepper(): string {
+  const p = process.env.GROUP_CODE_PEPPER;
+  if (!p || p.length < 32) throw new Error('GROUP_CODE_PEPPER is missing or too short');
+  return p;
 }
 
 /*
- * Join keywords: 3 words chosen at creation, typed with the code to join.
- * Compared forgivingly: case, accents, extra spaces and order do not matter.
+ * Key backups (mobile src/crypto/backup.ts). The phone already sealed the
+ * identity with its password; the server adds a layer keyed by its secret,
+ * so a database dump alone is not enough to start guessing passwords.
  */
-export const KEYWORD_COUNT = 3;
+const serverKey = (label: string) => createHmac('sha256', pepper()).update(`bs/v1/${label}`).digest();
 
-export function normalizeKeyword(word: string): string {
-  return word.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().trim().replace(/\s+/g, ' ');
+export const backupAuthHash = (authKey: Uint8Array): string =>
+  createHmac('sha256', serverKey('backup-auth')).update(authKey).digest('hex');
+
+export function backupAuthMatches(authKey: Uint8Array, stored: string): boolean {
+  const a = Buffer.from(backupAuthHash(authKey), 'hex');
+  const b = Buffer.from(stored, 'hex');
+  return a.length === b.length && timingSafeEqual(a, b);
 }
 
-export function normalizeKeywords(words: string[]): string {
-  return words.map(normalizeKeyword).sort().join('\n');
+/** A believable salt for usernames without a backup, so sign-in does not reveal who exists. */
+export const decoySalt = (username: string): Uint8Array =>
+  new Uint8Array(createHmac('sha256', serverKey('decoy-salt')).update(username).digest().subarray(0, 16));
+
+export function sealAtRest(box: string): string {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', serverKey('backup-box'), iv);
+  const ct = Buffer.concat([cipher.update(box, 'utf8'), cipher.final()]);
+  return Buffer.concat([iv, cipher.getAuthTag(), ct]).toString('base64url');
 }
 
-export const hashKeywords = (words: string[]) => hashGroupCode(normalizeKeywords(words));
-export const verifyKeywords = (words: string[], encoded: string) => verifyGroupCode(normalizeKeywords(words), encoded);
+export function openAtRest(sealed: string): string {
+  const raw = Buffer.from(sealed, 'base64url');
+  const decipher = createDecipheriv('aes-256-gcm', serverKey('backup-box'), raw.subarray(0, 12));
+  decipher.setAuthTag(raw.subarray(12, 28));
+  return Buffer.concat([decipher.update(raw.subarray(28)), decipher.final()]).toString('utf8');
+}

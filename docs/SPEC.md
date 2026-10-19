@@ -22,7 +22,7 @@
 3. L'utilisateur saisit son **code à 6 chiffres**.
    - Correct → animation de déverrouillage → page Messagerie.
    - Incorrect → vibration + shake des points. Compteur d'essais (voir §4.4).
-4. L'app se **reverrouille automatiquement** quand elle passe en arrière-plan (configurable : immédiat / 1 min / 5 min).
+4. L'app se **reverrouille automatiquement** après **5 min** hors de l'app (retour avant : pas de code). Dès qu'elle quitte le premier plan, l'écran est masqué (aperçu des apps récentes).
 5. Option : déverrouillage biométrique (Face ID / empreinte) **en plus** du code, jamais à la place au premier lancement.
 
 ### 2.2 Page Messagerie (liste des groupes)
@@ -34,19 +34,20 @@
 ### 2.3 Ouvrir un groupe
 1. Tap sur un groupe → modal « Code du groupe » (pavé numérique, même style).
 2. Bon code → ouverture de la conversation.
-3. Le groupe reste déverrouillé pendant la session, et se reverrouille quand l'app se verrouille (ou après X min, réglable).
+3. Le groupe reste déverrouillé pendant la session, et se reverrouille quand l'app se verrouille ou **10 min** après qu'on l'a quitté.
 
 ### 2.4 Conversation
 - Messages texte (MVP), puis images, vocaux, réactions.
 - Indicateurs : envoyé / reçu / lu (optionnel, désactivable).
 - Option « messages éphémères » par groupe (24 h / 7 j / off).
-- Captures d'écran bloquées si possible (Android `FLAG_SECURE`, flou sur iOS dans le switcher d'apps).
+- Apps récentes : flou sur iOS, aperçu vide sur Android 13+ (cache noir avant). Les captures d'écran restent autorisées (pas de `FLAG_SECURE`, choix du produit).
 
 ### 2.5 Onboarding (première fois)
-1. L'utilisateur reçoit un **lien/code d'invitation** d'un membre existant.
+1. L'utilisateur reçoit un **code d'invitation** d'un membre existant (valable 2 h ; 3 invitations ouvertes et 10 par jour au plus par membre).
 2. Il choisit un pseudo + crée son code app à 6 chiffres (saisi 2 fois).
 3. L'app génère ses clés **sur l'appareil** (voir §4).
 4. Il rejoint le(s) groupe(s) auxquels il a été invité.
+5. Il choisit aussi un **mot de passe** (10 caractères min., ni suite ni répétition ; sous 16 caractères, 3 types de caractères). Il protège une copie chiffrée de ses clés (Argon2id 64 Mo), gardée par le serveur. Sur un téléphone qui a perdu ses données, « Se connecter » (pseudo + mot de passe, puis nouveau code app) restaure le compte ; chaque groupe redemande alors son code **et** ses mots-clés. Le serveur ne peut pas ouvrir cette copie, limite les échecs à 5 par heure par pseudo (300 par heure en tout), et ne peut pas imposer à l'app un coût plus faible que le sien.
 
 ---
 
@@ -61,7 +62,7 @@
 | Auth | **Neon Auth** (ou JWT maison signé par l'API) | Comptes sur invitation uniquement |
 | Fichiers | **Neon Storage** (ou Cloudflare R2) | Images/vocaux, toujours chiffrés côté client |
 | ORM | **Drizzle** + driver `@neondatabase/serverless` | Typé, léger, migrations simples |
-| Crypto | **libsodium** (`react-native-libsodium`) | Primitives éprouvées, pas de crypto maison |
+| Crypto | Algorithmes libsodium en JS audité (@noble, tweetnacl), octet pour octet ; **module natif** `mobile/modules/bs-native` pour Argon2id (implémentation de référence) et la clé matérielle | Primitives éprouvées, pas de crypto maison |
 | Stockage secret local | `expo-secure-store` (Keychain / Keystore) | Clés protégées par le matériel |
 | Biométrie | `expo-local-authentication` | Option de déverrouillage |
 | Base locale | `expo-sqlite` (chiffrée, ex. SQLCipher via op-sqlite) | Cache des messages déchiffrés, hors-ligne |
@@ -84,37 +85,41 @@
 ### 4.2 Code app (6 chiffres)
 - Une **clé maître locale** aléatoire (32 octets) chiffre toutes les données locales (clés privées, clés de groupes, base SQLite).
 - Cette clé maître est stockée dans `expo-secure-store`, **enveloppée** avec une clé dérivée :
-  `Argon2id(code_app + device_secret, sel)` — `device_secret` étant un secret aléatoire lui aussi dans le Keychain/Keystore.
-- Conséquence : sans le téléphone, le code seul ne sert à rien ; sans le code, le téléphone seul non plus.
+  `k1 = Argon2id(code_app + device_secret, sel)` (64 Mo, 3 passes), puis `HMAC_matériel(k1)` calculé par une clé **non exportable** du Secure Enclave (iOS) / Android Keystore (StrongBox si présent). `device_secret` est un secret aléatoire lui aussi dans le Keychain/Keystore.
+- Conséquence : une copie du stockage de l'app ne suffit pas à tester des codes ; chaque essai doit passer par ce téléphone, où le compteur d'essais s'applique.
 - Le code app n'est **jamais** envoyé au serveur.
+- Toute dérivation Argon2id passe par le module natif : sans lui (Expo Go), l'app refuse plutôt que d'utiliser un coût plus faible.
 
 ### 4.3 Groupes
 - Chaque groupe a une **clé de groupe** aléatoire 256 bits, générée par le créateur.
-- Cette clé est distribuée à chaque membre **chiffrée avec sa clé publique** (`crypto_box_seal`) → table `group_keys` (une ligne par membre).
-- Messages chiffrés avec **XChaCha20-Poly1305** (`crypto_aead_xchacha20poly1305_ietf`) + nonce aléatoire, et **signés** par l'expéditeur (Ed25519).
-- Le **nom et l'avatar du groupe** sont aussi chiffrés avec la clé de groupe.
-- Quand un membre quitte / est retiré → **rotation de clé** : nouvelle clé de groupe redistribuée aux membres restants. Les anciens messages restent lisibles avec l'ancienne clé (versionnage `key_version`).
+- Chaque membre reçoit la clé en **remise** (table `group_keys`, une ligne par membre et par version) : chiffrée sous la clé dérivée du code + mots-clés (`wrapKey`, §4.4), scellée à sa clé publique (`crypto_box_seal`), et **signée par l'admin** qui la remet. Le serveur ne peut ni lire une remise, ni en fabriquer une, ni en donner une à quelqu'un.
+- La **meta** du groupe (nom, avatar, mots-clés, admins, membres, numéro de révision) est chiffrée avec la clé de groupe et **signée par un admin**. Les téléphones suivent ses listes, jamais celles du serveur, et refusent une révision plus ancienne que celle déjà vue.
+- **Entrer dans un groupe** : le code + mots-clés ne font qu'une **demande**. Un admin l'accepte depuis son téléphone (après avoir comparé l'empreinte du nouveau, §4.7) : c'est ce qui lui remet la clé et l'ajoute à la meta. Le serveur ne peut pas ajouter de membre fantôme.
+- Messages chiffrés avec **XChaCha20-Poly1305** (`crypto_aead_xchacha20poly1305_ietf`) + nonce aléatoire, et **signés** par l'expéditeur (Ed25519), vérifiés avec sa clé **épinglée** sur le téléphone.
+- Quand un membre quitte / est retiré → **rotation de clé** par un admin : nouvelle clé remise aux seuls membres de la meta encore présents (tout de suite quand l'admin retire quelqu'un). Les anciens messages restent lisibles avec l'ancienne clé (versionnage `key_version`). Un membre retiré est **banni** : le code qu'il connaît ne lui permet plus de redemander à entrer.
+- Le dernier admin désigne un autre admin (meta signée) avant de pouvoir partir.
 
-### 4.4 Code de groupe
-- Le code de groupe est un **verrou supplémentaire côté appareil**, partagé entre les membres (à l'oral, en vrai).
-- Fonctionnement : la clé de groupe stockée localement est ré-enveloppée avec `Argon2id(code_groupe, sel_groupe)` **puis** avec la clé maître locale. Il faut donc les deux.
-- Pour **rejoindre** un groupe : le serveur garde seulement un hash Argon2id du code de groupe, et vérifie via une fonction de l'API avec **limite stricte d'essais** (ex. 5 essais / heure / utilisateur). Le vrai secret (la clé de groupe) n'arrive ensuite que via `crypto_box_seal`, envoyé par un membre existant ou l'admin du groupe.
-- Code de groupe : 6 chiffres minimum dans le MVP ; prévoir l'option alphanumérique plus longue.
-- **Changer le code** (admin) : le serveur re-hashe le nouveau code et les mots-clés (`code_version` augmente). Chaque téléphone retient la version du code qui verrouille sa clé ; après une ouverture avec l'ancien code, il demande le nouveau et reverrouille la clé avec.
-- **3 mots-clés** choisis à la création, demandés avec le code pour **rejoindre**. Le serveur n'en garde qu'un hash Argon2id (casse, accents, espaces et ordre ignorés) ; un échec ne dit jamais si c'est le code ou les mots-clés. Les membres les retrouvent dans la fiche info du groupe (chiffrés avec la clé de groupe dans `encrypted_meta`).
+### 4.4 Code de groupe et mots-clés
+- Le code de groupe (6+ caractères) et les **3 mots-clés** sont partagés entre les membres, en vrai. Ils **ne quittent jamais le téléphone** : `Argon2id(code + mots-clés)` (64 Mo ; casse, accents, espaces et ordre ignorés) donne deux clés indépendantes (`mobile/src/crypto/groupSecret.ts`) :
+  - `joinKey`, envoyée pour trouver le groupe et demander à entrer. Le serveur n'en garde qu'un HMAC avec son secret, et limite les demandes à 5 par heure par utilisateur et 20 par heure par groupe ;
+  - `wrapKey`, jamais envoyée : toutes les remises de clé du serveur sont chiffrées sous elle. Ouvrir un groupe demande donc l'identité du compte **et** le code + mots-clés (après « Se connecter » sur un nouveau téléphone, les deux sont redemandés).
+- Sur le téléphone, la clé de groupe est en plus ré-enveloppée avec `Argon2id(code_groupe, sel)` **puis** avec la clé maître locale. Il faut donc les deux.
+- **Changer le code** (admin) : nouvelle `joinKey`, nouveaux mots-clés dans la meta, et **toutes les remises re-chiffrées** sous le nouveau code (aucune ne reste ouvrable avec l'ancien ; une version que l'admin ne détient pas est supprimée). `code_version` augmente ; les autres membres tapent une fois le nouveau code, qui doit ouvrir leur remise.
+- Les membres retrouvent les mots-clés dans la fiche info du groupe (dans la meta chiffrée).
 
 ### 4.5 Protection contre le forçage
-- Code app : après 5 échecs → délai croissant (30 s, 1 min, 5 min, 15 min…). Option « auto-destruction » après 10 échecs = effacement des données locales.
+- Code app : après 5 échecs → délai croissant (30 s, 1 min, 5 min, 15 min, 1 h). Option « auto-destruction » après 10 échecs = effacement des données locales (pas encore faite).
 - Code groupe : même logique, compteur par groupe.
-- Compteurs stockés dans le Secure Store (pas en mémoire, pas en AsyncStorage).
+- Compteurs stockés dans le Secure Store. Chaque essai est compté **avant** d'être tenté (tuer l'app pendant un essai ne le rend pas gratuit), et l'attente se mesure sur l'horloge de démarrage du téléphone : avancer la date ne la raccourcit pas, un redémarrage la fait repartir.
+- Serveur : invitations, créations de groupe et changements de code limités par utilisateur ; 60 messages par minute ; défis de connexion à usage unique ; un pseudo ne peut pas exister en deux casses (« Alice »/« alice ») ; une invitation brûle après 3 pseudos déjà pris.
 
 ### 4.6 Ce que le serveur voit / ne voit pas
 | Le serveur voit | Le serveur ne voit PAS |
 |---|---|
 | Pseudos, clés publiques | Contenu des messages |
 | Qui est dans quel groupe (IDs) | Nom des groupes, avatars |
-| Horodatage, taille des messages chiffrés | Codes app, codes groupe en clair |
-| | Clés privées, clés de groupe en clair |
+| Horodatage, taille des messages chiffrés | Codes app, codes groupe, mots-clés (seulement un dérivé Argon2id) |
+| Les demandes d'entrée en attente | Clés privées, clés de groupe en clair |
 
 ### 4.7 Autres règles
 - Notifications push : texte générique, aucun nom de groupe ni contenu.
@@ -123,8 +128,11 @@
   - Serveur : table `attachments` + bucket privé `attachments` (clé d'objet `<groupe>/<id>`). URL d'upload valable 5 min et limitée à la taille annoncée (10 Mo max, 60 envois/h). Téléchargement réservé aux membres tant que le message existe. Le fichier est supprimé avec le message éphémère, à la fermeture du groupe, ou après 24 h s'il n'a jamais été envoyé.
   - Téléphone : images déchiffrées gardées en mémoire seulement (vidées au verrouillage). « Enregistrer dans la galerie » est un choix explicite ; l'image n'y est plus chiffrée.
 - Photo de profil : jamais de vraie photo. On choisit dans Réglages une icône de la bibliothèque Lucide (lucide.dev, licence ISC) : silhouette par défaut, ou masque, espion, banque, coffre-fort, diamant, pièces d'or, butin, tirelire, clé, perceuse, guetteur. Le serveur ne stocke que l'identifiant (`profiles.avatar`, liste fermée), visible par les membres des groupes comme le pseudo. Dans le chat, l'avatar et le nom ouvrent chaque série de messages d'un membre.
-- Réponses : la réponse embarque dans son corps chiffré et signé l'id, l'auteur et un extrait (140 caractères max) du message cité. Quand l'original est encore chargé, l'app affiche l'original et non l'extrait, pour qu'un membre ne puisse pas faire dire autre chose à quelqu'un.
-- Vérification des contacts : afficher une **empreinte de sécurité** (safety number) comparable en vrai entre amis.
+- Réponses : la réponse embarque dans son corps chiffré et signé l'id, l'auteur et un extrait (140 caractères max) du message cité. Quand l'original est encore chargé, l'app affiche l'original et non l'extrait, pour qu'un membre ne puisse pas faire dire autre chose à quelqu'un. Sinon l'extrait est marqué « non vérifié » ; une citation qui contredit l'original chargé s'affiche « Citation falsifiée ».
+- Vérification des contacts : chacun a une **empreinte** (30 chiffres, Réglages). L'admin la compare en vrai avec celle qu'il voit avant d'accepter une demande, et peut la voir pour chaque membre (fiche du groupe). Les clés publiques des contacts sont **épinglées** à la première vue : une clé que le serveur changerait ensuite est refusée et signalée.
+- Images reçues : refusées avant affichage si ce n'est pas un JPEG bien formé ou si elles dépassent 4096 px (une image piégée ne peut pas faire planter l'app à chaque ouverture).
+- Fichiers en clair sur le disque (vocaux en lecture, enregistrements, copies du sélecteur de photos) : effacés à chaque lancement en plus du verrouillage. Le presse-papiers (texte copié, invitation) est marqué sensible et vidé au bout d'une minute.
+- Sauvegarde Android des données de l'app désactivée ; sur iOS, une réinstallation efface le coffre que le Keychain aurait gardé.
 - Aucun log contenant des données déchiffrées. Pas d'analytics tiers.
 - Multi-appareils : hors MVP (chaque appareil = une identité ; ajout d'appareil via QR code plus tard).
 
@@ -276,7 +284,7 @@ Composants partagés : `PinPad`, `PinDots`, `VaultSquare` (animation), `MessageB
 - [ ] Reverrouillage auto en arrière-plan
 
 **v0.2**
-- [ ] Images et vocaux chiffrés
+- [x] Images et vocaux chiffrés
 - [ ] Notifications push génériques
 - [ ] Messages éphémères
 - [ ] Rotation de clé à la sortie d'un membre

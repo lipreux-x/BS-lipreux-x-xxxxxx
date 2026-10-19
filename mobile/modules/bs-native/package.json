@@ -1,0 +1,7 @@
+{
+  "name": "bs-native",
+  "version": "1.0.0",
+  "private": true,
+  "description": "BaseSecrète native crypto: Argon2id, hardware-bound device key, monotonic clock",
+  "main": "index.ts"
+}

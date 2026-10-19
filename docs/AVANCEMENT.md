@@ -1,13 +1,41 @@
 # BaseSecrète — Avancement
 
-État du projet au 19/10/2026 (mis à jour après l'effacement de l'historique et les groupes éphémères) : les derniers ajouts et changements, puis le plan du projet avec ce qui est fait et ce qui reste. La spec de référence est [SPEC.md](SPEC.md).
+État du projet au 19/10/2026 (mis à jour après l'ajout de « Se connecter ») : les derniers ajouts et changements, puis le plan du projet avec ce qui est fait et ce qui reste. La spec de référence est [SPEC.md](SPEC.md).
 
 ## Derniers ajouts et changements
+
+### Audit de sécurité et protocole v2 (19/10)
+
+Un audit (serveur, chiffrement, app) a trouvé deux failles critiques : le serveur pouvait remettre aux téléphones une clé de groupe qu'il avait choisie, et ajouter un membre fantôme ou remplacer la clé d'un membre (les téléphones lui partageaient alors la clé). Tout ce qui a été trouvé est corrigé :
+
+- **Entrée dans un groupe sur validation** : le code + mots-clés ne font qu'une demande ; un admin l'accepte depuis son téléphone après avoir comparé l'empreinte du nouveau (Réglages > Mon empreinte). Plus de partage automatique de la clé.
+- **Remises de clé signées** par l'admin et chiffrées sous une clé tirée du code + mots-clés ; **meta signée** (admins, membres, révision). Clés des contacts **épinglées** sur le téléphone.
+- **Le code et les mots-clés ne partent plus au serveur** (seulement un dérivé Argon2id). Avec le seul mot de passe du compte, on n'ouvre aucun groupe : il faut aussi le code + les mots-clés.
+- **Membre retiré banni** et rotation immédiate de la clé ; seul un admin fait tourner la clé ; le dernier admin passe la main avant de partir.
+- **Argon2id 64 Mo** partout via un **module natif** (`mobile/modules/bs-native`, Argon2 de référence + clé matérielle Secure Enclave / Keystore) ; la sauvegarde par mot de passe refuse un coût plus faible demandé par le serveur ; mot de passe plus exigeant.
+- Compteur d'essais sur l'horloge de démarrage (changer la date ne sert à rien), essai compté avant d'être tenté ; plus de contournement du verrouillage par le sélecteur de photos.
+- Serveur : quotas (invitations, groupes, messages), défi de connexion à usage unique, pseudos uniques sans tenir compte de la casse, échecs de connexion seuls comptés, WebSocket coupé à l'expiration du jeton, nettoyage des fichiers sans fuite, scripts de maintenance protégés.
+- App : images piégées refusées, citations non vérifiables signalées, fichiers en clair effacés au lancement, presse-papiers vidé, liens directs vers un groupe fermé bloqués, sauvegarde Android coupée, coffre effacé à la réinstallation sur iOS.
+- **Données remises à zéro** (migration `0009`) : chacun recrée son compte et ses groupes avec le nouveau build. Expo Go ne suffit plus (module natif).
+- Détail des failles, des corrections et de ce qui reste à améliorer : [SECURITE.md](SECURITE.md).
+
+### Se connecter avec pseudo + mot de passe
+
+- À l'**inscription**, on choisit en plus un **mot de passe** (10 caractères minimum, saisi 2 fois), en plus du code app à 6 chiffres.
+- Sur la page d'accueil, le lien **« Déjà un compte ? Se connecter »** demande le pseudo et le mot de passe. On choisit ensuite un nouveau code app pour ce téléphone. Ça sert après une réinstallation, un nouveau build ou un changement de téléphone.
+- Après la reconnexion, les groupes s'ouvrent avec leur code comme à la première ouverture : les clés de groupe sont déjà sur le serveur, chiffrées pour le compte.
+
+**Côté sécurité**
+- Le téléphone chiffre une copie des clés privées avec une clé tirée du mot de passe (Argon2id 4 Mio / 3 passes, lié au pseudo). Le serveur garde cette copie, sans pouvoir l'ouvrir.
+- Le code à 6 chiffres n'est jamais utilisé pour ça : avec seulement un million de valeurs, il se devinerait hors ligne.
+- Le serveur ne rend la copie que si on prouve qu'on connaît le mot de passe. Il garde seulement un HMAC de cette preuve. Il limite à **5 essais par heure et par pseudo**. Il chiffre aussi la copie avec sa propre clé secrète : une fuite de la base seule ne suffit pas pour tester des mots de passe.
+- Pour un pseudo inconnu, le serveur répond avec des paramètres factices mais stables. On ne peut donc pas savoir quels pseudos existent.
+- Les comptes créés avant n'ont pas de sauvegarde. `server/scripts/reset-account.ts <pseudo>` libère le pseudo (compte et groupes où il était seul) et donne une invitation pour se réinscrire. Utilisé le 19/10 pour `lipreux-x`, dont les clés étaient perdues.
 
 ### Effacer des jours de conversation
 
 - Dans la conversation, l'**admin** fait un **appui long sur une date** (« LUN. 19 OCT. ») et choisit : **ce jour**, **ce jour et la veille**, ou **les 7 jours jusqu'à ce jour**. Une confirmation suit.
-- Les messages **et les photos** de la période sont effacés **pour tous les membres**, sur le serveur comme dans le stockage des images.
+- Les messages, **les photos et les vocaux** de la période sont effacés **pour tous les membres**, sur le serveur comme dans le stockage des images.
 - Les téléphones qui ont la conversation ouverte la rechargent tout de suite. Ceux qui étaient hors ligne la rechargent à leur retour.
 - Le serveur ne garde aucune trace de la période effacée, seulement le fait que l'historique a changé (table `group_purges`).
 - Un membre qui n'est pas admin ne peut rien effacer.
@@ -66,6 +94,8 @@ Le changement s'applique à tous les écrans de code : verrouillage, inscription
 
 ### Mise en production (branche Neon `dev`)
 
+- Se connecter (19/10) : migration `0008_account_backup` appliquée (colonnes `backup_*` dans `profiles`, table `login_attempts`), API redéployée, smoke test et test e2e de l'app passés contre l'API déployée.
+
 - Effacement + groupes éphémères (19/10) : migration `0007_group_expiry_purges` appliquée, API redéployée, smoke test passé contre l'API déployée (effacement réservé à l'admin, rechargement signalé, date d'autodestruction vérifiée, groupe expiré caché et impossible à rejoindre).
 - Migration `0002_group_keywords` appliquée.
 - Avatars (19/10) : migrations `0005_profile_avatar` et `0006_avatar_icons` (passage aux icônes Lucide, anciens choix convertis) appliquées, API redéployée, test e2e passé (choix visible par un membre du groupe, valeur hors liste refusée).
@@ -122,7 +152,7 @@ Le changement s'applique à tous les écrans de code : verrouillage, inscription
 
 | | Fonction | État |
 |---|---|---|
-| 🟡 | Images et vocaux chiffrés | Images faites : envoi depuis la galerie (recompressées en JPEG, métadonnées GPS retirées), chiffrées avec une clé par fichier, stockées dans un bucket Neon privé, affichées en mémoire seulement, et enregistrables dans la galerie depuis la vue plein écran. Vocaux à faire. |
+| ✅ | Images et vocaux chiffrés | Images : envoi depuis la galerie (recompressées en JPEG, métadonnées GPS retirées), chiffrées avec une clé par fichier, stockées dans un bucket Neon privé, affichées en mémoire seulement, et enregistrables dans la galerie depuis la vue plein écran. Vocaux : bouton micro quand le champ est vide, enregistrement AAC mono 32 kb/s (5 min max), chiffrés comme les images (clé par fichier, même bucket, aucun changement serveur), forme d'onde dans le message chiffré, lecture au toucher. Comme sur les messageries courantes : toucher la forme d'onde saute à cet endroit, la glisser fait défiler ; bouton de vitesse 1× / 1,5× / 2× (gardée d'un vocal à l'autre pendant la session) ; un vocal terminé enchaîne sur le suivant de la conversation, jusqu'à une pause, un autre vocal lancé ou la sortie de la conversation. Le fichier de l'enregistreur est lu puis supprimé aussitôt ; pour l'écoute, l'audio déchiffré passe par un fichier temporaire du cache, supprimé au vocal suivant et au verrouillage (avec tout ce que l'enregistreur aurait laissé). Quitter l'app pendant un enregistrement l'annule. À tester sur téléphone (nouvelle build : module natif expo-audio). |
 | ⬜ | Notifications push génériques | À faire |
 | ✅ | Messages éphémères | Fait : réglage admin dans les réglages du groupe, purge toutes les heures sur le serveur |
 | ✅ | Rotation de clé quand un membre part | Fait, avec « quitter » et « retirer un membre » |

@@ -10,9 +10,9 @@ try {
 }
 
 const { db, pool } = await import('../src/db/client');
-const { attachments, groups, invites, profiles } = await import('../src/db/schema');
+const { attachments, groupMembers, groups, invites, profiles } = await import('../src/db/schema');
 const { deleteObjects, objectKey } = await import('../src/lib/storage');
-const { inArray, like, or } = await import('drizzle-orm');
+const { and, eq, inArray, like, notExists, notInArray, or, sql } = await import('drizzle-orm');
 
 const ids = (await db.select({ id: profiles.id }).from(profiles).where(like(profiles.username, 'e2e\\_%'))).map((p) => p.id);
 if (ids.length) {
@@ -22,7 +22,19 @@ if (ids.length) {
     .where(inArray(attachments.uploaderId, ids));
   await deleteObjects(files.map((f) => objectKey(f.groupId, f.id)));
   console.log(`Removed ${files.length} stored image(s).`);
-  await db.delete(groups).where(inArray(groups.createdBy, ids));
+  // Only groups with nothing but test accounts in them: a real user who joined
+  // a test group, or registered a name starting with e2e_, keeps theirs.
+  await db.delete(groups).where(
+    and(
+      inArray(groups.createdBy, ids),
+      notExists(
+        db
+          .select({ one: sql`1` })
+          .from(groupMembers)
+          .where(and(eq(groupMembers.groupId, groups.id), notInArray(groupMembers.userId, ids))),
+      ),
+    ),
+  );
   await db.delete(invites).where(or(inArray(invites.usedBy, ids), inArray(invites.createdBy, ids)));
   await db.delete(profiles).where(inArray(profiles.id, ids));
 }

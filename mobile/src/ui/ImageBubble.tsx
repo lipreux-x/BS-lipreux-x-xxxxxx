@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Image, Pressable, StyleSheet, Text, View } from 'react-native';
-import type { ImageBody } from '@/crypto';
+import { b64, type ImageBody } from '@/crypto';
 import { ApiError } from '@/services/api';
-import { loadImage, type Session } from '@/services/groups';
+import { loadAttachment, type Session } from '@/services/groups';
 import { imageCache, jpegUri, previewUri } from '@/services/images';
+import { safeToDisplay } from '@/services/jpeg';
 import { colors } from './theme';
 
 const WIDTH = 240;
@@ -13,7 +14,17 @@ export function bubbleSize(width: number, height: number) {
   return { width: WIDTH, height: Math.round(Math.min(320, Math.max(120, (WIDTH * height) / width))) };
 }
 
-type State = { kind: 'loading' } | { kind: 'ready'; jpeg: Uint8Array } | { kind: 'error'; message: string };
+type State = { kind: 'loading' } | { kind: 'ready'; jpeg: Uint8Array } | { kind: 'error'; message: string; final?: boolean };
+
+/** The tiny preview carried in the message, if it is a sane JPEG (it comes from another member). */
+function safePreview(preview: string | undefined): string | null {
+  if (!preview) return null;
+  try {
+    return safeToDisplay(b64.decode(preview)) ? preview : null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * An encrypted image in the chat: the blurred preview carried by the message
@@ -37,8 +48,13 @@ export function ImageBubble({
   useEffect(() => {
     if (state.kind === 'ready') return;
     let live = true;
-    loadImage(session, groupId, body)
+    loadAttachment(session, groupId, body)
       .then((jpeg) => {
+        // Not a sane JPEG (or absurd dimensions): never handed to the decoder.
+        if (!safeToDisplay(jpeg)) {
+          if (live) setState({ kind: 'error', message: 'Image refusée (format invalide)', final: true });
+          return;
+        }
         imageCache.set(body.attachmentId, jpeg);
         if (live) setState({ kind: 'ready', jpeg });
       })
@@ -55,6 +71,7 @@ export function ImageBubble({
   }, [attempt]);
 
   const size = bubbleSize(body.width, body.height);
+  const preview = useMemo(() => safePreview(body.preview), [body.preview]);
   // Encoding a few hundred KB to base64: once per image, not on every render.
   const uri = useMemo(() => (state.kind === 'ready' ? jpegUri(state.jpeg) : null), [state]);
   return (
@@ -63,7 +80,7 @@ export function ImageBubble({
       accessibilityLabel="Image chiffrée"
       onPress={() => {
         if (state.kind === 'ready') onOpen(state.jpeg);
-        else if (state.kind === 'error') {
+        else if (state.kind === 'error' && !state.final) {
           setState({ kind: 'loading' });
           setAttempt((n) => n + 1);
         }
@@ -74,7 +91,7 @@ export function ImageBubble({
         <Image source={{ uri }} style={size} resizeMode="cover" />
       ) : (
         <>
-          {body.preview ? <Image source={{ uri: previewUri(body.preview) }} style={size} blurRadius={8} resizeMode="cover" /> : null}
+          {preview ? <Image source={{ uri: previewUri(preview) }} style={size} blurRadius={8} resizeMode="cover" /> : null}
           <View style={styles.overlay}>
             {state.kind === 'error' ? <Text style={styles.error}>{state.message}</Text> : <ActivityIndicator color={colors.text} />}
           </View>

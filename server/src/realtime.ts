@@ -17,6 +17,7 @@ import { pool } from './db/client';
  */
 
 const POLL_MS = 1000;
+const MAX_SOCKETS_PER_USER = 5;
 const LOOKBACK_SECONDS = 10;
 const HEARTBEAT_MS = 25_000;
 
@@ -153,13 +154,30 @@ function stop(): void {
   recentPurges.clear();
 }
 
+const expiries = new Map<NeonWSContext, ReturnType<typeof setTimeout>>();
+
 export const realtime = {
-  add(ws: NeonWSContext, userId: string): void {
+  /** `expiresAt`: the access token's expiry; the socket closes then (the phone reconnects with a fresh one). */
+  add(ws: NeonWSContext, userId: string, expiresAt: number): void {
+    const mine = [...clients].filter(([, u]) => u === userId).map(([s]) => s);
+    // Oldest out first: a phone that lost track of its sockets is not locked out.
+    for (const old of mine.slice(0, Math.max(0, mine.length - MAX_SOCKETS_PER_USER + 1))) {
+      realtime.remove(old);
+      old.close(4008, 'too_many_sockets');
+    }
     clients.set(ws, userId);
+    const t = setTimeout(() => {
+      realtime.remove(ws);
+      ws.close(4001, 'token_expired');
+    }, Math.max(0, expiresAt - Date.now()));
+    t.unref?.();
+    expiries.set(ws, t);
     ws.send('{"type":"ready"}');
     start();
   },
   remove(ws: NeonWSContext): void {
+    clearTimeout(expiries.get(ws));
+    expiries.delete(ws);
     clients.delete(ws);
     if (clients.size === 0) stop();
   },

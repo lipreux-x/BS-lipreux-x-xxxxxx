@@ -7,6 +7,7 @@ import {
   type ReplyRef,
   type AttachmentContext,
   type ImageBody,
+  type VoiceBody,
 } from '../attachment';
 import { b64 } from '../encoding';
 import { CryptoError } from '../errors';
@@ -94,6 +95,40 @@ describe('message bodies', () => {
   });
 });
 
+describe('voice message bodies', () => {
+  const voice: VoiceBody = {
+    kind: 'voice',
+    attachmentId: ctx.attachmentId,
+    fileKey: 'BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc',
+    mime: 'audio/mp4',
+    durationMs: 7300,
+    size: 60_000,
+    waveform: [0, 12, 100, 55],
+  };
+
+  it('round-trips, with or without a waveform', () => {
+    expect(parseMessageBody(encodeMessageBody(voice))).toEqual(voice);
+    const { waveform: _, ...flat } = voice;
+    expect(parseMessageBody(encodeMessageBody(flat))).toEqual(flat);
+  });
+
+  it('is quoted without text', () => {
+    expect(replyExcerpt(voice)).toEqual({ excerpt: '', voice: true });
+  });
+
+  it('reads malformed voice bodies as null', () => {
+    const enc = (v: object) => '\u0000' + JSON.stringify({ ...voice, ...v });
+    expect(parseMessageBody(enc({ mime: 'audio/x-wav' }))).toBeNull();
+    expect(parseMessageBody(enc({ durationMs: 0 }))).toBeNull();
+    expect(parseMessageBody(enc({ durationMs: 60 * 60 * 1000 }))).toBeNull();
+    expect(parseMessageBody(enc({ waveform: [101] }))).toBeNull();
+    expect(parseMessageBody(enc({ waveform: new Array(65).fill(1) }))).toBeNull();
+    expect(parseMessageBody(enc({ waveform: 'loud' }))).toBeNull();
+    expect(parseMessageBody(enc({ fileKey: '!!' }))).toBeNull();
+    expect(parseMessageBody(enc({ size: 50 * 1024 * 1024 }))).toBeNull();
+  });
+});
+
 describe('replies', () => {
   const replyTo: ReplyRef = {
     messageId: '1b9d6bcd-0000-4000-8000-0000000000aa',
@@ -135,6 +170,7 @@ describe('replies', () => {
     expect(parseMessageBody(enc({ senderId: 42 }))).toBeNull();
     expect(parseMessageBody(enc({ excerpt: 'x'.repeat(500) }))).toBeNull();
     expect(parseMessageBody(enc({ image: 'yes' }))).toBeNull();
+    expect(parseMessageBody(enc({ voice: 1 }))).toBeNull();
     // A structured text must be a reply, and not empty.
     expect(parseMessageBody('\u0000' + JSON.stringify({ kind: 'text', text: 'ok' }))).toBeNull();
     expect(parseMessageBody('\u0000' + JSON.stringify({ kind: 'text', text: '', replyTo }))).toBeNull();

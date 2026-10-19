@@ -2,31 +2,40 @@ import * as Haptics from 'expo-haptics';
 import { router, Stack, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useHeaderHeight } from 'expo-router/react-navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, FlatList, KeyboardAvoidingView, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, FlatList, KeyboardAvoidingView, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { API_URL } from '@/config';
-import type { ImageBody, ReplyRef } from '@/crypto';
+import type { ImageBody, ReplyRef, VoiceBody } from '@/crypto';
 import { wipe } from '@/crypto/encoding';
 import { useUnlocked, type OpenGroup } from '@/session/SessionProvider';
+import { useInsideGroup } from '@/session/useInsideGroup';
 import { ApiError, NetworkError, type WireMessage } from '@/services/api';
 import {
+  approveMember,
+  AttachmentTooLargeError,
   decryptMessages,
   fetchSince,
-  ImageTooLargeError,
+  GroupTamperedError,
+  joinRequests,
+  KeyChangedError,
   listGroups,
   newClientId,
-  sendImage,
+  rejectMember,
+  sendAttachment,
   sendText,
-  shareMissingKeys,
   relockGroup,
   syncGroup,
   unlockGroup,
   uploadImage,
+  uploadVoice,
   type ChatMessage,
   type GroupLockState,
+  type JoinRequestInfo,
   type PreparedImage,
+  type PreparedVoice,
 } from '@/services/groups';
 import { imageCache, pickImage } from '@/services/images';
+import { useVoiceRecorder, voiceCache, voicePlayer } from '@/services/voice';
 import { RealtimeClient } from '@/services/realtime';
 import { LockedOutError, WrongCodeError } from '@/services/vault';
 import { Composer } from '@/ui/chat/Composer';
@@ -38,6 +47,8 @@ import { buildTimeline, countdownLabel, dateTimeLabel, dayLabel, dayRange, timeL
 import { CodeEntry, type CodeResult } from '@/ui/CodeEntry';
 import { ImageBubble, LocalImage } from '@/ui/ImageBubble';
 import { ImageViewer } from '@/ui/ImageViewer';
+import { KeywordsForm } from '@/ui/KeywordsForm';
+import { SentVoice, VoiceBubble, voiceTrack } from '@/ui/VoiceBubble';
 import { Led } from '@/ui/Led';
 import { colors, fonts, mono, space, type } from '@/ui/theme';
 
@@ -52,15 +63,28 @@ export default function GroupScreen() {
     },
     [openGroups, id],
   );
+  // Closed while away (10 min out of it): its code again.
+  useInsideGroup(id, useCallback(() => setOpen(openGroups.get(id)), [openGroups, id]));
 
   return open ? <Chat groupId={id} group={open} onUpdate={update} /> : <GroupUnlock groupId={id} onOpen={update} />;
 }
 
 // ---- Unlock (SPEC §2.3) --------------------------------------------------------------
 
+/** What to tell the user when the server's data does not check out. */
+function securityMessage(e: unknown): string | null {
+  if (e instanceof KeyChangedError) return 'La clé d’un membre a changé : ouverture bloquée par sécurité';
+  if (e instanceof GroupTamperedError) {
+    return e.reason === 'keywords_mismatch' ? 'Mots-clés incorrects' : 'Données du groupe invalides : ouverture bloquée par sécurité';
+  }
+  return null;
+}
+
 function GroupUnlock({ groupId, onOpen }: { groupId: string; onOpen(g: OpenGroup): void }) {
-  const { session } = useUnlocked();
+  const { session, profiles } = useUnlocked();
   const [state, setState] = useState<GroupLockState | null>(null);
+  // Signed in again on this phone: the keywords are needed once, with the code.
+  const [keywords, setKeywords] = useState<string[] | null>(null);
   const [firstCode, setFirstCode] = useState<string | null>(null);
   const [mismatch, setMismatch] = useState(false);
   const [lockedFor, setLockedFor] = useState(0);
@@ -81,7 +105,7 @@ function GroupUnlock({ groupId, onOpen }: { groupId: string; onOpen(g: OpenGroup
 
   async function attempt(code: string): Promise<CodeResult> {
     try {
-      const res = await unlockGroup(session, groupId, code);
+      const res = await unlockGroup(session, profiles, groupId, code, keywords ?? undefined);
       if (!res) {
         setState({ kind: 'waiting-key' });
         return null;
@@ -93,13 +117,13 @@ function GroupUnlock({ groupId, onOpen }: { groupId: string; onOpen(g: OpenGroup
       }
       return () => onOpen(group);
     } catch (e) {
-      if (e instanceof WrongCodeError) return 'Code incorrect';
+      if (e instanceof WrongCodeError) return keywords ? 'Code ou mots-clés incorrects' : 'Code incorrect';
       if (e instanceof LockedOutError) {
         setLockedFor(e.retryInMs);
         return 'Trop d’essais';
       }
       if (e instanceof NetworkError) return 'Pas de réseau';
-      return 'Impossible d’ouvrir le groupe';
+      return securityMessage(e) ?? 'Impossible d’ouvrir le groupe';
     }
   }
 
@@ -129,10 +153,18 @@ function GroupUnlock({ groupId, onOpen }: { groupId: string; onOpen(g: OpenGroup
                 return null;
               }
               try {
-                await relockGroup(session, groupId, group.keyVersion, group.keys.get(group.keyVersion)!, code);
-                return () => onOpen(group);
+                // The new code must open the key the admin re-wrapped with it: a wrong one is refused here.
+                const r = await relockGroup(session, profiles, groupId, group.keys, code);
+                const opened = { keys: r.keys, keyVersion: r.keyVersion, name: r.meta.name };
+                return () => onOpen(opened);
               } catch (e) {
-                return e instanceof NetworkError ? 'Pas de réseau' : 'Impossible d’enregistrer le code';
+                if (e instanceof WrongCodeError) {
+                  setRelock({ group, first: null, mismatch: false });
+                  return 'Ce n’est pas le nouveau code';
+                }
+                if (e instanceof LockedOutError) return 'Trop d’essais, réessaie plus tard';
+                if (e instanceof NetworkError) return 'Pas de réseau';
+                return securityMessage(e) ?? 'Impossible d’enregistrer le code';
               }
             }}
           />
@@ -145,14 +177,44 @@ function GroupUnlock({ groupId, onOpen }: { groupId: string; onOpen(g: OpenGroup
 
   if (!state) return <SafeAreaView style={styles.center} />;
 
+  if (state.kind === 'pending') {
+    return (
+      <View style={[styles.center, { padding: space.lg, gap: space.md }]}>
+        <Stack.Screen options={{ title: 'Demande envoyée' }} />
+        <Text style={type.heading}>En attente d’un admin</Text>
+        <Text style={[type.dim, { textAlign: 'center' }]}>
+          Ta demande est arrivée. Un admin du groupe doit l’accepter depuis son téléphone. Pour qu’il soit sûr que c’est bien toi, montre-lui ton
+          empreinte (Réglages) : il la compare avec celle qu’il voit.
+        </Text>
+      </View>
+    );
+  }
+
   if (state.kind === 'waiting-key') {
     return (
       <View style={[styles.center, { padding: space.lg, gap: space.md }]}>
         <Stack.Screen options={{ title: 'Groupe verrouillé' }} />
         <Text style={type.heading}>En attente de la clé</Text>
         <Text style={[type.dim, { textAlign: 'center' }]}>
-          Tu es membre. La clé du groupe arrivera chiffrée pour toi dès qu’un membre ouvrira le groupe sur son téléphone.
+          Tu es membre. La nouvelle clé du groupe arrivera chiffrée pour toi dès qu’un admin ouvrira le groupe sur son téléphone.
         </Text>
+      </View>
+    );
+  }
+
+  // Signed in again: this phone does not know the keywords yet. They come first, then the code.
+  if (state.kind === 'first-unlock' && state.needsKeywords && !keywords) {
+    return (
+      <View style={[styles.center, { padding: space.lg }]}>
+        <Stack.Screen options={{ title: 'Groupe verrouillé' }} />
+        <KeywordsForm
+          hint="Tu t’es reconnecté sur ce téléphone : entre les 3 mots-clés du groupe, puis son code."
+          submitTitle="Continuer"
+          onSubmit={async (words) => {
+            setKeywords(words);
+            return null;
+          }}
+        />
       </View>
     );
   }
@@ -205,6 +267,7 @@ type Pending = { clientId: string; at: string; failed: boolean; error?: string; 
   | { kind: 'text'; text: string }
   // `body` is set once the encrypted file is uploaded: a retry only resends the message.
   | { kind: 'image'; image: PreparedImage; body?: ImageBody }
+  | { kind: 'voice'; voice: PreparedVoice; body?: VoiceBody }
 );
 
 /** The group no longer exists for us: self-destructed (or we were removed). */
@@ -215,7 +278,7 @@ function GroupGone() {
       <Text style={styles.emptyIcon}>💥</Text>
       <Text style={type.heading}>Ce groupe n’existe plus</Text>
       <Text style={[type.dim, { textAlign: 'center' }]}>
-        Il s’est autodétruit ou tu n’en fais plus partie. Ses messages, ses photos et ses clés ont été effacés de ce téléphone.
+        Il s’est autodétruit ou tu n’en fais plus partie. Ses messages, ses photos, ses vocaux et ses clés ont été effacés de ce téléphone.
       </Text>
     </View>
   );
@@ -268,23 +331,48 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
     current.current = group;
   }, [group]);
 
-  /** Rotation if a member left, keys rotated by others, key handout to new members. */
+  // Admin: people waiting to be let in (the sheet is open while `reviewing` is set).
+  const [requests, setRequests] = useState<JoinRequestInfo[]>([]);
+  const [reviewing, setReviewing] = useState(false);
+  // What the server sent did not check out (keys refused): shown, never silently used.
+  const [alert, setAlert] = useState<string | null>(null);
+  const [newAdmin, setNewAdmin] = useState(false);
+
+  /** Rotation if a member left (admin), keys rotated by an admin, join requests (admin). */
   const sync = useCallback(async (): Promise<OpenGroup> => {
     try {
       const r = await syncGroup(session, profiles, groupId, current.current.keys);
-      setRole(r.summary.role);
+      const admin = r.meta.admins.includes(session.account.userId);
+      setRole(admin ? 'admin' : 'member');
       setExpiresAt(r.summary.expiresAt ? new Date(r.summary.expiresAt) : null);
+      if (r.adminChanged) setNewAdmin(true);
+      setAlert(null);
       const g = { keys: r.keys, keyVersion: r.keyVersion, name: r.meta.name };
       current.current = g;
       onUpdate(g);
-      // Hand the key to members who joined since (they cannot read anything until then).
-      await shareMissingKeys(session, profiles, groupId, r.keys.get(r.keyVersion)!, r.keyVersion).catch(() => {});
+      setRequests(admin ? await joinRequests(session, profiles, groupId).catch(() => []) : []);
       return g;
     } catch (e) {
       if (e instanceof ApiError && e.status === 404) setRemoved(true);
+      const message = securityMessage(e);
+      if (message) setAlert(message);
       return current.current;
     }
   }, [session, profiles, groupId, onUpdate]);
+
+  async function decide(r: JoinRequestInfo, accept: boolean) {
+    try {
+      if (accept) await approveMember(session, profiles, groupId, current.current.keys, r.userId);
+      else await rejectMember(session, groupId, r.userId);
+      setRequests((list) => list.filter((x) => x.userId !== r.userId));
+      void sync();
+    } catch (e) {
+      Alert.alert(
+        accept ? 'Impossible d’accepter' : 'Impossible de refuser',
+        e instanceof NetworkError ? 'Pas de réseau.' : (securityMessage(e) ?? 'Réessaie dans un instant.'),
+      );
+    }
+  }
 
   const decrypt = useCallback(
     async (wire: WireMessage[]) => {
@@ -300,6 +388,28 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
     useCallback(() => {
       void sync();
     }, [sync]),
+  );
+
+  // A voice message that ends hands over to the next one of the conversation;
+  // leaving the conversation (settings, back to the list) stops the listening.
+  const delivered = useRef<ChatMessage[]>([]);
+  useEffect(() => {
+    delivered.current = messages;
+  }, [messages]);
+  useFocusEffect(
+    useCallback(() => {
+      voicePlayer.setQueue((id) => {
+        const list = delivered.current;
+        const from = list.findIndex((m) => m.voice?.attachmentId === id);
+        if (from < 0) return null;
+        const next = list.slice(from + 1).find((m) => m.voice);
+        return next?.voice ? voiceTrack(session, groupId, next.voice) : null;
+      });
+      return () => {
+        voicePlayer.setQueue(null);
+        voicePlayer.stop();
+      };
+    }, [session, groupId]),
   );
 
   /** `replace`: the whole history was fetched again (after an erase), drop what is no longer in it. */
@@ -386,7 +496,7 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
       days === 1
         ? `du ${dayLabel(day, today).toLowerCase()}`
         : `du ${dayLabel(from, today).toLowerCase()} au ${dayLabel(day, today).toLowerCase()}`;
-    Alert.alert(`Effacer les messages ${span} ?`, 'Les messages et les photos de cette période seront effacés pour tous les membres. C’est définitif.', [
+    Alert.alert(`Effacer les messages ${span} ?`, 'Les messages, les photos et les vocaux de cette période seront effacés pour tous les membres. C’est définitif.', [
       { text: 'Annuler', style: 'cancel' },
       {
         text: 'Effacer',
@@ -419,16 +529,21 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
     setPending((p) => [...p.filter((x) => x.clientId !== clientId), { ...item, failed: false, error: undefined }]);
     try {
       let ready = item;
+      // Encrypted on the phone with a fresh file key, then uploaded: the server only stores the blob.
       if (ready.kind === 'image' && !ready.body) {
-        // Encrypted on the phone with a fresh file key, then uploaded: the server only stores the blob.
         const body = await uploadImage(session, groupId, ready.image);
         ready = { ...ready, body };
         setPending((p) => p.map((x) => (x.clientId === clientId && x.kind === 'image' ? { ...x, body } : x)));
       }
+      if (ready.kind === 'voice' && !ready.body) {
+        const body = await uploadVoice(session, groupId, ready.voice);
+        ready = { ...ready, body };
+        setPending((p) => p.map((x) => (x.clientId === clientId && x.kind === 'voice' ? { ...x, body } : x)));
+      }
       const attempt = (g: OpenGroup) =>
         ready.kind === 'text'
           ? sendText(session, groupId, g.keys.get(g.keyVersion)!, g.keyVersion, ready.text, clientId, ready.replyTo)
-          : sendImage(session, groupId, g.keys.get(g.keyVersion)!, g.keyVersion, { ...ready.body!, ...(ready.replyTo && { replyTo: ready.replyTo }) }, clientId);
+          : sendAttachment(session, groupId, g.keys.get(g.keyVersion)!, g.keyVersion, { ...ready.body!, ...(ready.replyTo && { replyTo: ready.replyTo }) }, clientId);
       let wire: WireMessage;
       try {
         wire = await attempt(current.current);
@@ -437,12 +552,13 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
         if (!(e instanceof ApiError && e.code === 'stale_key_version')) throw e;
         wire = await attempt(await sync());
       }
-      // Our own image: no need to download what we just sent.
+      // Our own image or voice message: no need to download what we just sent.
       if (ready.kind === 'image') imageCache.set(ready.body!.attachmentId, ready.image.jpeg);
+      if (ready.kind === 'voice') voiceCache.set(ready.body!.attachmentId, ready.voice.audio);
       merge(await decrypt([wire]));
     } catch (e) {
       // Same clientId on retry: the server de-duplicates if the first send did land.
-      const error = e instanceof ImageTooLargeError ? 'Image trop lourde' : undefined;
+      const error = e instanceof AttachmentTooLargeError ? (item.kind === 'voice' ? 'Vocal trop long' : 'Image trop lourde') : undefined;
       setPending((p) => p.map((x) => (x.clientId === clientId ? { ...x, failed: true, error } : x)));
     }
   }
@@ -463,6 +579,19 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
       // Picker or re-encoding failed: nothing was sent.
     } finally {
       setPicking(false);
+    }
+  }
+
+  const recorder = useVoiceRecorder((voice) => {
+    void send({ clientId: newClientId(), at: new Date().toISOString(), kind: 'voice', voice, failed: false, replyTo: takeReply() });
+  });
+
+  async function startVoice() {
+    const res = await recorder.start();
+    if (res === 'denied') {
+      Alert.alert('Micro désactivé', 'Autorise l’accès au micro dans les réglages du téléphone pour envoyer des vocaux.');
+    } else if (res === 'failed') {
+      Alert.alert('Impossible d’enregistrer', 'Le micro n’a pas pu démarrer. Réessaie.');
     }
   }
 
@@ -516,6 +645,62 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
           </Text>
         </View>
       ) : null}
+      {alert ? (
+        <View style={[styles.banner, styles.alertBanner]}>
+          <Led state="red" size={7} />
+          <Text style={styles.bannerText}>{alert.toUpperCase()}</Text>
+        </View>
+      ) : null}
+      {newAdmin ? (
+        <Pressable style={styles.banner} onPress={() => setNewAdmin(false)} accessibilityRole="button">
+          <Led state="amber" size={7} />
+          <Text style={styles.bannerText}>LES ADMINS DU GROUPE ONT CHANGÉ — VOIR LES RÉGLAGES</Text>
+        </Pressable>
+      ) : null}
+      {requests.length ? (
+        <Pressable style={styles.banner} onPress={() => setReviewing(true)} accessibilityRole="button">
+          <Led state="amber" size={7} />
+          <Text style={styles.bannerText}>
+            {requests.length === 1 ? '1 DEMANDE D’ACCÈS — APPUIE POUR VOIR' : `${requests.length} DEMANDES D’ACCÈS — APPUIE POUR VOIR`}
+          </Text>
+        </Pressable>
+      ) : null}
+      <Modal visible={reviewing && requests.length > 0} transparent animationType="fade" onRequestClose={() => setReviewing(false)}>
+        <View style={styles.sheetBackdrop}>
+          <View style={styles.sheet}>
+            <Text style={type.heading}>Demandes d’accès</Text>
+            <Text style={type.dim}>
+              Ces personnes ont donné le bon code et les bons mots-clés. Accepter leur envoie la clé du groupe. Pour être sûr que c’est bien elles,
+              compare en vrai cette empreinte avec celle affichée sur leur téléphone (Réglages) : les chiffres doivent être identiques.
+            </Text>
+            {requests.map((r) => (
+              <View key={r.userId} style={styles.request}>
+                <Text style={styles.requestName}>{r.username}</Text>
+                {r.keyChanged ? (
+                  <Text style={styles.requestWarning}>Ses clés ont changé depuis la dernière fois : ne l’accepte pas sans vérifier.</Text>
+                ) : (
+                  <Text style={styles.safety} selectable>
+                    {r.fingerprint}
+                  </Text>
+                )}
+                <View style={styles.requestButtons}>
+                  <Pressable style={[styles.requestButton, styles.reject]} onPress={() => void decide(r, false)} accessibilityRole="button">
+                    <Text style={styles.requestButtonText}>Refuser</Text>
+                  </Pressable>
+                  {!r.keyChanged ? (
+                    <Pressable style={[styles.requestButton, styles.accept]} onPress={() => void decide(r, true)} accessibilityRole="button">
+                      <Text style={styles.requestButtonText}>Accepter</Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+              </View>
+            ))}
+            <Pressable onPress={() => setReviewing(false)} accessibilityRole="button" style={styles.sheetClose}>
+              <Text style={type.dim}>Fermer</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
       {/* 'padding' on both platforms: with edge-to-edge (always on since SDK 54),
           Android no longer shrinks the window for the keyboard by itself. */}
       <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding" keyboardVerticalOffset={headerHeight}>
@@ -527,6 +712,13 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
           renderContent={(item) =>
             item.image ? (
               <ImageBubble session={session} groupId={groupId} body={item.image} onOpen={setViewing} />
+            ) : item.voice ? (
+              <SentVoice session={session} groupId={groupId} body={item.voice} />
+            ) : item.localVoice ? (
+              <VoiceBubble
+                track={{ id: item.key, durationMs: item.localVoice.durationMs, load: () => Promise.resolve(item.localVoice!.audio) }}
+                waveform={item.localVoice.waveform}
+              />
             ) : item.local ? (
               <LocalImage jpeg={item.local.jpeg} width={item.local.width} height={item.local.height} />
             ) : item.text === null ? (
@@ -558,6 +750,14 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
           replyTo={replying ? resolveQuote(replyRefFor(replying)!, messages, session.account.userId) : null}
           onCancelReply={() => setReplying(null)}
           inputRef={input}
+          voice={{
+            phase: recorder.phase,
+            elapsedMs: recorder.elapsedMs,
+            levels: recorder.levels,
+            onStart: () => void startVoice(),
+            onCancel: () => void recorder.cancel(),
+            onSend: () => void recorder.finish(),
+          }}
           onSend={() => {
             const text = draft.trim().replace(/^\u0000+/, ''); // a leading NUL marks structured bodies
             setDraft('');
@@ -604,6 +804,8 @@ interface Line {
   text: string | null;
   image?: ImageBody;
   local?: PreparedImage;
+  voice?: VoiceBody;
+  localVoice?: PreparedVoice;
   status?: DeliveryStatus;
   pending?: Pending;
   replyTo?: ReplyRef;
@@ -654,10 +856,11 @@ function Timeline({
         avatar: m.senderAvatar,
         text: m.text,
         image: m.image ?? undefined,
+        voice: m.voice ?? undefined,
         status: m.mine ? ('sent' as const) : undefined,
         replyTo: m.replyTo ?? undefined,
         // Unreadable messages cannot be quoted.
-        message: m.text !== null || m.image ? m : undefined,
+        message: m.text !== null || m.image || m.voice ? m : undefined,
       })),
       ...pending.map((p) => ({
         key: p.clientId,
@@ -667,6 +870,7 @@ function Timeline({
         author: '',
         text: p.kind === 'text' ? p.text : null,
         local: p.kind === 'image' ? p.image : undefined,
+        localVoice: p.kind === 'voice' ? p.voice : undefined,
         status: p.failed ? ('failed' as const) : ('sending' as const),
         pending: p,
         replyTo: p.replyTo,
@@ -703,7 +907,7 @@ function Timeline({
           <Text style={styles.emptyIcon}>🔓</Text>
           <Text style={styles.emptyTitle}>Coffre ouvert</Text>
           <Text style={[type.dim, { textAlign: 'center' }]}>
-            Les messages et les photos sont chiffrés sur ton téléphone. Seuls les membres du groupe peuvent les lire.
+            Les messages, les photos et les vocaux sont chiffrés sur ton téléphone. Seuls les membres du groupe peuvent les lire.
           </Text>
         </View>
       }
@@ -760,6 +964,19 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.border,
   },
   bannerText: { fontFamily: mono, fontSize: 10, letterSpacing: 1, color: colors.textDim },
+  alertBanner: { borderBottomColor: colors.danger },
+  sheetBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', padding: space.lg },
+  sheet: { backgroundColor: colors.surface, borderRadius: 12, padding: space.lg, gap: space.md, borderWidth: 1, borderColor: colors.border },
+  sheetClose: { alignSelf: 'center', padding: space.sm },
+  request: { gap: space.sm, paddingTop: space.md, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
+  requestName: { ...type.heading, fontSize: 17 },
+  requestWarning: { color: colors.danger },
+  safety: { fontFamily: mono, fontSize: 15, letterSpacing: 1, color: colors.text, lineHeight: 22 },
+  requestButtons: { flexDirection: 'row', gap: space.sm },
+  requestButton: { flex: 1, paddingVertical: 12, borderRadius: 8, alignItems: 'center' },
+  accept: { backgroundColor: colors.forest },
+  reject: { backgroundColor: colors.surface2, borderWidth: 1, borderColor: colors.border },
+  requestButtonText: { color: colors.text, fontFamily: fonts.semibold },
   timeline: { paddingHorizontal: space.md, paddingVertical: space.sm, gap: 3, flexGrow: 1 },
   runEnd: { marginBottom: space.sm },
   text: { color: colors.text, fontSize: 16, lineHeight: 21 },

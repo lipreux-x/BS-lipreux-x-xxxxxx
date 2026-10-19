@@ -3,7 +3,8 @@ import { randomBytes } from 'node:crypto';
 
 /*
  * Two token kinds, both HS256 with JWT_SECRET:
- * - challenge (60 s): stateless login nonce the device must sign with Ed25519;
+ * - challenge (60 s): login nonce the device must sign with Ed25519, used
+ *   once (its nonce is recorded, app.ts /auth/token);
  * - access (1 h): bearer token for the API and the WebSocket.
  */
 
@@ -28,9 +29,15 @@ export async function issueAccessToken(userId: string): Promise<string> {
 }
 
 export async function verifyAccessToken(token: string): Promise<string | null> {
+  return (await readAccessToken(token))?.userId ?? null;
+}
+
+/** With its expiry (ms): a WebSocket is closed when its token runs out. */
+export async function readAccessToken(token: string): Promise<{ userId: string; expiresAt: number } | null> {
   try {
     const { payload } = await jwtVerify(token, secret(), { issuer: ISSUER, algorithms: ['HS256'] });
-    return payload.typ === 'access' && typeof payload.sub === 'string' ? payload.sub : null;
+    if (payload.typ !== 'access' || typeof payload.sub !== 'string' || typeof payload.exp !== 'number') return null;
+    return { userId: payload.sub, expiresAt: payload.exp * 1000 };
   } catch {
     return null;
   }
@@ -45,10 +52,12 @@ export async function issueChallenge(userId: string): Promise<string> {
     .sign(secret());
 }
 
-export async function verifyChallenge(challenge: string): Promise<string | null> {
+export async function verifyChallenge(challenge: string): Promise<{ userId: string; nonce: string; expiresAt: Date } | null> {
   try {
     const { payload } = await jwtVerify(challenge, secret(), { issuer: ISSUER, algorithms: ['HS256'] });
-    return payload.typ === 'challenge' && typeof payload.sub === 'string' ? payload.sub : null;
+    if (payload.typ !== 'challenge' || typeof payload.sub !== 'string') return null;
+    if (typeof payload.n !== 'string' || typeof payload.exp !== 'number') return null;
+    return { userId: payload.sub, nonce: payload.n, expiresAt: new Date(payload.exp * 1000) };
   } catch {
     return null;
   }

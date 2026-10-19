@@ -1,7 +1,8 @@
-import * as Clipboard from 'expo-clipboard';
 import { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { keyFingerprint } from '@/crypto';
 import { useUnlocked } from '@/session/SessionProvider';
+import { copySensitive } from '@/services/clipboard';
 import { ApiError, NetworkError } from '@/services/api';
 import { Avatar, isAvatarId, type AvatarId } from '@/ui/avatars';
 import { AvatarPicker } from '@/ui/AvatarPicker';
@@ -65,21 +66,33 @@ export default function Settings() {
       </Section>
 
       <Section title="Inviter un pote">
-        <Text style={type.dim}>Un code à usage unique, valable 7 jours. Donne-le en main propre.</Text>
+        <Text style={type.dim}>Un code à usage unique, valable 2 heures. Donne-le en main propre.</Text>
         {invite ? (
           <View style={styles.inviteBox}>
             <Text selectable style={styles.invite}>
               {invite.code}
             </Text>
-            <Button title="Copier" variant="ghost" onPress={() => void Clipboard.setStringAsync(invite.code)} />
+            <Button title="Copier" variant="ghost" onPress={() => void copySensitive(invite.code)} />
           </View>
         ) : null}
         {error ? <Text style={styles.error}>{error}</Text> : null}
         <Button title="Créer une invitation" onPress={createInvite} busy={busy} />
       </Section>
 
+      <Section title="Mon empreinte">
+        <Text style={styles.fingerprint} selectable>
+          {keyFingerprint(session.identity)}
+        </Text>
+        <Text style={type.dim}>
+          Pour rejoindre un groupe, montre ces chiffres à l’admin : il les compare avec ceux qu’il voit pour ta demande. S’ils sont identiques, personne
+          n’a remplacé tes clés en chemin.
+        </Text>
+      </Section>
+
       <Section title="Sécurité">
-        <Text style={type.dim}>L’app se verrouille dès qu’elle passe en arrière-plan.</Text>
+        <Text style={type.dim}>
+          Hors de l’app plus de 5 minutes, le code BaseSecrète est redemandé. Un groupe se referme 10 minutes après que tu l’as quitté.
+        </Text>
         <Button title="Verrouiller maintenant" variant="ghost" onPress={lock} />
       </Section>
     </ScrollView>
@@ -104,4 +117,5 @@ const styles = StyleSheet.create({
   inviteBox: { gap: space.sm, paddingVertical: space.sm },
   invite: { color: colors.text, fontSize: 22, fontFamily: 'monospace', letterSpacing: 1, textAlign: 'center' },
   error: { color: colors.danger },
+  fingerprint: { color: colors.text, fontSize: 18, fontFamily: 'monospace', letterSpacing: 1, textAlign: 'center', lineHeight: 28 },
 });

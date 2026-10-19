@@ -3,9 +3,10 @@ import { useCallback, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { wipe } from '@/crypto/encoding';
 import { useUnlocked } from '@/session/SessionProvider';
-import { NetworkError } from '@/services/api';
+import { useInsideGroup } from '@/session/useInsideGroup';
+import { ApiError, NetworkError } from '@/services/api';
 import { groupInfo, leaveGroup, type GroupInfo, type GroupInfoMember } from '@/services/groupInfo';
-import { syncGroup } from '@/services/groups';
+import { fingerprintOf, GroupTamperedError, KeyChangedError, rotateNow, setAdmins } from '@/services/groups';
 import { Avatar, isAvatarId } from '@/ui/avatars';
 import { countdownLabel, dateTimeLabel } from '@/ui/chat/timeline';
 import { colors, space, type } from '@/ui/theme';
@@ -24,18 +25,24 @@ const EPHEMERAL: { label: string; seconds: number | null }[] = [
 export default function GroupSettings() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { session, profiles, openGroups } = useUnlocked();
+  useInsideGroup(id);
   const [info, setInfo] = useState<GroupInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(() => {
+    // Reached by a link while the group is locked: nothing is shown without its code.
+    if (!openGroups.has(id)) {
+      router.replace({ pathname: '/group/[id]', params: { id } });
+      return;
+    }
     groupInfo(session, profiles, id)
       .then((i) => {
         setInfo(i);
         setError(null);
       })
       .catch((e) => setError(message(e, 'Impossible de charger les réglages')));
-  }, [session, profiles, id]);
+  }, [session, profiles, openGroups, id]);
   // Also after changing the code: the keywords shown come from the refreshed meta.
   useFocusEffect(load);
 
@@ -51,33 +58,50 @@ export default function GroupSettings() {
   }
 
   function remove(m: GroupInfoMember) {
-    Alert.alert(`Retirer ${m.username} ?`, 'Une nouvelle clé sera créée : il ne pourra plus lire les nouveaux messages.', [
-      { text: 'Annuler', style: 'cancel' },
-      {
-        text: 'Retirer',
-        style: 'destructive',
-        onPress: () =>
-          void run(async () => {
-            await session.api.removeMember(id, m.userId);
-            // Rotate now, so the removed member never sees the next messages' key.
-            const open = openGroups.get(id);
-            if (open) {
-              const r = await syncGroup(session, profiles, id, open.keys);
-              openGroups.set(id, { keys: r.keys, keyVersion: r.keyVersion, name: r.meta.name });
-            }
-            load();
-          }, 'Impossible de retirer ce membre'),
-      },
-    ]);
+    Alert.alert(
+      `Retirer ${m.username} ?`,
+      'Une nouvelle clé sera créée tout de suite : il ne pourra plus lire les nouveaux messages, ni revenir avec le code. Change aussi le code et les mots-clés s’il pourrait les avoir donnés à quelqu’un.',
+      [
+        { text: 'Annuler', style: 'cancel' },
+        {
+          text: 'Retirer',
+          style: 'destructive',
+          onPress: () =>
+            void run(async () => {
+              await session.api.removeMember(id, m.userId);
+              // Rotate now, so the removed member never sees the next messages' key.
+              const open = openGroups.get(id);
+              if (open) {
+                const r = await rotateNow(session, profiles, id, open.keys);
+                openGroups.set(id, { keys: r.keys, keyVersion: r.keyVersion, name: r.meta.name });
+              }
+              load();
+            }, 'Impossible de retirer ce membre'),
+        },
+      ],
+    );
+  }
+
+  /** A member's own key fingerprint, as this phone pinned it: compare it with the one on their phone. */
+  async function showFingerprint(m: GroupInfoMember) {
+    const f = await fingerprintOf(profiles, m.userId);
+    if (!f) return;
+    Alert.alert(
+      `Empreinte de ${m.username}`,
+      f.keyChanged
+        ? `Attention : ses clés ont changé depuis que ce téléphone les a vues. Ses nouveaux messages ne sont pas considérés comme les siens.\n\nEmpreinte connue :\n${f.fingerprint}`
+        : `${f.fingerprint}\n\nCompare ces chiffres avec ceux affichés dans Réglages sur son téléphone. Identiques : c’est bien lui, personne n’a remplacé ses clés.`,
+    );
   }
 
   function leave(i: GroupInfo) {
-    const lastAdmin = i.myRole === 'admin' && i.members.filter((m) => m.role === 'admin').length === 1 && i.members.length > 1;
+    const others = i.members.filter((m) => !m.me && !m.unknown);
+    const lastAdmin = i.myRole === 'admin' && i.members.filter((m) => m.role === 'admin').length === 1 && others.length > 0;
     Alert.alert(
       'Quitter le groupe ?',
       lastAdmin
-        ? 'Le membre le plus ancien deviendra admin. Tu ne pourras revenir qu’avec le code et les mots-clés.'
-        : 'Tu ne pourras revenir qu’avec le code et les mots-clés.',
+        ? 'Tu es le seul admin : le membre le plus ancien le deviendra. Tu ne pourras revenir qu’avec le code, les mots-clés et l’accord d’un admin.'
+        : 'Tu ne pourras revenir qu’avec le code, les mots-clés et l’accord d’un admin.',
       [
         { text: 'Annuler', style: 'cancel' },
         {
@@ -85,6 +109,14 @@ export default function GroupSettings() {
           style: 'destructive',
           onPress: () =>
             void run(async () => {
+              if (lastAdmin) {
+                // Signed by us while still admin: the other phones follow this, not the server.
+                const open = openGroups.get(id);
+                if (!open) throw new ApiError(409, 'not_open');
+                const { members } = await session.api.members(id); // oldest first
+                const next = members.find((m) => m.userId !== session.account.userId && others.some((o) => o.userId === m.userId));
+                if (next) await setAdmins(session, profiles, id, open.keys, [next.userId]);
+              }
               await leaveGroup(session, id, i.keyVersion);
               const open = openGroups.get(id);
               if (open) for (const k of open.keys.values()) wipe(k);
@@ -119,17 +151,13 @@ export default function GroupSettings() {
 
       <Text style={styles.section}>Mots-clés pour rejoindre</Text>
       <View style={styles.card}>
-        {info.keywords ? (
-          <View style={styles.keywords}>
-            {info.keywords.map((k, i) => (
-              <View key={i} style={styles.chip}>
-                <Text style={styles.chipText}>{k}</Text>
-              </View>
-            ))}
-          </View>
-        ) : (
-          <Text style={type.dim}>Aucun : ce groupe a été créé avant les mots-clés, le code suffit pour le rejoindre.</Text>
-        )}
+        <View style={styles.keywords}>
+          {(info.keywords ?? []).map((k, i) => (
+            <View key={i} style={styles.chip}>
+              <Text style={styles.chipText}>{k}</Text>
+            </View>
+          ))}
+        </View>
         <Text style={[type.dim, styles.note]}>À donner en vrai avec le code, jamais par message.</Text>
       </View>
 
@@ -138,13 +166,15 @@ export default function GroupSettings() {
         {info.members.map((m, i) => (
           <View key={m.userId} style={[styles.row, i > 0 && styles.divider]}>
             <Avatar id={isAvatarId(m.avatar) ? m.avatar : null} size={36} />
-            <View style={{ flex: 1 }}>
+            <Pressable style={{ flex: 1 }} disabled={m.me} onPress={() => void showFingerprint(m)} accessibilityRole="button">
               <Text style={type.body}>
                 {m.username}
                 {m.me ? <Text style={type.dim}> (toi)</Text> : null}
               </Text>
-              {!m.hasKey ? <Text style={type.dim}>En attente de la clé</Text> : null}
-            </View>
+              {m.keyChanged ? <Text style={styles.danger}>Clés changées : à vérifier</Text> : null}
+              {m.unknown ? <Text style={styles.danger}>Pas accepté par un admin : ne reçoit pas la clé</Text> : null}
+              {!m.me && !m.keyChanged && !m.unknown ? <Text style={type.dim}>Voir son empreinte</Text> : null}
+            </Pressable>
             {m.role === 'admin' ? (
               <View style={styles.badge}>
                 <Text style={styles.badgeText}>Admin</Text>
@@ -237,7 +267,10 @@ export default function GroupSettings() {
 }
 
 function message(e: unknown, fallback: string): string {
-  return e instanceof NetworkError ? 'Pas de réseau' : fallback;
+  if (e instanceof NetworkError) return 'Pas de réseau';
+  if (e instanceof KeyChangedError) return 'Les clés d’un membre ont changé : vérifie son empreinte avant.';
+  if (e instanceof GroupTamperedError) return 'Le serveur liste quelqu’un qu’aucun admin n’a accepté : action bloquée par sécurité.';
+  return fallback;
 }
 
 const styles = StyleSheet.create({

@@ -40,8 +40,10 @@ async function prepareImage(uri: string, width: number, height: number): Promise
   small.resize(width >= height ? { width: PREVIEW_SIDE, height: null } : { width: null, height: PREVIEW_SIDE });
   const preview = await (await small.renderAsync()).saveAsync({ format: SaveFormat.JPEG, compress: 0.5, base64: true });
 
-  // The manipulator writes its output to the cache: keep only the bytes in memory.
+  // The manipulator writes its output to the cache, and the picker may have
+  // copied the original there too: keep only the bytes in memory.
   for (const out of [image.uri, preview.uri]) deleteQuietly(out);
+  if (uri.startsWith(Paths.cache.uri)) deleteQuietly(uri);
   return {
     jpeg: fromStdBase64(image.base64!),
     width: image.width,

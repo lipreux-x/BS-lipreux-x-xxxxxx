@@ -1,6 +1,7 @@
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { NativeCryptoMissingError } from '@/crypto';
 import { useUnlocked } from '@/session/SessionProvider';
 import { ApiError, NetworkError } from '@/services/api';
 import { joinGroup } from '@/services/groups';
@@ -9,10 +10,10 @@ import { KeywordsForm } from '@/ui/KeywordsForm';
 import { colors, space } from '@/ui/theme';
 
 /*
- * Key flow: the code identifies the group. The server checks it together with
- * the 3 keywords (5 tries/hour) and adds us as member. The group key is NOT
- * sent here: a member who has it seals it to our public key the next time
- * they open the group.
+ * Key flow: the code + 3 keywords never leave the phone; a key derived from
+ * them finds the group (5 tries/hour). That only files a request: an admin
+ * approves it from their phone (after comparing our fingerprint in person),
+ * which hands us the group key wrapped under the code.
  *
  * Keywords first, code last: the code is checked as it is typed, so the safe
  * display shows green (joined) or red (wrong code or keywords) right away.
@@ -52,6 +53,7 @@ export default function JoinGroup() {
             if (e instanceof NetworkError) return 'Pas de réseau';
             if (e instanceof ApiError && e.code === 'too_many_attempts') return 'Trop d’essais. Réessaie dans une heure.';
             if (e instanceof ApiError && e.code === 'wrong_code') return 'Code ou mots-clés incorrects';
+            if (e instanceof NativeCryptoMissingError) return 'Version de l’app incomplète : installe celle du store';
             return 'Impossible de rejoindre';
           }
         }}
