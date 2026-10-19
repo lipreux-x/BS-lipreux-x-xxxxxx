@@ -21,10 +21,10 @@ type Phase = 'idle' | 'scanning' | 'open' | 'failed';
 
 const STATUS: Record<Phase, string> = { idle: 'PRÊT', scanning: 'LECTURE…', open: 'ACCÈS OK', failed: 'REFUSÉ' };
 const HINT: Record<Phase, string> = {
-  idle: 'Pose ton doigt sur le lecteur',
-  scanning: 'Garde ton doigt sur le capteur du téléphone',
+  idle: 'Appuie sur le lecteur pour scanner',
+  scanning: 'Pose ton doigt sur le capteur du téléphone',
   open: 'Ouverture',
-  failed: 'Empreinte refusée, réessaie',
+  failed: 'Empreinte refusée, appuie pour réessayer',
 };
 
 /**
