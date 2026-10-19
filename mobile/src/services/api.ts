@@ -241,6 +241,11 @@ export class Api {
     return this.request<{ avatar: string | null }>('/me/avatar', { method: 'PUT', json: { avatar } });
   }
 
+  /** This phone's Expo push token (notifications carry a fixed generic line, server lib/push.ts). */
+  setPushToken(token: string) {
+    return this.request<{ ok: true }>('/me/push-token', { method: 'PUT', json: { token } });
+  }
+
   createInvite() {
     return this.request<{ code: string; expiresAt: string }>('/invites', { method: 'POST' });
   }

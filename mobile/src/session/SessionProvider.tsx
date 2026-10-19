@@ -10,6 +10,7 @@ import { biometricStore } from '@/services/biometrics';
 import { ProfileCache, type GroupKeys, type Session } from '@/services/groups';
 import { imageCache } from '@/services/images';
 import { deleteLocalDb, openLocalStore } from '@/services/localDb';
+import { registerPush, setupNotifications, unregisterPush } from '@/services/push';
 import type { LocalStore } from '@/services/localStore';
 import { voiceCache } from '@/services/voice';
 import { secureStore } from '@/services/secureStore';
@@ -104,6 +105,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const leftAt = useRef(new Map<string, number>()).current;
 
   useEffect(() => {
+    setupNotifications();
     (async () => {
       sweepPlaintextCache();
       await initCrypto();
@@ -234,8 +236,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     await s?.local.close().catch(() => {}); // the file can only be deleted once closed
     await deleteDeviceKey().catch(() => {});
     await deleteLocalDb();
+    await unregisterPush();
     setStatus({ kind: 'no-account' });
   }, [lock]);
+
+  // Once unlocked: this phone's push token goes to the server (permission asked the first time).
+  useEffect(() => {
+    if (session) void registerPush(session.api);
+  }, [session]);
 
   const unlock = useCallback(
     async (appCode: string) => {

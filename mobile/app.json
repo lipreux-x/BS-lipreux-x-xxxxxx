@@ -48,7 +48,7 @@
         {
           "photosPermission": "BaseSecrète accède à tes photos pour que tu puisses en envoyer, chiffrées, dans tes groupes.",
           "cameraPermission": false,
-          "microphonePermission": false
+          "microphonePermission": "BaseSecrète utilise le micro pour enregistrer les vocaux que tu envoies, chiffrés, dans tes groupes."
         }
       ],
       [
@@ -67,7 +67,8 @@
         {
           "microphonePermission": "BaseSecrète utilise le micro pour enregistrer les vocaux que tu envoies, chiffrés, dans tes groupes.",
           "recordAudioAndroid": true,
-          "enableBackgroundRecording": false
+          "enableBackgroundRecording": false,
+          "enableBackgroundPlayback": false
         }
       ],
       [
@@ -79,7 +80,15 @@
           "backgroundColor": "#000000"
         }
       ],
-      "expo-sqlite"
+      "expo-sqlite",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/android-icon-monochrome.png",
+          "color": "#000000",
+          "defaultChannel": "messages"
+        }
+      ]
     ],
     "backgroundColor": "#000000",
     "scheme": "basesecrete",

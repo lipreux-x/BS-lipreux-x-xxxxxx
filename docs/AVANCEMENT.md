@@ -4,6 +4,23 @@
 
 ## Derniers ajouts et changements
 
+### Notifications (20/10)
+
+- Un message reçu fait sonner le téléphone avec **une seule phrase : « uçer egassem »** (« message reçu » à l'envers). Pas de titre, pas de nom, pas de groupe, pas de texte du message.
+- **Toucher la notification** ouvre l'app sur l'écran du coffre : code app (ou empreinte), puis code du groupe, puis **directement la bonne conversation**.
+- Au plus une notification toutes les 30 s par téléphone : un groupe actif ne sonne pas sans arrêt.
+- La permission est demandée au premier déverrouillage. Réglages → Sécurité → Notifications montre l'état, avec un bouton si elles sont refusées.
+- **Ce que voient les services de notification** (Expo, Google, Apple) : qu'un téléphone a reçu « un message », et l'identifiant du groupe (un UUID aléatoire, pour ouvrir la bonne conversation). Rien d'autre.
+- Serveur : table `push_tokens` (migration `0011_push_tokens`), routes `PUT/DELETE /me/push-token`. L'envoi part après chaque message vers les autres membres actifs. Les téléphones qui ont désinstallé l'app sont oubliés.
+- Il faut un nouveau build. Sur Android, il faut aussi des identifiants Firebase pour le service Expo (`google-services.json` + clé FCM V1 envoyée sur EAS).
+
+### Autorisations vérifiées (20/10)
+
+- **Micro corrigé** : l'option `microphonePermission: false` du sélecteur de photos retirait le micro de toute l'app. Sur Android, `RECORD_AUDIO` était supprimé, et sur iOS il manquait la phrase d'autorisation. Les vocaux ne pouvaient donc pas s'enregistrer. C'est corrigé.
+- **Lecture en arrière-plan retirée** : `FOREGROUND_SERVICE` et `FOREGROUND_SERVICE_MEDIA_PLAYBACK` ne sont plus demandés. Un vocal s'arrête quand on quitte l'app, qui de toute façon se masque.
+- Restent : internet, vibration, micro, biométrie, photos (lecture pour le sélecteur, écriture pour « Enregistrer dans la galerie »), notifications. La caméra est explicitement retirée.
+- À revoir avant le Play Store : `READ_MEDIA_IMAGES` (Google limite cette permission), et `SYSTEM_ALERT_WINDOW`, ajouté par le build de développement.
+
 ### Mot de passe affiché à l'envers (20/10)
 
 - À l'inscription et à la connexion, le mot de passe s'affiche **à l'envers** au lieu des points. Le bouton **⇄ Lire** à droite du champ le remet à l'endroit, et **⇄ Envers** le retourne.
@@ -196,7 +213,7 @@ Le changement s'applique à tous les écrans de code : verrouillage, inscription
 | | Fonction | État |
 |---|---|---|
 | ✅ | Images et vocaux chiffrés | Images : envoi depuis la galerie (recompressées en JPEG, métadonnées GPS retirées), chiffrées avec une clé par fichier, stockées dans un bucket Neon privé, affichées en mémoire seulement, et enregistrables dans la galerie depuis la vue plein écran. Vocaux : bouton micro quand le champ est vide, enregistrement AAC mono 32 kb/s (5 min max), chiffrés comme les images (clé par fichier, même bucket, aucun changement serveur), forme d'onde dans le message chiffré, lecture au toucher. Comme sur les messageries courantes : toucher la forme d'onde saute à cet endroit, la glisser fait défiler ; bouton de vitesse 1× / 1,5× / 2× (gardée d'un vocal à l'autre pendant la session) ; un vocal terminé enchaîne sur le suivant de la conversation, jusqu'à une pause, un autre vocal lancé ou la sortie de la conversation. Le fichier de l'enregistreur est lu puis supprimé aussitôt ; pour l'écoute, l'audio déchiffré passe par un fichier temporaire du cache, supprimé au vocal suivant et au verrouillage (avec tout ce que l'enregistreur aurait laissé). Quitter l'app pendant un enregistrement l'annule. À tester sur téléphone (nouvelle build : module natif expo-audio). |
-| ⬜ | Notifications push génériques | À faire |
+| ✅ | Notifications push génériques | Fait : « uçer egassem » seulement ; le toucher demande les codes puis ouvre le groupe. Il manque les identifiants Firebase pour Android. |
 | ✅ | Messages éphémères | Fait : réglage admin dans les réglages du groupe, purge toutes les heures sur le serveur |
 | ✅ | Rotation de clé quand un membre part | Fait, avec « quitter » et « retirer un membre » |
 

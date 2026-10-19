@@ -5,6 +5,7 @@ import { keyFingerprint } from '@/crypto';
 import { useUnlocked } from '@/session/SessionProvider';
 import { copySensitive } from '@/services/clipboard';
 import { ApiError, NetworkError } from '@/services/api';
+import { registerPush, type PushStatus } from '@/services/push';
 import { WIPE_AFTER_CHOICES } from '@/services/vault';
 import { Avatar, isAvatarId, type AvatarId } from '@/ui/avatars';
 import { AvatarPicker } from '@/ui/AvatarPicker';
@@ -18,6 +19,11 @@ export default function Settings() {
   const [noScreenshots, setNoScreenshots] = useState<boolean | undefined>(undefined);
   const [bioOn, setBioOn] = useState<boolean | undefined>(undefined);
   const [bioAvailable, setBioAvailable] = useState(false);
+  const [push, setPush] = useState<PushStatus | undefined>(undefined);
+
+  useEffect(() => {
+    void registerPush(session.api, { ask: false }).then(setPush);
+  }, [session]);
 
   useEffect(() => {
     void vault.wipeAfter().then(setWipeAfter);
@@ -144,6 +150,18 @@ export default function Settings() {
         ) : (
           <Text style={type.dim}>Pas de capteur d’empreinte, ou aucun doigt enregistré sur ce téléphone.</Text>
         )}
+
+        <Text style={styles.subTitle}>Notifications</Text>
+        <Text style={type.dim}>
+          {push === 'on'
+            ? 'Activées. Elles disent seulement « uçer egassem » (« message reçu » à l’envers) : ni nom, ni groupe, ni texte. En touchant la notification, tu tapes tes codes, puis le groupe s’ouvre.'
+            : push === 'denied'
+              ? 'Refusées. Autorise les notifications de BaseSecrète dans les réglages du téléphone.'
+              : push === 'unavailable'
+                ? 'Indisponibles sur cette version de l’app.'
+                : '…'}
+        </Text>
+        {push === 'denied' ? <Button title="Activer" variant="ghost" onPress={() => void registerPush(session.api).then(setPush)} /> : null}
 
         <Text style={styles.subTitle}>Captures d’écran</Text>
         <Text style={type.dim}>Bloquées : ni capture ni enregistrement de l’écran dans l’app, sur ce téléphone.</Text>

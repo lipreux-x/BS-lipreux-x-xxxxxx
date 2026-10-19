@@ -1,7 +1,19 @@
-import { Stack } from 'expo-router';
+import { router, Stack } from 'expo-router';
+import { useEffect } from 'react';
+import { onPendingGroup, takePendingGroup } from '@/services/push';
 import { colors, fonts } from '@/ui/theme';
 
 export default function AppLayout() {
+  // A tapped notification: straight to its group once the app is open (the group asks its own code).
+  useEffect(() => {
+    const go = () => {
+      const id = takePendingGroup();
+      if (id) router.push({ pathname: '/group/[id]', params: { id } });
+    };
+    go();
+    return onPendingGroup(go);
+  }, []);
+
   return (
     <Stack
       screenOptions={{

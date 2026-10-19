@@ -125,6 +125,7 @@
 
 ### 4.7 Autres règles
 - Notifications push : texte générique, aucun nom de groupe ni contenu.
+  - Fait : une seule phrase, « uçer egassem » (« message reçu » à l'envers), sans titre. Les données ne portent que l'id du groupe (UUID). Le toucher ouvre l'écran du coffre (code app ou empreinte), puis le code du groupe, puis la conversation. Au plus une notification toutes les 30 s par téléphone. Serveur : `push_tokens`, `server/src/lib/push.ts` ; app : `mobile/src/services/push.ts`.
 - Images/vocaux : chiffrés côté client avant upload dans Neon Storage / R2 (URLs présignées) (clé de fichier aléatoire, elle-même chiffrée avec la clé de groupe).
   - Images (fait) : recompressées en JPEG 1600 px avant envoi, ce qui retire les métadonnées (GPS, appareil). Fichier chiffré en XChaCha20-Poly1305 avec une clé aléatoire, AD = `bs/v1/attachment` + groupe + id de la pièce jointe (`mobile/src/crypto/attachment.ts`). La clé, les dimensions et un mini-aperçu flou voyagent dans un message de groupe normal (chiffré + signé).
   - Serveur : table `attachments` + bucket privé `attachments` (clé d'objet `<groupe>/<id>`). URL d'upload valable 5 min et limitée à la taille annoncée (10 Mo max, 60 envois/h). Téléchargement réservé aux membres tant que le message existe. Le fichier est supprimé avec le message éphémère, à la fermeture du groupe, ou après 24 h s'il n'a jamais été envoyé.
