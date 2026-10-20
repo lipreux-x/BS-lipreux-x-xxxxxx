@@ -1,5 +1,5 @@
 import { useRef, useState, type ComponentRef } from 'react';
-import { StyleSheet, Text, TextInput, View } from 'react-native';
+import { Platform, StyleSheet, Text, TextInput, View } from 'react-native';
 import { KEYWORD_COUNT, KEYWORD_MAX_LENGTH, keywordsProblem } from '@/services/keywords';
 import { Button } from './Button';
 import { colors, space, type } from './theme';
@@ -51,6 +51,8 @@ export function KeywordsForm({
           maxLength={KEYWORD_MAX_LENGTH}
           autoCapitalize="none"
           autoCorrect={false}
+          // Android keyboards would still learn the words and suggest them in other apps.
+          keyboardType={Platform.OS === 'android' ? 'visible-password' : 'default'}
           autoFocus={i === 0}
           returnKeyType={i < KEYWORD_COUNT - 1 ? 'next' : 'done'}
           submitBehavior={i < KEYWORD_COUNT - 1 ? 'submit' : 'blurAndSubmit'}

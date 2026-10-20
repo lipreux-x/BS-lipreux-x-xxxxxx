@@ -152,7 +152,7 @@ export function FingerprintPad({ onScan }: { onScan(): Promise<(() => void) | nu
         <View
           style={[
             styles.led,
-            ledColor && { backgroundColor: ledColor, shadowColor: ledColor, shadowOpacity: 0.9, shadowRadius: 5, shadowOffset: { width: 0, height: 0 } },
+            ledColor && { backgroundColor: ledColor, boxShadow: `0 0 5px ${ledColor}` },
           ]}
         />
       </View>
@@ -244,11 +244,7 @@ const styles = StyleSheet.create({
   bar: {
     height: 3,
     backgroundColor: led.green,
-    shadowColor: led.green,
-    shadowOpacity: 1,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 0 },
-    elevation: 4,
+    boxShadow: `0 0 8px ${led.green}`,
   },
 
   // Status line: the code display's LCD and LED.

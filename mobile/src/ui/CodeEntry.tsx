@@ -1,6 +1,6 @@
 import * as Haptics from 'expo-haptics';
 import { useEffect, useRef, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { AppState, StyleSheet, Text, View } from 'react-native';
 import { PinPad } from './PinPad';
 import { SafeDisplay, type SafeDisplayHandle } from './SafeDisplay';
 import { colors, space, type } from './theme';
@@ -47,12 +47,27 @@ export function CodeEntry({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => setWait(lockedForMs), [lockedForMs]);
+  // Counted down from an end time, not by 1 s steps: timers stop while the app
+  // is in the background, so the wait is recomputed when it comes back.
   useEffect(() => {
-    if (wait <= 0) return;
-    const t = setTimeout(() => setWait((w) => Math.max(0, w - 1000)), 1000);
-    return () => clearTimeout(t);
-  }, [wait]);
+    const until = Date.now() + lockedForMs;
+    let t: ReturnType<typeof setTimeout> | undefined;
+    const tick = () => {
+      const left = Math.max(0, until - Date.now());
+      setWait(left);
+      if (left > 0) t = setTimeout(tick, Math.min(1000, left));
+    };
+    t = setTimeout(tick, 0);
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state !== 'active') return;
+      clearTimeout(t);
+      tick();
+    });
+    return () => {
+      clearTimeout(t);
+      sub.remove();
+    };
+  }, [lockedForMs]);
 
   async function submit(full: string) {
     setBusy(true);

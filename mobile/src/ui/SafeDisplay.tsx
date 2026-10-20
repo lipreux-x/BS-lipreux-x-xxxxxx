@@ -86,7 +86,7 @@ const styles = StyleSheet.create({
   errorChar: { color: colors.danger, textShadowColor: colors.danger },
   successChar: { color: GREEN, textShadowColor: GREEN },
   led: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#2E2E2E', borderWidth: 1, borderColor: '#000000' },
-  ledBusy: { backgroundColor: AMBER, shadowColor: AMBER, shadowOpacity: 0.9, shadowRadius: 6, shadowOffset: { width: 0, height: 0 } },
-  ledSuccess: { backgroundColor: GREEN, shadowColor: GREEN, shadowOpacity: 0.9, shadowRadius: 6, shadowOffset: { width: 0, height: 0 } },
-  ledError: { backgroundColor: colors.danger, shadowColor: colors.danger, shadowOpacity: 0.9, shadowRadius: 6, shadowOffset: { width: 0, height: 0 } },
+  ledBusy: { backgroundColor: AMBER, boxShadow: `0 0 6px ${AMBER}` },
+  ledSuccess: { backgroundColor: GREEN, boxShadow: `0 0 6px ${GREEN}` },
+  ledError: { backgroundColor: colors.danger, boxShadow: `0 0 6px ${colors.danger}` },
 });

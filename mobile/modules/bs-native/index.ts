@@ -20,6 +20,8 @@ export interface BsNative {
   deleteDeviceKey(): Promise<void>;
   /** Milliseconds since boot, sleep included: cannot be moved by changing the clock. */
   uptimeMs(): number;
+  /** iOS only: copies text kept off other Apple devices, removed by iOS after `seconds`. */
+  copyLocal?(text: string, seconds: number): Promise<void>;
 }
 
 export const bsNative = requireOptionalNativeModule<BsNative>('BsNative');

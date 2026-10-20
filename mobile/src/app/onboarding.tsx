@@ -1,6 +1,6 @@
-import { useState } from 'react';
-import { KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useEffect, useMemo, useState } from 'react';
+import { BackHandler, KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CryptoError, isValidPassword, MIN_PASSWORD_LENGTH, NativeCryptoMissingError, passwordProblem } from '@/crypto';
 import { useSession, type RecoveredAccount } from '@/session/SessionProvider';
 import { ApiError, NetworkError } from '@/services/api';
@@ -68,9 +68,30 @@ export default function Onboarding() {
     }
   }
 
+  const insets = useSafeAreaInsets();
+  // Back from the code steps: to the previous step, not out of the app (the form keeps what was typed).
+  const back = useMemo(
+    () => (step.kind === 'confirm' ? () => setStep({ kind: 'code' }) : step.kind === 'code' ? () => setStep({ kind: 'form' }) : null),
+    [step.kind],
+  );
+  useEffect(() => {
+    if (!back) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      back();
+      return true;
+    });
+    return () => sub.remove();
+  }, [back]);
+  const backLink = back ? (
+    <Pressable onPress={back} hitSlop={12} style={[styles.back, { top: insets.top + space.sm }]}>
+      <Text style={styles.backText}>‹ Retour</Text>
+    </Pressable>
+  ) : null;
+
   if (step.kind === 'code') {
     return (
       <SafeAreaView style={styles.center}>
+        {backLink}
         <CodeEntry
           key="code"
           initialError={step.notice}
@@ -91,6 +112,7 @@ export default function Onboarding() {
   if (step.kind === 'confirm') {
     return (
       <SafeAreaView style={styles.center}>
+        {backLink}
         <CodeEntry
           key="confirm"
           title="Confirme ton code"
@@ -284,6 +306,8 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   center: { flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center' },
   centerText: { textAlign: 'center' },
+  back: { position: 'absolute', left: space.md, zIndex: 1 },
+  backText: { color: colors.accentFg, fontSize: 16 },
   stripes: { flexDirection: 'row', height: 10, opacity: 0.85 },
   form: { flexGrow: 1, padding: space.lg, gap: space.md, justifyContent: 'center' },
   header: { alignItems: 'center', gap: space.xs, marginBottom: space.sm },

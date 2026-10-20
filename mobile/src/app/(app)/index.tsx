@@ -1,6 +1,7 @@
 import { Stack, useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { FlatList, Platform, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { wipe } from '@/crypto/encoding';
 import { useUnlocked } from '@/session/SessionProvider';
 import { NetworkError } from '@/services/api';
@@ -16,6 +17,7 @@ export default function GroupsList() {
   // groupsVersion: re-render when groups close on their own (10 min out of them).
   const { session, openGroups, groupsVersion } = useUnlocked();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const [groups, setGroups] = useState<GroupListItem[] | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   // Why the last refresh failed: no network, or the server answered an error.
@@ -79,9 +81,13 @@ export default function GroupsList() {
             </View>
           ) : undefined
         }
+        // Edge to edge: "Rejoindre un groupe" stays above the navigation bar / home indicator.
+        contentContainerStyle={{ paddingBottom: insets.bottom }}
         refreshControl={
           <RefreshControl
             tintColor={colors.accentFg}
+            colors={[colors.accentFg]}
+            progressBackgroundColor={colors.surface2}
             refreshing={refreshing}
             onRefresh={async () => {
               setRefreshing(true);
@@ -177,11 +183,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#000000',
   },
-  ledOpen: { backgroundColor: LED_GREEN, shadowColor: LED_GREEN, shadowOpacity: 0.9, shadowRadius: 4, shadowOffset: { width: 0, height: 0 } },
-  ledKey: { backgroundColor: LED_AMBER, shadowColor: LED_AMBER, shadowOpacity: 0.9, shadowRadius: 4, shadowOffset: { width: 0, height: 0 } },
+  ledOpen: { backgroundColor: LED_GREEN, boxShadow: `0 0 4px ${LED_GREEN}` },
+  ledKey: { backgroundColor: LED_AMBER, boxShadow: `0 0 4px ${LED_AMBER}` },
   openText: { color: LED_GREEN },
   closedText: { color: colors.danger },
-  ledClosed: { backgroundColor: colors.danger, shadowColor: colors.danger, shadowOpacity: 0.9, shadowRadius: 4, shadowOffset: { width: 0, height: 0 } },
+  ledClosed: { backgroundColor: colors.danger, boxShadow: `0 0 4px ${colors.danger}` },
   chevron: { color: colors.textDim, fontSize: 24 },
   expiry: { color: colors.textDim },
   section: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: space.md, paddingTop: space.md, paddingBottom: space.sm },

@@ -76,7 +76,8 @@ export function onPendingGroup(listener: () => void): () => void {
 
 // ---- token -------------------------------------------------------------------------
 
-export type PushStatus = 'on' | 'denied' | 'unavailable';
+/** 'blocked': refused, and the system will not ask again (only its settings can allow them). */
+export type PushStatus = 'on' | 'denied' | 'blocked' | 'unavailable';
 
 /**
  * Asks for the permission if never asked, and gives this phone's token to
@@ -86,9 +87,9 @@ export async function registerPush(api: Api, { ask = true } = {}): Promise<PushS
   try {
     let { status, canAskAgain } = await Notifications.getPermissionsAsync();
     if (status !== 'granted' && ask && canAskAgain) {
-      ({ status } = await whileSystemUi(() => Notifications.requestPermissionsAsync()));
+      ({ status, canAskAgain } = await whileSystemUi(() => Notifications.requestPermissionsAsync()));
     }
-    if (status !== 'granted') return 'denied';
+    if (status !== 'granted') return canAskAgain ? 'denied' : 'blocked';
     const projectId = Constants.expoConfig?.extra?.eas?.projectId as string | undefined;
     const { data: token } = await Notifications.getExpoPushTokenAsync({ projectId });
     await api.setPushToken(token);

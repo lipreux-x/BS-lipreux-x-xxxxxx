@@ -1,13 +1,21 @@
+import { AppState, type NativeEventSubscription } from 'react-native';
 import type { WireMessage } from './api';
 
 /*
  * WebSocket to /ws. The socket is only a fast path: after every (re)connect
  * the app resyncs over HTTP, so a message missed while offline or during a
  * Wi-Fi <-> 4G switch is still fetched (SPEC §5.1).
+ *
+ * A socket can die without a close event (iOS suspends the app, Android
+ * dozes, the network changes): the server pings every 25 s, so a socket
+ * silent for longer than SILENT_MS is replaced, checked on a timer and when
+ * the app comes back to the foreground.
  */
 
 const MIN_BACKOFF_MS = 1000;
 const MAX_BACKOFF_MS = 30_000;
+const SILENT_MS = 60_000; // two server pings missed
+const WATCH_MS = 10_000;
 
 export interface RealtimeHandlers {
   onMessage(message: WireMessage): void;
@@ -23,6 +31,11 @@ export class RealtimeClient {
   private backoff = MIN_BACKOFF_MS;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private stopped = true;
+  /** Bumped by every connect: one still waiting for its token gives up if another started since. */
+  private attempt = 0;
+  private lastFrameAt = 0;
+  private watchdog: ReturnType<typeof setInterval> | null = null;
+  private appState: NativeEventSubscription | null = null;
 
   constructor(
     private readonly baseUrl: string,
@@ -33,6 +46,10 @@ export class RealtimeClient {
   start(): void {
     if (!this.stopped) return;
     this.stopped = false;
+    this.watchdog = setInterval(() => this.reconnectIfSilent(), WATCH_MS);
+    this.appState = AppState.addEventListener('change', (state) => {
+      if (state === 'active') this.reconnectIfSilent();
+    });
     void this.connect();
   }
 
@@ -40,6 +57,10 @@ export class RealtimeClient {
     this.stopped = true;
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
+    if (this.watchdog) clearInterval(this.watchdog);
+    this.watchdog = null;
+    this.appState?.remove();
+    this.appState = null;
     const ws = this.ws;
     this.ws = null;
     ws?.close();
@@ -57,19 +78,27 @@ export class RealtimeClient {
     void this.connect();
   }
 
+  private reconnectIfSilent(): void {
+    if (this.ws && Date.now() - this.lastFrameAt > SILENT_MS) this.reconnectNow();
+  }
+
   private async connect(): Promise<void> {
     if (this.stopped || this.ws) return;
+    const attempt = ++this.attempt;
     let token: string;
     try {
       token = await this.getToken(); // fresh each attempt: tokens are short-lived
     } catch {
-      return this.scheduleReconnect();
+      if (attempt === this.attempt) this.scheduleReconnect();
+      return;
     }
-    if (this.stopped) return;
+    if (this.stopped || this.ws || attempt !== this.attempt) return;
 
     const ws = new WebSocket(`${this.baseUrl.replace(/^http/, 'ws')}/ws?token=${encodeURIComponent(token)}`);
     this.ws = ws;
+    this.lastFrameAt = Date.now();
     ws.onmessage = (event) => {
+      this.lastFrameAt = Date.now();
       let data: { type?: string; message?: WireMessage; groupId?: string };
       try {
         data = JSON.parse(String(event.data));

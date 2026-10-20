@@ -42,7 +42,18 @@
       "./plugins/withHiddenRecents",
       "expo-router",
       "expo-status-bar",
-      "expo-secure-store",
+      [
+        "expo-secure-store",
+        {
+          "faceIDPermission": "BaseSecrète n’utilise pas Face ID : seule l’empreinte (Touch ID) peut ouvrir l’app, si tu l’actives dans les Réglages."
+        }
+      ],
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "BaseSecrète n’utilise pas Face ID : seule l’empreinte (Touch ID) peut ouvrir l’app, si tu l’actives dans les Réglages."
+        }
+      ],
       "expo-font",
       [
         "expo-image-picker",

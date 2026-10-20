@@ -1,7 +1,8 @@
 import { router, useFocusEffect } from 'expo-router';
 import { Bell, Bomb, CameraOff, FingerprintPattern, Lock, ShieldCheck, type LucideIcon, User, UserPlus } from 'lucide-react-native';
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, AppState, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { keyFingerprint } from '@/crypto';
 import { useUnlocked } from '@/session/SessionProvider';
 import { copySensitive } from '@/services/clipboard';
@@ -13,10 +14,11 @@ import { AvatarPicker } from '@/ui/AvatarPicker';
 import { Button } from '@/ui/Button';
 import { timeLabel } from '@/ui/chat/timeline';
 import { InviteCodeDisplay } from '@/ui/InviteCode';
-import { colors, space, type } from '@/ui/theme';
+import { colors, mono, space, type } from '@/ui/theme';
 
 export default function Settings() {
   const { session, profiles, vault, lock, setScreenshotsBlocked } = useUnlocked();
+  const insets = useSafeAreaInsets();
   // Per-phone security options, read from the Secure Store (undefined until then).
   const [wipeAfter, setWipeAfter] = useState<number | null | undefined>(undefined);
   const [noScreenshots, setNoScreenshots] = useState<boolean | undefined>(undefined);
@@ -24,8 +26,14 @@ export default function Settings() {
   const [bioAvailable, setBioAvailable] = useState(false);
   const [push, setPush] = useState<PushStatus | undefined>(undefined);
 
+  // Read again when coming back from the phone's settings.
   useEffect(() => {
-    void registerPush(session.api, { ask: false }).then(setPush);
+    const read = () => void registerPush(session.api, { ask: false }).then(setPush);
+    read();
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') read();
+    });
+    return () => sub.remove();
   }, [session]);
 
   useEffect(() => {
@@ -92,7 +100,8 @@ export default function Settings() {
   }
 
   return (
-    <ScrollView contentContainerStyle={styles.screen}>
+    // Edge to edge: the last options stay above the navigation bar / home indicator.
+    <ScrollView contentContainerStyle={[styles.screen, { paddingBottom: insets.bottom + space.md }]}>
       <Section title="Profil" icon={User}>
         <View style={styles.profile}>
           <Avatar id={avatar ?? null} size={64} />
@@ -157,13 +166,14 @@ export default function Settings() {
         <Text style={type.dim}>
           {push === 'on'
             ? 'Activées. Elles disent seulement « uçer egassem » (« message reçu » à l’envers) : ni nom, ni groupe, ni texte. En touchant la notification, tu tapes tes codes, puis le groupe s’ouvre.'
-            : push === 'denied'
+            : push === 'denied' || push === 'blocked'
               ? 'Refusées. Autorise les notifications de BaseSecrète dans les réglages du téléphone.'
               : push === 'unavailable'
                 ? 'Indisponibles sur cette version de l’app.'
                 : '…'}
         </Text>
         {push === 'denied' ? <Button title="Activer" variant="ghost" onPress={() => void registerPush(session.api).then(setPush)} /> : null}
+        {push === 'blocked' ? <Button title="Ouvrir les réglages du téléphone" variant="ghost" onPress={() => void Linking.openSettings()} /> : null}
 
         <SubTitle icon={CameraOff}>Captures d’écran</SubTitle>
         <Text style={type.dim}>Bloquées : ni capture ni enregistrement de l’écran dans l’app, sur ce téléphone.</Text>
@@ -248,5 +258,5 @@ const styles = StyleSheet.create({
   optionOn: { backgroundColor: colors.accent, borderColor: colors.accentFg },
   optionText: { color: colors.textDim, fontSize: 14 },
   optionTextOn: { color: colors.text, fontWeight: '600' },
-  fingerprint: { color: colors.text, fontSize: 18, fontFamily: 'monospace', letterSpacing: 1, textAlign: 'center', lineHeight: 28 },
+  fingerprint: { color: colors.text, fontSize: 18, fontFamily: mono, letterSpacing: 1, textAlign: 'center', lineHeight: 28 },
 });

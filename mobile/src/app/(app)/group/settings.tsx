@@ -1,6 +1,7 @@
 import { router, Stack, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { wipe } from '@/crypto/encoding';
 import { useUnlocked } from '@/session/SessionProvider';
 import { useInsideGroup } from '@/session/useInsideGroup';
@@ -25,6 +26,7 @@ const EPHEMERAL: { label: string; seconds: number | null }[] = [
 export default function GroupSettings() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { session, profiles, openGroups } = useUnlocked();
+  const insets = useSafeAreaInsets();
   useInsideGroup(id);
   const [info, setInfo] = useState<GroupInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -146,7 +148,8 @@ export default function GroupSettings() {
 
   const admin = info.myRole === 'admin';
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+    // Edge to edge: "Quitter le groupe" stays above the navigation bar / home indicator.
+    <ScrollView style={styles.screen} contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + space.xl }]}>
       {info.name ? <Stack.Screen options={{ title: info.name }} /> : null}
 
       <Text style={styles.section}>Mots-clés pour rejoindre</Text>

@@ -57,6 +57,8 @@ import { checkLockout, FREE_ATTEMPTS, parseLockout, registerFailure, type Lockou
 export interface BiometricStore {
   /** A fingerprint sensor with a finger enrolled. */
   available(): Promise<boolean>;
+  /** Saving already asks for the finger (Android), so it proves the finger works. */
+  readonly saveAsksFinger?: boolean;
   save(value: string): Promise<void>;
   load(): Promise<string | null>;
   clear(): Promise<void>;
@@ -273,14 +275,15 @@ export class Vault {
   /**
    * Turns the option on. The app code is asked again (and counts toward the
    * lockout like on the lock screen); the system then asks for the finger
-   * once, to check it works before relying on it.
+   * once, to check it works before relying on it (on Android, saving the
+   * copy is that check: no second prompt).
    */
   async enableBiometrics(appCode: string): Promise<void> {
     if (!this.bio || !(await this.biometricsAvailable())) throw new Error('biometrics_unavailable');
     const { masterKey, identity } = await this.unlock(appCode);
     try {
       await this.bio.save(b64.encode(masterKey));
-      if ((await this.bio.load()) !== b64.encode(masterKey)) throw new Error('biometrics_failed');
+      if (!this.bio.saveAsksFinger && (await this.bio.load()) !== b64.encode(masterKey)) throw new Error('biometrics_failed');
     } catch (e) {
       await this.bio.clear().catch(() => {});
       throw e;

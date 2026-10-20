@@ -5,6 +5,8 @@ import CryptoKit
 import ExpoModulesCore
 import Foundation
 import Security
+import UIKit
+import UniformTypeIdentifiers
 
 public class BsNativeModule: Module {
   public func definition() -> ModuleDefinition {
@@ -38,6 +40,15 @@ public class BsNativeModule: Module {
     AsyncFunction("deleteDeviceKey") {
       DeviceKey.delete()
     }
+
+    // Copied text that stays on this iPhone (no Universal Clipboard) and that
+    // iOS removes by itself: the app never reads the pasteboard back.
+    AsyncFunction("copyLocal") { (text: String, seconds: Double) in
+      UIPasteboard.general.setItems(
+        [[UTType.utf8PlainText.identifier: text]],
+        options: [.localOnly: true, .expirationDate: Date().addingTimeInterval(seconds)]
+      )
+    }.runOnQueue(DispatchQueue.main)
 
     Function("uptimeMs") { () -> Double in
       // CLOCK_MONOTONIC keeps counting during sleep on Darwin; the wall clock is not used.

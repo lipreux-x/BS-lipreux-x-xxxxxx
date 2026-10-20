@@ -1,6 +1,8 @@
 import { router, Stack } from 'expo-router';
 import { useEffect } from 'react';
+import { View } from 'react-native';
 import { onPendingGroup, takePendingGroup } from '@/services/push';
+import { PrivacyCover } from '@/ui/PrivacyCover';
 import { colors, fonts } from '@/ui/theme';
 
 export default function AppLayout() {
@@ -22,6 +24,13 @@ export default function AppLayout() {
         headerTitleStyle: { color: colors.text, fontFamily: fonts.semibold },
         contentStyle: { backgroundColor: colors.bg },
       }}
+      // iOS shows modal screens above the root PrivacyCover: each screen carries its own.
+      screenLayout={({ children }) => (
+        <View style={{ flex: 1 }}>
+          {children}
+          <PrivacyCover />
+        </View>
+      )}
     >
       <Stack.Screen name="index" options={{ title: 'BaseSecrète' }} />
       <Stack.Screen name="group/new" options={{ title: 'Nouveau groupe', presentation: 'modal' }} />

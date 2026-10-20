@@ -39,7 +39,9 @@ export type Status =
   | { kind: 'loading' }
   | { kind: 'no-account' }
   | { kind: 'locked'; username: string }
-  | { kind: 'unlocked' };
+  | { kind: 'unlocked' }
+  /** Startup threw (secure storage, crypto): `retry` runs it again (an interrupted wipe resumes). */
+  | { kind: 'failed'; retry(): void };
 
 export interface OpenGroup {
   keys: GroupKeys; // every version we can read; keyVersion is the one to send with
@@ -107,7 +109,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     setupNotifications();
-    (async () => {
+    const boot = async () => {
       sweepPlaintextCache();
       await initCrypto();
       // Reinstalled (iOS kept the Keychain): what the deleted app left is erased, not reused.
@@ -129,7 +131,18 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       await vault.wipeAll();
       await deleteLocalDb();
       setStatus({ kind: 'no-account' });
-    })();
+    };
+    const start = () =>
+      boot().catch(() =>
+        setStatus({
+          kind: 'failed',
+          retry: () => {
+            setStatus({ kind: 'loading' });
+            void start();
+          },
+        }),
+      );
+    void start();
   }, []);
 
   const sessionRef = useRef<Session | null>(null);

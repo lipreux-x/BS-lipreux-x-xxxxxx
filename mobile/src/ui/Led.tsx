@@ -13,7 +13,7 @@ export function Led({ state, size = 8 }: { state: LedState; size?: number }) {
       style={[
         styles.led,
         { width: size, height: size, borderRadius: size / 2 },
-        glow && { backgroundColor: glow, shadowColor: glow, shadowOpacity: 0.9, shadowRadius: size / 2, shadowOffset: { width: 0, height: 0 } },
+        glow && { backgroundColor: glow, boxShadow: `0 0 ${size / 2}px ${glow}` },
       ]}
     />
   );

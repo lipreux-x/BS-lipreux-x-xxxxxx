@@ -7,10 +7,11 @@ import {
 } from '@expo-google-fonts/space-grotesk';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { ActivityIndicator, View } from 'react-native';
+import { ActivityIndicator, Text, View } from 'react-native';
 import { SessionProvider, useSession } from '@/session/SessionProvider';
+import { Button } from '@/ui/Button';
 import { PrivacyCover } from '@/ui/PrivacyCover';
-import { colors, fonts } from '@/ui/theme';
+import { colors, fonts, space, type } from '@/ui/theme';
 
 function RootStack() {
   const { status } = useSession();
@@ -21,6 +22,15 @@ function RootStack() {
     SpaceGrotesk_600SemiBold,
     SpaceGrotesk_700Bold,
   });
+  if (status.kind === 'failed') {
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.bg, justifyContent: 'center', padding: space.lg, gap: space.md }}>
+        <Text style={type.heading}>L’app n’a pas pu démarrer</Text>
+        <Text style={type.dim}>Une erreur est survenue à l’ouverture du coffre. Réessaie, ou redémarre le téléphone.</Text>
+        <Button title="Réessayer" onPress={status.retry} />
+      </View>
+    );
+  }
   if (status.kind === 'loading' || (!fontsLoaded && !fontError)) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center' }}>
@@ -41,7 +51,8 @@ function RootStack() {
         <Stack.Screen name="onboarding" options={{ headerShown: false }} />
       </Stack.Protected>
       <Stack.Protected guard={status.kind === 'locked'}>
-        <Stack.Screen name="lock" options={{ headerShown: false, animation: 'fade' }} />
+        {/* No fade: the screen being locked must not show through on the way in. */}
+        <Stack.Screen name="lock" options={{ headerShown: false, animation: 'none' }} />
       </Stack.Protected>
       <Stack.Protected guard={status.kind === 'unlocked'}>
         <Stack.Screen name="(app)" options={{ headerShown: false }} />
