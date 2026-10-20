@@ -41,8 +41,8 @@ export const type = {
   dim: { color: colors.textDim, fontSize: 14 },
 };
 
-/** Calm backdrop behind the app code keypad, once the vault door has opened. */
+/** Calm backdrop behind the app code keypad, once through the vault's portal: a faint green glow is left of it. */
 export const calm = {
-  backgroundColor: '#101214',
-  backgroundImage: 'radial-gradient(ellipse 120% 60% at 50% 0%, rgba(255, 206, 140, 0.12) 0%, rgba(16, 18, 20, 0) 70%)',
+  backgroundColor: '#0B110D',
+  backgroundImage: 'radial-gradient(ellipse 120% 60% at 50% 0%, rgba(124, 255, 91, 0.10) 0%, rgba(11, 17, 13, 0) 70%)',
 } as const;

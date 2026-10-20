@@ -10,9 +10,9 @@ import { calm, colors, fonts, space, type } from '@/ui/theme';
 import { VaultDoor } from '@/ui/VaultDoor';
 
 // SPEC §2.1: vault door; tap -> it unlocks and opens -> a calm keypad for the 6-digit app code.
-// The vault look is only for the opening; the code screen stays quiet. The door ends with the
-// vault's inside (painted `calm`) filling the screen, so the calm background shows at once and
-// only the keypad fades in, as if it were waiting inside.
+// The vault look is only for the opening; the code screen stays quiet. The door ends with its
+// portal pulling you in and the `calm` backdrop filling the screen, so the calm background shows
+// at once and only the keypad fades in, as if it were waiting on the other side.
 // With the fingerprint on (Settings), the door opens on the safe's fingerprint reader instead of
 // the keypad: tap the green print, it scans, the safe opens. "Taper le code" switches to the
 // keypad; it is shown by itself when the code is due (every 48 h) or the fingerprint was dropped.

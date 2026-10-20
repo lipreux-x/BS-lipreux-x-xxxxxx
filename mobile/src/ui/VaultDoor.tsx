@@ -1,6 +1,7 @@
 import * as Haptics from 'expo-haptics';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AccessibilityInfo, Animated, Easing, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { Portal, PORTAL_GLOW } from './Portal';
 import { calm, colors, led, space, type } from './theme';
 import { BoltArt, DialArt, DialGloss, DoorFaceArt, FrameArt, Glow, HingeArt, SheenBand, WheelArt } from './VaultArt';
 import { VaultWall } from './VaultWall';
@@ -8,18 +9,31 @@ import { VaultWall } from './VaultWall';
 /** Frame size the parts are drawn at; the door scales up to fill the screen width. */
 const BASE = 236;
 const BOLTS = 12;
-/** Warm light inside the vault, the same tint as the code screen's `calm` glow. */
-const WARM = '#FFCE8C';
+/** Behind the portal, at the edge of the opening. */
+const VOID = '#03140A';
+/** How long the portal takes to pull you in, and how far the scene twists meanwhile. */
+const SUCK_MS = 1250;
+const TWIST_DEG = 140;
 
-/** Tunnel rings behind the door, by depth (the opening is at depth 1). */
-const TUNNEL = [1.18, 1.4, 1.7, 2.15, 2.8, 3.8];
 /**
- * The walk-in is a camera moving forward by TRAVEL: something at depth z then
+ * Being pulled in is a camera moving forward by TRAVEL: something at depth z then
  * looks z / (z - TRAVEL·e) times bigger. Sampled so Animated can interpolate it.
  */
 const TRAVEL = 0.86;
 const SAMPLES = [0, 0.15, 0.3, 0.45, 0.6, 0.72, 0.82, 0.9, 0.96, 1];
 const grow = (z: number) => SAMPLES.map((e) => z / (z - e * TRAVEL));
+
+/** Rumble while the portal pulls you in: closer and closer, harder and harder (ms after it starts). */
+const RUMBLE: [number, Haptics.ImpactFeedbackStyle][] = [
+  [0, Haptics.ImpactFeedbackStyle.Light],
+  [330, Haptics.ImpactFeedbackStyle.Light],
+  [580, Haptics.ImpactFeedbackStyle.Medium],
+  [770, Haptics.ImpactFeedbackStyle.Medium],
+  [910, Haptics.ImpactFeedbackStyle.Heavy],
+  [1020, Haptics.ImpactFeedbackStyle.Heavy],
+  [1110, Haptics.ImpactFeedbackStyle.Heavy],
+  [1180, Haptics.ImpactFeedbackStyle.Rigid],
+];
 
 function run(anim: Animated.CompositeAnimation) {
   return new Promise<void>((resolve) => anim.start(() => resolve()));
@@ -35,9 +49,11 @@ const deg = (v: Animated.Value) => v.interpolate({ inputRange: [0, 360], outputR
  * one after the other; while it waits, a glint sweeps across it and the red LED
  * pulses. Tap: the combination dial clicks through three numbers, the handwheel
  * turns and draws the bolts in one by one, the LED goes green, the door unseats
- * with a thud and swings open on its hinges, light spills out, and the camera
- * walks through the opening down a lit tunnel until the code screen's `calm`
- * backdrop fills the screen. Then `onOpen`, with nothing left to cross-fade.
+ * with a thud and swings open on a green swirling portal, whose light spills
+ * out. The portal pulls you in: the camera speeds towards it while the whole
+ * scene twists and the phone rumbles harder and harder, until you are
+ * through and the code screen's `calm` backdrop fills the screen. Then
+ * `onOpen`, with nothing left to cross-fade.
  */
 export function VaultDoor({ onOpen, hint }: { onOpen(): void; hint?: string }) {
   // Animated values live in state, not refs: they are read while rendering.
@@ -140,18 +156,25 @@ export function VaultDoor({ onOpen, hint }: { onOpen(): void; hint?: string }) {
     // The seal breaks: the heavy door comes towards us a little...
     await run(t(pull, 1, 260, Easing.out(Easing.cubic)));
     void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    // ...swings open on its hinges, and before it has finished we're already walking in.
+    // ...swings open on the portal, and before it has finished the portal is pulling us in,
+    // slowly then faster and faster.
+    for (const [ms, style] of RUMBLE) setTimeout(() => void Haptics.impactAsync(style), 480 + ms);
     await run(
       Animated.parallel([
         t(swing, 1, 760, Easing.inOut(Easing.cubic)),
-        Animated.sequence([Animated.delay(480), t(exit, 1, 1050, Easing.inOut(Easing.sin))]),
+        Animated.sequence([Animated.delay(480), t(exit, 1, SUCK_MS, Easing.in(Easing.cubic))]),
       ]),
     );
-    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Soft);
+    void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     onOpen();
   }
 
   const unfade = fade.interpolate({ inputRange: [0, 1], outputRange: [1, 0] });
+  // Pulled in: the scene twists around the portal, the wall less than the door (it is further away).
+  const twist = exit.interpolate({ inputRange: [0, 1], outputRange: ['0deg', `${TWIST_DEG}deg`] });
+  const portalSpin = exit.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
+  // Diving in: the portal's black hole widens faster than we approach, the dark takes over.
+  const portalDepth = exit.interpolate({ inputRange: [0, 0.5, 1], outputRange: [1, 1.5, 3.2] });
   const frameStyle = {
     opacity: Animated.multiply(enter, unfade),
     transform: [
@@ -166,6 +189,7 @@ export function VaultDoor({ onOpen, hint }: { onOpen(): void; hint?: string }) {
           exit.interpolate({ inputRange: SAMPLES, outputRange: grow(1) }),
         ),
       },
+      { rotate: twist },
     ],
   };
   // The door: unseats (scales about its centre), then swings about its left edge, darkening as it turns away.
@@ -194,21 +218,13 @@ export function VaultDoor({ onOpen, hint }: { onOpen(): void; hint?: string }) {
   // The wall slides past slower than the door (parallax) and is gone once we're through.
   const wallStyle = {
     opacity: Animated.multiply(exit.interpolate({ inputRange: [0, 0.6], outputRange: [1, 0], extrapolate: 'clamp' }), unfade),
-    transform: [{ scale: exit.interpolate({ inputRange: [0, 1], outputRange: [1, 1.7] }) }],
-  };
-  // Tunnel rings: each grows by its own depth relative to the opening, so the far ones lag behind.
-  const ringStyle = (z: number) => ({
     transform: [
-      {
-        scale: exit.interpolate({
-          inputRange: SAMPLES,
-          outputRange: grow(z).map((g, i) => g / grow(1)[i]! / z),
-        }),
-      },
+      { scale: exit.interpolate({ inputRange: [0, 1], outputRange: [1, 1.7] }) },
+      { rotate: exit.interpolate({ inputRange: [0, 1], outputRange: ['0deg', `${TWIST_DEG * 0.4}deg`] }) },
     ],
-  });
-  // Last stretch: the end-of-tunnel light settles into the code screen's backdrop.
-  const arrive = exit.interpolate({ inputRange: [0.78, 1], outputRange: [0, 1], extrapolate: 'clamp' });
+  };
+  // Last stretch: through the portal, its light settles into the code screen's backdrop.
+  const arrive = exit.interpolate({ inputRange: [0.55, 1], outputRange: [0, 1], extrapolate: 'clamp' });
   const hintOpacity = Animated.multiply(
     enter,
     swing.interpolate({ inputRange: [0, 0.15], outputRange: [1, 0], extrapolate: 'clamp' }),
@@ -220,7 +236,7 @@ export function VaultDoor({ onOpen, hint }: { onOpen(): void; hint?: string }) {
         <VaultWall width={width} height={height} />
       </Animated.View>
       <Animated.View pointerEvents="none" style={[styles.wallGlow, { opacity: Animated.multiply(spill, 0.55) }]}>
-        <Glow size={styles.wallGlow.width} color={WARM} strength={0.5} />
+        <Glow size={styles.wallGlow.width} color={PORTAL_GLOW} strength={0.45} />
       </Animated.View>
 
       <Pressable
@@ -235,7 +251,7 @@ export function VaultDoor({ onOpen, hint }: { onOpen(): void; hint?: string }) {
             <FrameArt size={styles.frame.width} />
           </View>
           <Animated.View pointerEvents="none" style={[styles.frameGlow, { opacity: Animated.multiply(spill, 0.7) }]}>
-            <Glow size={styles.frameGlow.width} color={WARM} strength={0.45} />
+            <Glow size={styles.frameGlow.width} color={PORTAL_GLOW} strength={0.45} />
           </Animated.View>
           {(['hingeTop', 'hingeBottom'] as const).map((h) => (
             <View key={h} style={[styles.hinge, styles[h]]}>
@@ -248,14 +264,9 @@ export function VaultDoor({ onOpen, hint }: { onOpen(): void; hint?: string }) {
           </View>
 
           <View style={styles.recess}>
-            {/* Inside the vault: a lit tunnel, revealed as the door swings. */}
+            {/* Inside the vault: the portal, revealed as the door swings. */}
             <Animated.View style={[styles.inside, { opacity: light }]}>
-              {TUNNEL.map((z) => (
-                <Animated.View key={z} style={[styles.tunnelRing, ringStyle(z)]} />
-              ))}
-              <View style={styles.tunnelEnd}>
-                <Glow size={styles.tunnelEnd.width} color={WARM} strength={0.55} />
-              </View>
+              <Portal size={styles.inside.width} spin={portalSpin} depth={portalDepth} />
             </Animated.View>
 
             <Animated.View style={[styles.doorShadow, doorShadowStyle]} />
@@ -391,22 +402,13 @@ function makeStyles(k: number) {
     },
     recess: { ...circle(RECESS), alignItems: 'center', justifyContent: 'center' },
     inside: {
-      ...StyleSheet.absoluteFill,
-      borderRadius: RECESS / 2,
-      backgroundColor: calm.backgroundColor,
+      position: 'absolute',
+      ...circle(RECESS),
+      backgroundColor: VOID,
       alignItems: 'center',
       justifyContent: 'center',
       overflow: 'hidden',
     },
-    // Drawn at the opening's size; `ringStyle` shrinks each one to its depth.
-    tunnelRing: {
-      position: 'absolute',
-      ...circle(RECESS),
-      borderWidth: 3 * k,
-      borderColor: 'rgba(255,206,140,0.10)',
-      backgroundColor: 'rgba(255,206,140,0.035)',
-    },
-    tunnelEnd: { position: 'absolute', width: RECESS * 0.9, height: RECESS * 0.9 },
     doorShadow: { position: 'absolute', ...circle(DOOR), backgroundColor: '#000000' },
     door: { ...circle(DOOR), backfaceVisibility: 'hidden' },
     ring: { ...StyleSheet.absoluteFill, alignItems: 'center' },
