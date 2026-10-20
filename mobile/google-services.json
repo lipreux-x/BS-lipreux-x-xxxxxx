@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "302951416067",
+    "project_id": "basesecrete-976c7",
+    "storage_bucket": "basesecrete-976c7.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:302951416067:android:833f450d5a7736ab09a936",
+        "android_client_info": {
+          "package_name": "com.lipreux.basesecrete"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAk0pHowLU_mRFVNWup7WaBQf1jLQbzhoo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

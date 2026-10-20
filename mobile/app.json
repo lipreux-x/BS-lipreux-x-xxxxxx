@@ -16,6 +16,7 @@
     },
     "android": {
       "package": "com.lipreux.basesecrete",
+      "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "backgroundColor": "#000000",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -85,7 +86,7 @@
         "expo-notifications",
         {
           "icon": "./assets/android-icon-monochrome.png",
-          "color": "#000000",
+          "color": "#9AA1A7",
           "defaultChannel": "messages"
         }
       ]
