@@ -12,8 +12,9 @@ import { colors, mono } from './theme';
  * are there, red when the server refused it.
  *
  * The real text field (letters and digits only, so the cursor always stays
- * at the end) lies over the screen, fully see-through (Android drew its text
- * in black despite a transparent color): tapping opens the keyboard, a long
+ * at the end) lies over the screen, see-through (Android drew its text in
+ * black despite a transparent color, so it is fully hidden there; iOS needs
+ * it visible to take taps, so only its text is): tapping opens the keyboard, a long
  * press pastes. On Android, no suggestions: the word being composed is not
  * drawn either.
  */
@@ -105,7 +106,19 @@ const styles = StyleSheet.create({
   },
   chars: { fontFamily: mono, fontSize: 18, letterSpacing: 1, textAlign: 'center' },
   // Over the whole screen, invisible: it only takes the taps and the keyboard.
-  input: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, padding: 0, opacity: 0, color: 'transparent', fontSize: 18 },
+  // iOS skips views under 1% opacity when it looks for what was tapped (the
+  // keyboard never opened), so there only the text is transparent.
+  input: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    padding: 0,
+    opacity: Platform.OS === 'android' ? 0 : 1,
+    color: 'transparent',
+    fontSize: 18,
+  },
   off: { color: LCD_OFF },
   on: { color: LCD_ON, textShadowColor: LCD_ON, textShadowRadius: 6 },
   errorChars: { color: colors.danger, textShadowColor: colors.danger, textShadowRadius: 6 },
