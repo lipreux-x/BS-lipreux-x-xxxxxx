@@ -152,6 +152,13 @@ Le changement s'applique à tous les écrans de code : verrouillage, inscription
 - **Expo Go** : l'app tourne dans Expo Go grâce à une version 100 % JavaScript de la crypto.
 - **Couleur d'accent** : gris anthracite au lieu de l'or.
 
+### Production (branche Neon `main`)
+
+- 20/10 : migrations `0000` à `0011` appliquées, API, bucket `attachments` et purge horaire déployés, avec des secrets propres à la prod (`server/.env.production`, jamais commité). Smoke test passé contre l'API déployée. Première invitation créée.
+- API : `https://br-green-silence-bahz9z6m-api.compute.c-8.eu-central-1.aws.neon.tech/`.
+- Les profils EAS `preview` (APK Android à partager) et `production` (iOS, TestFlight) pointent sur cette API ; `development` reste sur `dev`.
+- Déployer : `neon deploy --branch main --env .env.production --no-env-pull` dans `server/`.
+
 ### Mise en production (branche Neon `dev`)
 
 - Notifications (20/10) : migration `0011_push_tokens` appliquée, API redéployée. Vérifié : `/health` répond, `PUT /me/push-token` refuse sans connexion (401). Pas encore testé de bout en bout : il manque les identifiants Firebase et un nouveau build.

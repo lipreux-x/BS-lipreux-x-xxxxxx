@@ -9,10 +9,19 @@
       "distribution": "internal"
     },
     "preview": {
-      "distribution": "internal"
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://br-green-silence-bahz9z6m-api.compute.c-8.eu-central-1.aws.neon.tech"
+      }
     },
     "production": {
-      "autoIncrement": true
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://br-green-silence-bahz9z6m-api.compute.c-8.eu-central-1.aws.neon.tech"
+      }
     }
   },
   "submit": {
