@@ -1,4 +1,6 @@
-import Argon2Swift
+// Implementation only: the app target that imports BsNative never has to
+// resolve Argon2Swift and its C module `argon2` (Xcode explicit modules).
+@_implementationOnly import Argon2Swift
 import CryptoKit
 import ExpoModulesCore
 import Foundation
