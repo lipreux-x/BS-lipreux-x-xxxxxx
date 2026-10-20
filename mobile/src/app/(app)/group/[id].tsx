@@ -187,7 +187,7 @@ function GroupUnlock({ groupId, onOpen }: { groupId: string; onOpen(g: OpenGroup
         <Text style={type.heading}>En attente d’un admin</Text>
         <Text style={[type.dim, { textAlign: 'center' }]}>
           Ta demande est arrivée. Un admin du groupe doit l’accepter depuis son téléphone. Pour qu’il soit sûr que c’est bien toi, montre-lui ton
-          empreinte (Réglages) : il la compare avec celle qu’il voit.
+          numéro de sécurité (Réglages) : il le compare avec celui qu’il voit.
         </Text>
       </View>
     );
@@ -734,7 +734,7 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
             <Text style={type.heading}>Demandes d’accès</Text>
             <Text style={type.dim}>
               Ces personnes ont donné le bon code et les bons mots-clés. Accepter leur envoie la clé du groupe. Pour être sûr que c’est bien elles,
-              compare en vrai cette empreinte avec celle affichée sur leur téléphone (Réglages) : les chiffres doivent être identiques.
+              compare en vrai ce numéro de sécurité avec celui affiché sur leur téléphone (Réglages) : les chiffres doivent être identiques.
             </Text>
             {requests.map((r) => (
               <View key={r.userId} style={styles.request}>

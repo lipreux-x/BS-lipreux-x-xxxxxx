@@ -21,7 +21,7 @@ Trois audits ont été menés en parallèle : le serveur et l'API, le chiffremen
 | Avant | Maintenant |
 |---|---|
 | Avec le bon code et les bons mots-clés, on entrait dans le groupe et un membre envoyait la clé automatiquement. | Le code et les mots-clés envoient une **demande**. Un **admin l'accepte** depuis son téléphone : une bannière « Demande d'accès » apparaît dans la conversation. |
-| Aucune vérification d'identité. | Chacun a une **empreinte** (30 chiffres, Réglages > Mon empreinte). L'admin la compare en vrai avec celle qu'il voit avant d'accepter. On peut aussi voir l'empreinte de chaque membre (fiche du groupe). |
+| Aucune vérification d'identité. | Chacun a un **numéro de sécurité** (30 chiffres, Réglages > Mon numéro de sécurité). L'admin le compare en vrai avec celui qu'il voit avant d'accepter. On peut aussi voir le numéro de chaque membre (fiche du groupe). |
 | Un membre retiré pouvait revenir avec le code qu'il connaissait. | Un membre retiré est **banni** de ce groupe, et une nouvelle clé est créée tout de suite. |
 | Le dernier admin pouvait partir, le serveur choisissait le suivant. | Le dernier admin **désigne** le suivant en partant : c'est le membre le plus ancien, et la désignation est signée. |
 | Après « Se connecter » sur un nouveau téléphone, n'importe quel code ouvrait les groupes. | Chaque groupe redemande son **code et ses mots-clés**. |

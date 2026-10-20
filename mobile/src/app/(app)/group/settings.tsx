@@ -87,10 +87,10 @@ export default function GroupSettings() {
     const f = await fingerprintOf(profiles, m.userId);
     if (!f) return;
     Alert.alert(
-      `Empreinte de ${m.username}`,
+      `Numéro de sécurité de ${m.username}`,
       f.keyChanged
-        ? `Attention : ses clés ont changé depuis que ce téléphone les a vues. Ses nouveaux messages ne sont pas considérés comme les siens.\n\nEmpreinte connue :\n${f.fingerprint}`
-        : `${f.fingerprint}\n\nCompare ces chiffres avec ceux affichés dans Réglages sur son téléphone. Identiques : c’est bien lui, personne n’a remplacé ses clés.`,
+        ? `Attention : ses clés ont changé depuis que ce téléphone les a vues. Ses nouveaux messages ne sont pas considérés comme les siens.\n\nNuméro connu :\n${f.fingerprint}`
+        : `${f.fingerprint}\n\nCompare ces chiffres avec ceux affichés dans Réglages sur son téléphone (Mon numéro de sécurité). Identiques : c’est bien lui, personne n’a remplacé ses clés.`,
     );
   }
 
@@ -173,7 +173,7 @@ export default function GroupSettings() {
               </Text>
               {m.keyChanged ? <Text style={styles.danger}>Clés changées : à vérifier</Text> : null}
               {m.unknown ? <Text style={styles.danger}>Pas accepté par un admin : ne reçoit pas la clé</Text> : null}
-              {!m.me && !m.keyChanged && !m.unknown ? <Text style={type.dim}>Voir son empreinte</Text> : null}
+              {!m.me && !m.keyChanged && !m.unknown ? <Text style={type.dim}>Voir son numéro de sécurité</Text> : null}
             </Pressable>
             {m.role === 'admin' ? (
               <View style={styles.badge}>
@@ -268,7 +268,7 @@ export default function GroupSettings() {
 
 function message(e: unknown, fallback: string): string {
   if (e instanceof NetworkError) return 'Pas de réseau';
-  if (e instanceof KeyChangedError) return 'Les clés d’un membre ont changé : vérifie son empreinte avant.';
+  if (e instanceof KeyChangedError) return 'Les clés d’un membre ont changé : vérifie son numéro de sécurité avant.';
   if (e instanceof GroupTamperedError) return 'Le serveur liste quelqu’un qu’aucun admin n’a accepté : action bloquée par sécurité.';
   return fallback;
 }

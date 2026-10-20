@@ -1,4 +1,5 @@
 import { router, useFocusEffect } from 'expo-router';
+import { Bell, Bomb, CameraOff, FingerprintPattern, Lock, ShieldCheck, type LucideIcon, User, UserPlus } from 'lucide-react-native';
 import { useCallback, useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { keyFingerprint } from '@/crypto';
@@ -90,7 +91,7 @@ export default function Settings() {
 
   return (
     <ScrollView contentContainerStyle={styles.screen}>
-      <Section title="Profil">
+      <Section title="Profil" icon={User}>
         <View style={styles.profile}>
           <Avatar id={avatar ?? null} size={64} />
           <View style={{ flex: 1, gap: 2 }}>
@@ -98,12 +99,12 @@ export default function Settings() {
             <Text style={type.dim}>Visible par les membres de tes groupes.</Text>
           </View>
         </View>
-        <Text style={styles.subTitle}>Photo de profil</Text>
+        <Text style={[styles.subTitle, styles.subTitleRow]}>Photo de profil</Text>
         <AvatarPicker value={avatar ?? null} onChange={(id) => void chooseAvatar(id)} disabled={avatar === undefined} />
         {avatarError ? <Text style={styles.error}>{avatarError}</Text> : null}
       </Section>
 
-      <Section title="Inviter un pote">
+      <Section title="Inviter un pote" icon={UserPlus}>
         <Text style={type.dim}>Un code à usage unique, valable 2 heures. Donne-le en main propre.</Text>
         {invite ? (
           <View style={styles.inviteBox}>
@@ -117,23 +118,23 @@ export default function Settings() {
         <Button title="Créer une invitation" onPress={createInvite} busy={busy} />
       </Section>
 
-      <Section title="Mon empreinte">
+      <Section title="Mon numéro de sécurité" icon={ShieldCheck}>
         <Text style={styles.fingerprint} selectable>
           {keyFingerprint(session.identity)}
         </Text>
         <Text style={type.dim}>
-          Pour rejoindre un groupe, montre ces chiffres à l’admin : il les compare avec ceux qu’il voit pour ta demande. S’ils sont identiques, personne
-          n’a remplacé tes clés en chemin.
+          Ta carte d’identité dans l’app. Quand tu demandes à entrer dans un groupe, l’admin voit ces chiffres sur son téléphone : montre-lui les
+          tiens en vrai. Identiques : c’est bien toi, personne ne s’est fait passer pour toi.
         </Text>
       </Section>
 
-      <Section title="Sécurité">
+      <Section title="Sécurité" icon={Lock}>
         <Text style={type.dim}>
           Hors de l’app plus de 5 minutes, le code BaseSecrète est redemandé. Un groupe se referme 10 minutes après que tu l’as quitté.
         </Text>
         <Button title="Verrouiller maintenant" variant="ghost" onPress={lock} />
 
-        <Text style={styles.subTitle}>Empreinte</Text>
+        <SubTitle icon={FingerprintPattern}>Empreinte digitale</SubTitle>
         {bioAvailable || bioOn ? (
           <>
             <Text style={type.dim}>
@@ -151,7 +152,7 @@ export default function Settings() {
           <Text style={type.dim}>Pas de capteur d’empreinte, ou aucun doigt enregistré sur ce téléphone.</Text>
         )}
 
-        <Text style={styles.subTitle}>Notifications</Text>
+        <SubTitle icon={Bell}>Notifications</SubTitle>
         <Text style={type.dim}>
           {push === 'on'
             ? 'Activées. Elles disent seulement « uçer egassem » (« message reçu » à l’envers) : ni nom, ni groupe, ni texte. En touchant la notification, tu tapes tes codes, puis le groupe s’ouvre.'
@@ -163,7 +164,7 @@ export default function Settings() {
         </Text>
         {push === 'denied' ? <Button title="Activer" variant="ghost" onPress={() => void registerPush(session.api).then(setPush)} /> : null}
 
-        <Text style={styles.subTitle}>Captures d’écran</Text>
+        <SubTitle icon={CameraOff}>Captures d’écran</SubTitle>
         <Text style={type.dim}>Bloquées : ni capture ni enregistrement de l’écran dans l’app, sur ce téléphone.</Text>
         <Segment
           options={[
@@ -174,7 +175,7 @@ export default function Settings() {
           onChange={(blocked) => void setScreenshotsBlocked(blocked).then(() => setNoScreenshots(blocked))}
         />
 
-        <Text style={styles.subTitle}>Auto-destruction</Text>
+        <SubTitle icon={Bomb}>Auto-destruction</SubTitle>
         <Text style={type.dim}>Après trop de codes faux d’affilée, tout ce que l’app garde sur ce téléphone est effacé.</Text>
         <Segment
           options={[{ label: 'Désactivée', value: null }, ...WIPE_AFTER_CHOICES.map((n) => ({ label: `${n} essais`, value: n }))]}
@@ -209,11 +210,23 @@ function Segment<T>({ options, value, onChange }: { options: { label: string; va
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({ title, icon: Icon, children }: { title: string; icon: LucideIcon; children: React.ReactNode }) {
   return (
     <View style={styles.section}>
-      <Text style={styles.sectionTitle}>{title}</Text>
+      <View style={styles.titleRow}>
+        <Icon size={16} color={colors.accentFg} />
+        <Text style={styles.sectionTitle}>{title}</Text>
+      </View>
       {children}
+    </View>
+  );
+}
+
+function SubTitle({ icon: Icon, children }: { icon: LucideIcon; children: string }) {
+  return (
+    <View style={[styles.titleRow, styles.subTitleRow]}>
+      <Icon size={18} color={colors.accentFg} />
+      <Text style={styles.subTitle}>{children}</Text>
     </View>
   );
 }
@@ -223,7 +236,9 @@ const styles = StyleSheet.create({
   section: { gap: space.sm, padding: space.md, borderRadius: 14, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
   sectionTitle: { color: colors.accentFg, fontSize: 13, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 1 },
   profile: { flexDirection: 'row', alignItems: 'center', gap: space.md, marginBottom: space.sm },
-  subTitle: { color: colors.text, fontSize: 15, fontWeight: '600', marginTop: space.sm },
+  titleRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  subTitleRow: { marginTop: space.sm },
+  subTitle: { color: colors.accentFg, fontSize: 15, fontWeight: '600' },
   inviteBox: { gap: space.sm, paddingVertical: space.sm },
   invite: { color: colors.text, fontSize: 22, fontFamily: 'monospace', letterSpacing: 1, textAlign: 'center' },
   error: { color: colors.danger },

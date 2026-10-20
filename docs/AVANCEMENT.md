@@ -28,7 +28,7 @@
 
 ### Ouvrir l'app avec l'empreinte (20/10)
 
-- **Réglages → Sécurité → Empreinte → Activer** : le code de l'app est redemandé, puis le téléphone demande le doigt une fois pour vérifier.
+- **Réglages → Sécurité → Empreinte digitale → Activer** : le code de l'app est redemandé, puis le téléphone demande le doigt une fois pour vérifier.
 - Ensuite, la porte du coffre s'ouvre sur un **lecteur d'empreinte façon coffre-fort**, **à la place du clavier du code app**. C'est une plaque métal vissée comme le clavier, avec une fenêtre de capteur carrée en verre sombre rétroéclairé en vert, une trame et des repères de visée, et un écran LCD d'état (PRÊT, LECTURE…, ACCÈS OK, REFUSÉ) avec son voyant. On touche la fenêtre : une barre de scan la balaie de haut en bas pendant qu'on pose le doigt, puis la fenêtre flashe en vert et le coffre s'ouvre. En cas d'échec, elle flashe en rouge et la plaque tremble. « Taper le code » ramène au clavier.
 - La vérification passe toujours par la fenêtre d'empreinte du système : aucune app ne peut lire le capteur elle-même, et c'est ce qui garantit que seul le vrai doigt libère la clé.
 - **Empreinte seulement**, pas de reconnaissance faciale : l'option n'apparaît que sur un téléphone avec un capteur d'empreinte et un doigt enregistré.
@@ -68,7 +68,7 @@
 
 Un audit (serveur, chiffrement, app) a trouvé deux failles critiques : le serveur pouvait remettre aux téléphones une clé de groupe qu'il avait choisie, et ajouter un membre fantôme ou remplacer la clé d'un membre (les téléphones lui partageaient alors la clé). Tout ce qui a été trouvé est corrigé :
 
-- **Entrée dans un groupe sur validation** : le code + mots-clés ne font qu'une demande ; un admin l'accepte depuis son téléphone après avoir comparé l'empreinte du nouveau (Réglages > Mon empreinte). Plus de partage automatique de la clé.
+- **Entrée dans un groupe sur validation** : le code + mots-clés ne font qu'une demande ; un admin l'accepte depuis son téléphone après avoir comparé le numéro de sécurité du nouveau (Réglages > Mon numéro de sécurité). Plus de partage automatique de la clé.
 - **Remises de clé signées** par l'admin et chiffrées sous une clé tirée du code + mots-clés ; **meta signée** (admins, membres, révision). Clés des contacts **épinglées** sur le téléphone.
 - **Le code et les mots-clés ne partent plus au serveur** (seulement un dérivé Argon2id). Avec le seul mot de passe du compte, on n'ouvre aucun groupe : il faut aussi le code + les mots-clés.
 - **Membre retiré banni** et rotation immédiate de la clé ; seul un admin fait tourner la clé ; le dernier admin passe la main avant de partir.
