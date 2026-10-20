@@ -5,6 +5,7 @@ import { ApiError } from '@/services/api';
 import { loadAttachment, type Session } from '@/services/groups';
 import { imageCache, jpegUri, previewUri } from '@/services/images';
 import { safeToDisplay } from '@/services/jpeg';
+import { LONG_PRESS_MS } from './chat/MessageBubble';
 import { colors } from './theme';
 
 const WIDTH = 240;
@@ -28,18 +29,21 @@ function safePreview(preview: string | undefined): string | null {
 
 /**
  * An encrypted image in the chat: the blurred preview carried by the message
- * first, then the full image, downloaded and decrypted in memory.
+ * first, then the full image, downloaded and decrypted in memory. A tap
+ * opens it full screen, a long press the message's actions.
  */
 export function ImageBubble({
   session,
   groupId,
   body,
   onOpen,
+  onLongPress,
 }: {
   session: Session;
   groupId: string;
   body: ImageBody;
   onOpen(jpeg: Uint8Array): void;
+  onLongPress?(): void;
 }) {
   const cached = imageCache.get(body.attachmentId);
   const [state, setState] = useState<State>(cached ? { kind: 'ready', jpeg: cached } : { kind: 'loading' });
@@ -85,6 +89,8 @@ export function ImageBubble({
           setAttempt((n) => n + 1);
         }
       }}
+      onLongPress={onLongPress}
+      delayLongPress={LONG_PRESS_MS}
       style={[styles.frame, size]}
     >
       {uri ? (

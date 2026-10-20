@@ -3,6 +3,7 @@ import { Image, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { jpegUri, saveToGallery } from '@/services/images';
 import { Button } from './Button';
+import { PrivacyCover } from './PrivacyCover';
 import { colors, space, type } from './theme';
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'denied' | 'failed';
@@ -50,6 +51,8 @@ export function ImageViewer({ jpeg, onClose }: { jpeg: Uint8Array | null; onClos
           <Text style={[type.dim, styles.message, { fontSize: 12 }]}>Une fois dans la galerie, l’image n’est plus chiffrée.</Text>
         </View>
       </SafeAreaView>
+      {/* A modal is drawn above the app's own cover: it needs its own for the app switcher. */}
+      <PrivacyCover />
     </Modal>
   );
 }

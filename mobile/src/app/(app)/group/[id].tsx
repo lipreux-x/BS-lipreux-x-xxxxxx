@@ -1,8 +1,20 @@
 import * as Haptics from 'expo-haptics';
 import { router, Stack, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useHeaderHeight } from 'expo-router/react-navigation';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, FlatList, KeyboardAvoidingView, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Alert,
+  FlatList,
+  Keyboard,
+  KeyboardAvoidingView,
+  Modal,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+  type ListRenderItemInfo,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { API_URL } from '@/config';
 import type { ImageBody, ReplyRef, VoiceBody } from '@/crypto';
@@ -44,13 +56,14 @@ import { LockedOutError, WrongCodeError } from '@/services/vault';
 import { Composer } from '@/ui/chat/Composer';
 import { ActionKey, ActionSheet, MessageActions } from '@/ui/chat/MessageActions';
 import { DaySeparator, MessageBubble, type DeliveryStatus } from '@/ui/chat/MessageBubble';
-import { replyRefFor, resolveQuote } from '@/ui/chat/replies';
+import { quoteResolver, replyRefFor, resolveQuote, type Quote } from '@/ui/chat/replies';
 import { SwipeToReply } from '@/ui/chat/SwipeToReply';
 import { buildTimeline, countdownLabel, dateTimeLabel, dayLabel, dayRange, timeLabel } from '@/ui/chat/timeline';
 import { CodeEntry, type CodeResult } from '@/ui/CodeEntry';
 import { ImageBubble, LocalImage } from '@/ui/ImageBubble';
 import { ImageViewer } from '@/ui/ImageViewer';
 import { KeywordsForm } from '@/ui/KeywordsForm';
+import { PrivacyCover } from '@/ui/PrivacyCover';
 import { SentVoice, VoiceBubble, voiceTrack } from '@/ui/VoiceBubble';
 import { Led } from '@/ui/Led';
 import { colors, fonts, mono, space, type } from '@/ui/theme';
@@ -290,22 +303,37 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
   const { session, profiles, openGroups } = useUnlocked();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [pending, setPending] = useState<Pending[]>([]);
-  const [draft, setDraft] = useState('');
   const [picking, setPicking] = useState(false);
   const [viewing, setViewing] = useState<Uint8Array | null>(null);
   // The message being answered (composer strip), and the one long-pressed (action sheet).
   const [replying, setReplying] = useState<ChatMessage | null>(null);
   const [pressed, setPressed] = useState<ChatMessage | null>(null);
+  // "Répondre" picked in the action sheet: the keyboard comes up once the sheet is gone.
+  const replyAfterSheet = useRef(false);
   const input = useRef<React.ComponentRef<typeof TextInput>>(null);
   // Where this screen starts below the top of the display (status bar + header):
   // what the keyboard avoider needs to keep the composer just above the keyboard.
   const headerHeight = useHeaderHeight();
 
   /** Answer `m`: reply strip above the composer, keyboard up. */
-  function startReply(m: ChatMessage) {
+  const startReply = useCallback((m: ChatMessage) => {
     setReplying(m);
     input.current?.focus();
-  }
+  }, []);
+
+  /** Long press on a message: its actions, over the keyboard put away. */
+  const openActions = useCallback((m: ChatMessage) => {
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    Keyboard.dismiss();
+    replyAfterSheet.current = false;
+    setPressed(m);
+  }, []);
+
+  /** Tap on a photo: full screen, without the keyboard over it. */
+  const openImage = useCallback((jpeg: Uint8Array) => {
+    Keyboard.dismiss();
+    setViewing(jpeg);
+  }, []);
   const [online, setOnline] = useState(true);
   const [removed, setRemoved] = useState(false);
   // From the server at each sync: only admins erase days; self-destruct date if any.
@@ -330,6 +358,8 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
   // Admin: people waiting to be let in (the sheet is open while `reviewing` is set).
   const [requests, setRequests] = useState<JoinRequestInfo[]>([]);
   const [reviewing, setReviewing] = useState(false);
+  // The last one answered: the sheet is closed for good, a later request does not pop it up over the chat.
+  if (reviewing && !requests.length) setReviewing(false);
   // What the server sent did not check out (keys refused): shown, never silently used.
   const [alert, setAlert] = useState<string | null>(null);
   const [newAdmin, setNewAdmin] = useState(false);
@@ -645,18 +675,71 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
     }
   }
 
-  const recorder = useVoiceRecorder((voice) => {
-    void send({ clientId: newClientId(), at: new Date().toISOString(), kind: 'voice', voice, failed: false, replyTo: takeReply() });
+  // What the list gets keeps one identity across renders, so that its rows
+  // (memoized) re-render only when they change. Retry calls the latest `send`.
+  const sendLatest = useRef(send);
+  useEffect(() => {
+    sendLatest.current = send;
   });
+  const retry = useCallback((p: Pending) => void sendLatest.current(p), []);
 
-  async function startVoice() {
-    const res = await recorder.start();
-    if (res === 'denied') {
-      Alert.alert('Micro désactivé', 'Autorise l’accès au micro dans les réglages du téléphone pour envoyer des vocaux.');
-    } else if (res === 'failed') {
-      Alert.alert('Impossible d’enregistrer', 'Le micro n’a pas pu démarrer. Réessaie.');
-    }
-  }
+  const renderContent = useCallback(
+    (item: Line, onLongPress?: () => void) =>
+      item.image ? (
+        <ImageBubble session={session} groupId={groupId} body={item.image} onOpen={openImage} onLongPress={onLongPress} />
+      ) : item.voice ? (
+        <SentVoice session={session} groupId={groupId} body={item.voice} onLongPress={onLongPress} />
+      ) : item.localVoice ? (
+        <VoiceBubble
+          track={{ id: item.key, durationMs: item.localVoice.durationMs, load: () => Promise.resolve(item.localVoice!.audio) }}
+          waveform={item.localVoice.waveform}
+        />
+      ) : item.local ? (
+        <LocalImage jpeg={item.local.jpeg} width={item.local.width} height={item.local.height} />
+      ) : item.text === null ? (
+        <Text style={styles.unreadable}>Message illisible (signature ou clé invalide)</Text>
+      ) : (
+        <Text style={styles.text}>{item.text}</Text>
+      ),
+    [session, groupId, openImage],
+  );
+
+  const eraseMenu = useMemo(
+    () =>
+      role === 'admin'
+        ? (day: Date) => {
+            void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            Keyboard.dismiss();
+            setEraseDay(day);
+          }
+        : undefined,
+    [role],
+  );
+
+  // Same object from one render to the next: expo-router sets the header again whenever it changes.
+  const headerOptions = useMemo(
+    () => ({
+      headerTitle: () => (
+        <View style={styles.title}>
+          <Led state="green" size={7} />
+          <Text style={styles.titleText} numberOfLines={1}>
+            {group.name}
+          </Text>
+        </View>
+      ),
+      headerRight: () => (
+        <Pressable
+          hitSlop={12}
+          accessibilityRole="button"
+          accessibilityLabel="Réglages du groupe"
+          onPress={() => router.push({ pathname: '/group/settings', params: { id: groupId } })}
+        >
+          <Text style={styles.headerButton}>⚙</Text>
+        </Pressable>
+      ),
+    }),
+    [group.name, groupId],
+  );
 
   if (destroyed) return <GroupGone />;
 
@@ -672,28 +755,7 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
 
   return (
     <SafeAreaView style={styles.screen} edges={['bottom']}>
-      <Stack.Screen
-        options={{
-          headerTitle: () => (
-            <View style={styles.title}>
-              <Led state="green" size={7} />
-              <Text style={styles.titleText} numberOfLines={1}>
-                {group.name}
-              </Text>
-            </View>
-          ),
-          headerRight: () => (
-            <Pressable
-              hitSlop={12}
-              accessibilityRole="button"
-              accessibilityLabel="Réglages du groupe"
-              onPress={() => router.push({ pathname: '/group/settings', params: { id: groupId } })}
-            >
-              <Text style={styles.headerButton}>⚙</Text>
-            </Pressable>
-          ),
-        }}
-      />
+      <Stack.Screen options={headerOptions} />
       {!online ? (
         <View style={styles.banner}>
           <Led state="amber" size={7} />
@@ -763,6 +825,8 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
             </Pressable>
           </View>
         </View>
+        {/* A modal is drawn above the app's own cover: it needs its own for the app switcher. */}
+        <PrivacyCover />
       </Modal>
       {/* 'padding' on both platforms: with edge-to-edge (always on since SDK 54),
           Android no longer shrinks the window for the keyboard by itself. */}
@@ -772,67 +836,41 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
           loaded={loaded}
           messages={messages}
           pending={pending}
-          renderContent={(item) =>
-            item.image ? (
-              <ImageBubble session={session} groupId={groupId} body={item.image} onOpen={setViewing} />
-            ) : item.voice ? (
-              <SentVoice session={session} groupId={groupId} body={item.voice} />
-            ) : item.localVoice ? (
-              <VoiceBubble
-                track={{ id: item.key, durationMs: item.localVoice.durationMs, load: () => Promise.resolve(item.localVoice!.audio) }}
-                waveform={item.localVoice.waveform}
-              />
-            ) : item.local ? (
-              <LocalImage jpeg={item.local.jpeg} width={item.local.width} height={item.local.height} />
-            ) : item.text === null ? (
-              <Text style={styles.unreadable}>Message illisible (signature ou clé invalide)</Text>
-            ) : (
-              <Text style={styles.text}>{item.text}</Text>
-            )
-          }
-          onRetry={(p) => void send(p)}
-          onLongPress={(m) => {
-            void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-            setPressed(m);
-          }}
+          renderContent={renderContent}
+          onRetry={retry}
+          onLongPress={openActions}
           onReply={startReply}
-          onDayLongPress={
-            role === 'admin'
-              ? (day) => {
-                  void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                  setEraseDay(day);
-                }
-              : undefined
-          }
+          onDayLongPress={eraseMenu}
         />
-        <Composer
-          value={draft}
-          onChange={setDraft}
+        <ChatComposer
           attaching={picking}
           onAttach={() => void sendPhoto()}
           replyTo={replying ? resolveQuote(replyRefFor(replying)!, messages, session.account.userId) : null}
           onCancelReply={() => setReplying(null)}
           inputRef={input}
-          voice={{
-            phase: recorder.phase,
-            elapsedMs: recorder.elapsedMs,
-            levels: recorder.levels,
-            onStart: () => void startVoice(),
-            onCancel: () => void recorder.cancel(),
-            onSend: () => void recorder.finish(),
-          }}
-          onSend={() => {
-            const text = draft.trim().replace(/^\u0000+/, ''); // a leading NUL marks structured bodies
-            setDraft('');
-            if (text) void send({ clientId: newClientId(), at: new Date().toISOString(), kind: 'text', text, failed: false, replyTo: takeReply() });
-          }}
+          onSendText={(text) =>
+            void send({ clientId: newClientId(), at: new Date().toISOString(), kind: 'text', text, failed: false, replyTo: takeReply() })
+          }
+          onSendVoice={(voice) =>
+            void send({ clientId: newClientId(), at: new Date().toISOString(), kind: 'voice', voice, failed: false, replyTo: takeReply() })
+          }
         />
       </KeyboardAvoidingView>
       <ImageViewer jpeg={viewing} onClose={() => setViewing(null)} />
       <MessageActions
         target={pressed ? { quote: resolveQuote(replyRefFor(pressed)!, messages, session.account.userId), text: pressed.text } : null}
-        onReply={() => pressed && startReply(pressed)}
+        onReply={() => {
+          if (!pressed) return;
+          // Strip shown now; the keyboard once the sheet is gone (focused under it, it would not come up).
+          setReplying(pressed);
+          replyAfterSheet.current = true;
+        }}
         onClose={() => setPressed(null)}
+        onHidden={() => {
+          if (!replyAfterSheet.current) return;
+          replyAfterSheet.current = false;
+          input.current?.focus();
+        }}
       />
       <ActionSheet visible={eraseDay !== null} onClose={() => setEraseDay(null)}>
         <Text style={styles.sheetTitle}>EFFACER POUR TOUS · {eraseDay ? dayLabel(eraseDay, now) : ''}</Text>
@@ -854,6 +892,65 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
   );
 }
 
+/**
+ * The composer, with what changes as the user types or records: the draft and
+ * the recorder's ticks (10 a second) re-render only this, not the conversation.
+ */
+function ChatComposer({
+  attaching,
+  onAttach,
+  replyTo,
+  onCancelReply,
+  inputRef,
+  onSendText,
+  onSendVoice,
+}: {
+  attaching: boolean;
+  onAttach(): void;
+  replyTo: Quote | null;
+  onCancelReply(): void;
+  inputRef: React.Ref<React.ComponentRef<typeof TextInput>>;
+  onSendText(text: string): void;
+  onSendVoice(voice: PreparedVoice): void;
+}) {
+  const [draft, setDraft] = useState('');
+  const recorder = useVoiceRecorder(onSendVoice);
+
+  async function startVoice() {
+    const res = await recorder.start();
+    if (res === 'denied') {
+      Alert.alert('Micro désactivé', 'Autorise l’accès au micro dans les réglages du téléphone pour envoyer des vocaux.');
+    } else if (res === 'failed') {
+      Alert.alert('Impossible d’enregistrer', 'Le micro n’a pas pu démarrer. Réessaie.');
+    }
+  }
+
+  return (
+    <Composer
+      value={draft}
+      onChange={setDraft}
+      attaching={attaching}
+      onAttach={onAttach}
+      replyTo={replyTo}
+      onCancelReply={onCancelReply}
+      inputRef={inputRef}
+      voice={{
+        phase: recorder.phase,
+        elapsedMs: recorder.elapsedMs,
+        levels: recorder.levels,
+        onStart: () => void startVoice(),
+        onCancel: () => void recorder.cancel(),
+        onSend: () => void recorder.finish(),
+      }}
+      onSend={() => {
+        const text = draft.trim().replace(/^\u0000+/, ''); // a leading NUL marks structured bodies
+        setDraft('');
+        if (text) onSendText(text);
+      }}
+    />
+  );
+}
+
 // ---- Timeline --------------------------------------------------------------------------
 
 /** One line of the chat, sent or still on its way. */
@@ -872,13 +969,17 @@ interface Line {
   status?: DeliveryStatus;
   pending?: Pending;
   replyTo?: ReplyRef;
+  /** How `replyTo` shows, resolved against the loaded messages. */
+  quote?: Quote;
   /** Delivered message: can be answered (long press). */
   message?: ChatMessage;
 }
 
 type Item = ReturnType<typeof buildTimeline<Line>>[number];
 
-function Timeline({
+const itemKey = (i: Item) => i.key;
+
+const Timeline = memo(function Timeline({
   listRef,
   loaded,
   messages,
@@ -893,7 +994,8 @@ function Timeline({
   loaded: boolean;
   messages: ChatMessage[];
   pending: Pending[];
-  renderContent(line: Line): React.ReactNode;
+  /** `onLongPress`: for the content that takes the touch (photo, voice message). */
+  renderContent(line: Line, onLongPress?: () => void): React.ReactNode;
   onRetry(p: Pending): void;
   onLongPress(m: ChatMessage): void;
   /** Swipe right on a delivered message. */
@@ -909,6 +1011,8 @@ function Timeline({
   useEffect(() => () => clearTimeout(highlightTimer.current), []);
   // Newest first: the list is inverted so it opens on the latest message.
   const items = useMemo(() => {
+    // Quotes resolved here, once per change of the history, not on each render of each row.
+    const quoteOf = quoteResolver(messages, me);
     const lines: Line[] = [
       ...messages.map((m) => ({
         key: m.id,
@@ -922,6 +1026,7 @@ function Timeline({
         voice: m.voice ?? undefined,
         status: m.mine ? ('sent' as const) : undefined,
         replyTo: m.replyTo ?? undefined,
+        quote: m.replyTo ? quoteOf(m.replyTo) : undefined,
         // Unreadable messages cannot be quoted.
         message: m.text !== null || m.image || m.voice ? m : undefined,
       })),
@@ -937,26 +1042,54 @@ function Timeline({
         status: p.failed ? ('failed' as const) : ('sending' as const),
         pending: p,
         replyTo: p.replyTo,
+        quote: p.replyTo ? quoteOf(p.replyTo) : undefined,
       })),
     ];
     return buildTimeline(lines, new Date()).reverse();
   }, [messages, pending, me]);
 
-  function jumpTo(messageId: string) {
-    const index = items.findIndex((i) => i.kind === 'message' && i.key === messageId);
-    if (index < 0) return;
-    listRef.current?.scrollToIndex({ index, viewPosition: 0.5, animated: true });
-    setHighlight(messageId);
-    clearTimeout(highlightTimer.current);
-    highlightTimer.current = setTimeout(() => setHighlight(null), 1500);
-  }
+  const jumpTo = useCallback(
+    (messageId: string) => {
+      const index = items.findIndex((i) => i.kind === 'message' && i.key === messageId);
+      if (index < 0) return;
+      listRef.current?.scrollToIndex({ index, viewPosition: 0.5, animated: true });
+      setHighlight(messageId);
+      clearTimeout(highlightTimer.current);
+      highlightTimer.current = setTimeout(() => setHighlight(null), 1500);
+    },
+    [items, listRef],
+  );
+
+  const renderItem = useCallback(
+    ({ item }: ListRenderItemInfo<Item>) => {
+      if (item.kind === 'day') {
+        return <DaySeparator label={item.label} onLongPress={onDayLongPress ? () => onDayLongPress(item.at) : undefined} />;
+      }
+      const { message: line } = item;
+      // Others' messages each carry the sender's avatar and name, so who wrote
+      // what is never in doubt; only mine are grouped in runs.
+      return (
+        <TimelineRow
+          line={line}
+          last={!line.mine || item.last}
+          highlighted={highlight === line.key}
+          renderContent={renderContent}
+          onRetry={onRetry}
+          onLongPress={onLongPress}
+          onReply={onReply}
+          onQuotePress={jumpTo}
+        />
+      );
+    },
+    [highlight, renderContent, onRetry, onLongPress, onReply, onDayLongPress, jumpTo],
+  );
 
   return (
     <FlatList
       ref={listRef}
       inverted
       data={items}
-      keyExtractor={(i) => i.key}
+      keyExtractor={itemKey}
       onScrollToIndexFailed={(info) => {
         // Row not measured yet: get close, then aim again once it is rendered.
         listRef.current?.scrollToOffset({ offset: info.averageItemLength * info.index, animated: false });
@@ -974,41 +1107,58 @@ function Timeline({
           </Text>
         </View>
       }
-      renderItem={({ item }) => {
-        if (item.kind === 'day') {
-          return <DaySeparator label={item.label} onLongPress={onDayLongPress ? () => onDayLongPress(item.at) : undefined} />;
-        }
-        const { message: line } = item;
-        // Others' messages each carry the sender's avatar and name, so who wrote
-        // what is never in doubt; only mine are grouped in runs.
-        const last = !line.mine || item.last;
-        return (
-          <View style={last ? styles.runEnd : undefined}>
-            <SwipeToReply onReply={line.message ? () => onReply(line.message!) : undefined}>
-              <MessageBubble
-                mine={line.mine}
-                author={line.mine ? undefined : line.author}
-                avatar={line.avatar}
-                time={timeLabel(line.at)}
-                status={line.status}
-                error={line.pending?.error}
-                last={last}
-                media={!!(line.image || line.local)}
-                quote={line.replyTo ? resolveQuote(line.replyTo, messages, me) : undefined}
-                highlighted={highlight === line.key}
-                onRetry={line.pending ? () => onRetry(line.pending!) : undefined}
-                onQuotePress={line.replyTo ? () => jumpTo(line.replyTo!.messageId) : undefined}
-                onLongPress={line.message ? () => onLongPress(line.message!) : undefined}
-              >
-                {renderContent(line)}
-              </MessageBubble>
-            </SwipeToReply>
-          </View>
-        );
-      }}
+      renderItem={renderItem}
     />
   );
-}
+});
+
+/** A message of the timeline: re-rendered when it changes, not on every render of the list. */
+const TimelineRow = memo(function TimelineRow({
+  line,
+  last,
+  highlighted,
+  renderContent,
+  onRetry,
+  onLongPress,
+  onReply,
+  onQuotePress,
+}: {
+  line: Line;
+  last: boolean;
+  highlighted: boolean;
+  renderContent(line: Line, onLongPress?: () => void): React.ReactNode;
+  onRetry(p: Pending): void;
+  onLongPress(m: ChatMessage): void;
+  onReply(m: ChatMessage): void;
+  /** Tap on the quote: to the original (by id). */
+  onQuotePress(messageId: string): void;
+}) {
+  const { message, pending, replyTo } = line;
+  const longPress = message ? () => onLongPress(message) : undefined;
+  return (
+    <View style={last ? styles.runEnd : undefined}>
+      <SwipeToReply onReply={message ? () => onReply(message) : undefined}>
+        <MessageBubble
+          mine={line.mine}
+          author={line.mine ? undefined : line.author}
+          avatar={line.avatar}
+          time={timeLabel(line.at)}
+          status={line.status}
+          error={pending?.error}
+          last={last}
+          media={!!(line.image || line.local)}
+          quote={line.quote}
+          highlighted={highlighted}
+          onRetry={pending ? () => onRetry(pending) : undefined}
+          onQuotePress={replyTo ? () => onQuotePress(replyTo.messageId) : undefined}
+          onLongPress={longPress}
+        >
+          {renderContent(line, longPress)}
+        </MessageBubble>
+      </SwipeToReply>
+    </View>
+  );
+});
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },

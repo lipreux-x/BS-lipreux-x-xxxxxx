@@ -11,6 +11,13 @@ const STATUS_LED: Record<DeliveryStatus, LedState> = { sending: 'amber', sent: '
 const STATUS_LABEL: Record<DeliveryStatus, string> = { sending: 'Envoi en cours', sent: 'Envoyé', failed: 'Échec de l’envoi' };
 
 /**
+ * How long a press on a message lasts to open its actions. What takes the
+ * touch inside a bubble (photo, voice message, quote) gets the long press
+ * too, with the same delay: the bubble itself never sees it.
+ */
+export const LONG_PRESS_MS = 300;
+
+/**
  * A message as a small plate of the safe: bevelled edges like the keypad
  * keys, anthracite for mine, darker metal for others. The corner on the
  * sender's side is squared off on the last message of a run. Footer: time
@@ -74,7 +81,7 @@ export function MessageBubble({
         disabled={!failed && !onLongPress}
         onPress={failed ? onRetry : undefined}
         onLongPress={onLongPress}
-        delayLongPress={300}
+        delayLongPress={LONG_PRESS_MS}
         accessibilityHint={failed ? 'Touche pour renvoyer' : onLongPress ? 'Appui long pour répondre' : undefined}
         style={[
           styles.plate,
@@ -85,7 +92,7 @@ export function MessageBubble({
           highlighted && styles.highlighted,
         ]}
       >
-        {quote ? <QuoteBlock quote={quote} media={media} onPress={onQuotePress} /> : null}
+        {quote ? <QuoteBlock quote={quote} media={media} onPress={onQuotePress} onLongPress={onLongPress} /> : null}
         {children}
         <View style={[styles.footer, media && styles.footerMedia]}>
           <Text style={[styles.time, mine && styles.timeMine]}>{time}</Text>
@@ -109,11 +116,13 @@ export function MessageBubble({
 }
 
 /** The quoted message, in a recessed screen with a lit edge on the left. */
-export function QuoteBlock({ quote, media, onPress }: { quote: Quote; media?: boolean; onPress?(): void }) {
+export function QuoteBlock({ quote, media, onPress, onLongPress }: { quote: Quote; media?: boolean; onPress?(): void; onLongPress?(): void }) {
   return (
     <Pressable
       disabled={!quote.found || !onPress}
       onPress={onPress}
+      onLongPress={onLongPress}
+      delayLongPress={LONG_PRESS_MS}
       accessibilityRole="button"
       accessibilityLabel={`Réponse à ${quote.author}`}
       style={[styles.quote, media && styles.quoteMedia]}

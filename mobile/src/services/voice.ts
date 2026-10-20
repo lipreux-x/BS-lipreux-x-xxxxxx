@@ -10,6 +10,7 @@ import {
 } from 'expo-audio';
 import { randomUUID } from 'expo-crypto';
 import { Directory, File, Paths } from 'expo-file-system';
+import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { AppState } from 'react-native';
 import { MAX_VOICE_MS } from '@/crypto';
@@ -30,6 +31,13 @@ import type { PreparedVoice } from './groups';
  *   player could have left behind is swept on lock as well.
  * - Decrypted audio otherwise lives in memory, cleared on lock.
  * - Leaving the app throws away a recording in progress and pauses playback.
+ *   The screen stays on while recording and while a message plays, so that
+ *   the phone locking itself does not end them.
+ * - Recording and listening pause the other apps' audio (music...), which
+ *   resumes after; on iOS it would otherwise go on, and into the recording.
+ * - No message plays while recording: switching the audio back to playback
+ *   would stop the recorder on iOS, and the message would be recorded on
+ *   Android.
  * - As on the usual messaging apps, the waveform can be tapped or dragged to
  *   move in a message, and a message that ends hands over to the next one.
  */
@@ -53,6 +61,42 @@ const PLAYBACK_DIR = () => new Directory(Paths.cache, 'voice');
 // Where expo-audio records by default (Android, iOS).
 const RECORDER_DIRS = () => [new Directory(Paths.cache, 'Audio'), new Directory(Paths.cache, 'ExpoAudio')];
 
+// Not mixed with the other apps' audio: it pauses, and resumes once we are done.
+const RECORD_MODE = { allowsRecording: true, playsInSilentMode: true, interruptionMode: 'doNotMix' } as const;
+const PLAY_MODE = { allowsRecording: false, playsInSilentMode: true, interruptionMode: 'doNotMix' } as const;
+
+// Keep-awake tags: each one lets the screen sleep again on its own.
+const RECORDING_AWAKE = 'voice-recording';
+const PLAYBACK_AWAKE = 'voice-playback';
+
+const keepAwake = (tag: string, on: boolean) => void (on ? activateKeepAwakeAsync(tag) : deactivateKeepAwake(tag)).catch(() => {});
+
+// ---- Microphone in use, across the app --------------------------------------------
+
+const micListeners = new Set<() => void>();
+// The recorder holding the microphone, from its start until its audio mode is reset.
+let micHolder: object | null = null;
+
+function holdMic(holder: object, held: boolean) {
+  const next = held ? holder : micHolder === holder ? null : micHolder;
+  if (next === micHolder) return;
+  micHolder = next;
+  for (const l of micListeners) l();
+}
+
+const subscribeMic = (listener: () => void) => {
+  micListeners.add(listener);
+  return () => void micListeners.delete(listener);
+};
+
+/** A voice message is being recorded: the player stays still. */
+export const isRecordingVoice = () => micHolder !== null;
+
+/** `isRecordingVoice`, for the play keys (shown disabled). */
+export function useRecordingVoice() {
+  return useSyncExternalStore(subscribeMic, isRecordingVoice);
+}
+
 export type RecorderPhase = 'idle' | 'starting' | 'recording';
 
 /**
@@ -69,6 +113,8 @@ export function useVoiceRecorder(onRecorded: (voice: PreparedVoice) => void) {
   const timer = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
   const startedAt = useRef(0);
   const recording = useRef(false);
+  // This recorder, as the holder of the microphone (`isRecordingVoice`).
+  const [holder] = useState(() => ({}));
   const onRecordedRef = useRef(onRecorded);
   useEffect(() => {
     onRecordedRef.current = onRecorded;
@@ -77,7 +123,11 @@ export function useVoiceRecorder(onRecorded: (voice: PreparedVoice) => void) {
   /** Stops the recorder; the file it wrote and how long it lasted, if it was recording. */
   const stop = useCallback(async (): Promise<{ uri: string | null; durationMs: number } | null> => {
     clearInterval(timer.current);
-    if (!recording.current) return null;
+    keepAwake(RECORDING_AWAKE, false);
+    if (!recording.current) {
+      holdMic(holder, false); // failed to start
+      return null;
+    }
     recording.current = false;
     let durationMs = Date.now() - startedAt.current;
     try {
@@ -86,9 +136,10 @@ export function useVoiceRecorder(onRecorded: (voice: PreparedVoice) => void) {
     } catch {
       // already stopped
     }
-    await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true }).catch(() => {});
+    await setAudioModeAsync(PLAY_MODE).catch(() => {});
+    holdMic(holder, false);
     return { uri: recorder.uri, durationMs };
-  }, [recorder]);
+  }, [recorder, holder]);
 
   const finish = useCallback(async () => {
     const done = await stop();
@@ -122,11 +173,14 @@ export function useVoiceRecorder(onRecorded: (voice: PreparedVoice) => void) {
         setPhase('idle');
         return 'denied';
       }
+      // From here the player stays still: its audio mode would stop the recorder.
+      holdMic(holder, true);
       voicePlayer.stop();
-      await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
+      await setAudioModeAsync(RECORD_MODE);
       await recorder.prepareToRecordAsync();
       recorder.record();
       recording.current = true;
+      keepAwake(RECORDING_AWAKE, true);
       startedAt.current = Date.now();
       samples.current = [];
       setElapsedMs(0);
@@ -145,7 +199,7 @@ export function useVoiceRecorder(onRecorded: (voice: PreparedVoice) => void) {
       await cancel();
       return 'failed';
     }
-  }, [recorder, finish, cancel]);
+  }, [recorder, holder, finish, cancel]);
 
   // Leaving the chat or the app mid-recording: nothing is sent.
   useEffect(() => {
@@ -217,7 +271,10 @@ class VoicePlayer {
   readonly getState = () => this.state;
 
   private set(next: Partial<PlaybackState>) {
+    const wasPlaying = this.state.playing;
     this.state = { ...this.state, ...next };
+    // The screen stays on exactly while a message plays (paused, ended, stopped: it can sleep).
+    if (this.state.playing !== wasPlaying) keepAwake(PLAYBACK_AWAKE, this.state.playing);
     for (const l of this.listeners) l();
   }
 
@@ -226,8 +283,9 @@ class VoicePlayer {
     this.next = next;
   }
 
-  /** Plays `track`, or pauses it if it is the one playing. */
+  /** Plays `track`, or pauses it if it is the one playing. Nothing while recording. */
   toggle(track: VoiceTrack) {
+    if (isRecordingVoice()) return;
     if (this.state.id === track.id && this.player?.playing) this.player.pause();
     else void this.play(track);
   }
@@ -239,8 +297,9 @@ class VoicePlayer {
     this.set({ rate });
   }
 
-  /** Moves to `fraction` (0–1) of `track`, starting it there if it is not the one loaded. */
+  /** Moves to `fraction` (0–1) of `track`, starting it there if it is not the one loaded. Nothing while recording. */
   seek(track: VoiceTrack, fraction: number) {
+    if (isRecordingVoice()) return;
     const ms = Math.round(Math.min(1, Math.max(0, fraction)) * track.durationMs);
     if (this.state.id === track.id && this.player) {
       void this.player.seekTo(ms / 1000);
@@ -252,6 +311,7 @@ class VoicePlayer {
   }
 
   private async play(track: VoiceTrack, fromMs = 0) {
+    if (isRecordingVoice()) return;
     const request = ++this.request;
     if (this.state.id === track.id && this.player) {
       this.player.play();
@@ -271,7 +331,7 @@ class VoicePlayer {
       if (request !== this.request) return;
     }
     this.release();
-    await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true }).catch(() => {});
+    await setAudioModeAsync(PLAY_MODE).catch(() => {});
     if (request !== this.request) return;
     const dir = PLAYBACK_DIR();
     if (!dir.exists) dir.create({ intermediates: true, idempotent: true });

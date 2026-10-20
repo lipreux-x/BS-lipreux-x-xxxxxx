@@ -43,14 +43,28 @@ export function replyRefFor(m: Quotable): ReplyRef | null {
 
 /** How to show the quote of `ref`, given the messages loaded in the chat. */
 export function resolveQuote(ref: ReplyRef, messages: Quotable[], me: string): Quote {
-  const original = messages.find((m) => m.id === ref.messageId);
-  const body = original && bodyOf(original);
-  if (original && body && original.senderId === ref.senderId) {
-    return { author: original.mine ? 'Toi' : original.senderName, ...withImage(replyExcerpt(body)), found: true };
+  return quoteResolver(messages, me)(ref);
+}
+
+/** `resolveQuote` for many quotes at once: the messages are indexed once (by id, and their senders' names). */
+export function quoteResolver(messages: Quotable[], me: string): (ref: ReplyRef) => Quote {
+  // The first one wins, as a search from the start would find it.
+  const byId = new Map<string, Quotable>();
+  const names = new Map<string, string>();
+  for (const m of messages) {
+    if (!byId.has(m.id)) byId.set(m.id, m);
+    if (!names.has(m.senderId)) names.set(m.senderId, m.senderName);
   }
-  if (original) return { author: 'Citation falsifiée', excerpt: 'Ce message ne correspond pas à l’original', image: false, found: false };
-  const claimed = ref.senderId === me ? 'Toi' : (messages.find((m) => m.senderId === ref.senderId)?.senderName ?? 'Un membre');
-  return { author: `${claimed} · non vérifié`, ...withImage(ref), found: false };
+  return (ref) => {
+    const original = byId.get(ref.messageId);
+    const body = original && bodyOf(original);
+    if (original && body && original.senderId === ref.senderId) {
+      return { author: original.mine ? 'Toi' : original.senderName, ...withImage(replyExcerpt(body)), found: true };
+    }
+    if (original) return { author: 'Citation falsifiée', excerpt: 'Ce message ne correspond pas à l’original', image: false, found: false };
+    const claimed = ref.senderId === me ? 'Toi' : (names.get(ref.senderId) ?? 'Un membre');
+    return { author: `${claimed} · non vérifié`, ...withImage(ref), found: false };
+  };
 }
 
 const withImage = (e: Pick<ReplyRef, 'excerpt' | 'image' | 'voice'>) => ({

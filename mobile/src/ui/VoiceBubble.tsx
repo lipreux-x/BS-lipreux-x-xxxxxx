@@ -1,11 +1,15 @@
 import { Pause, Play } from 'lucide-react-native';
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View, type GestureResponderEvent } from 'react-native';
 import type { VoiceBody } from '@/crypto';
 import { loadAttachment, type Session } from '@/services/groups';
-import { usePlayback, voicePlayer, type VoiceTrack } from '@/services/voice';
+import { usePlayback, useRecordingVoice, voicePlayer, type VoiceTrack } from '@/services/voice';
+import { LONG_PRESS_MS } from './chat/MessageBubble';
 import { durationLabel, stretch } from './chat/waveform';
 import { colors, led, mono } from './theme';
+
+// A finger that moves less than this before the long press is still holding, not scrubbing.
+const HOLD_SLOP = 10;
 
 /**
  * A voice message: a play key, its waveform lit as it plays, and its length
@@ -13,16 +17,22 @@ import { colors, led, mono } from './theme';
  * then kept in memory for the session.
  *
  * As on the usual messaging apps, tapping the waveform jumps there and
- * dragging along it scrubs (the move happens when the finger lifts).
+ * dragging along it scrubs (the move happens when the finger lifts). A long
+ * press, on the waveform or the keys, opens the message's actions. While a
+ * voice message is being recorded, nothing plays: the play key is off.
  */
-export function VoiceBubble({ track, waveform }: { track: VoiceTrack; waveform?: number[] }) {
+export function VoiceBubble({ track, waveform, onLongPress }: { track: VoiceTrack; waveform?: number[]; onLongPress?(): void }) {
   const playback = usePlayback(track.id);
+  const recording = useRecordingVoice();
   const bars = useMemo(() => stretch(waveform), [waveform]);
   // Where the finger is while scrubbing (0–1), null otherwise.
   const [scrub, setScrub] = useState<number | null>(null);
   const width = useRef(1);
-  // Where the finger came down (fraction and screen x), and where it is now.
-  const drag = useRef({ from: 0, pageX: 0, at: 0 });
+  // Where the finger came down (fraction and screen x), where it is now, and
+  // whether it was held long enough to open the actions (then it is no scrub).
+  const drag = useRef({ from: 0, pageX: 0, at: 0, held: false });
+  const holdTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(holdTimer.current), []);
 
   const progress = scrub ?? (playback.id ? Math.min(1, playback.positionMs / track.durationMs) : 0);
   const lit = Math.round(progress * bars.length);
@@ -35,13 +45,30 @@ export function VoiceBubble({ track, waveform }: { track: VoiceTrack; waveform?:
    */
   function grant(e: GestureResponderEvent) {
     const from = clamp(e.nativeEvent.locationX / width.current);
-    drag.current = { from, pageX: e.nativeEvent.pageX, at: from };
+    drag.current = { from, pageX: e.nativeEvent.pageX, at: from, held: false };
     setScrub(from);
+    clearTimeout(holdTimer.current);
+    if (onLongPress) {
+      holdTimer.current = setTimeout(() => {
+        drag.current.held = true;
+        setScrub(null);
+        onLongPress();
+      }, LONG_PRESS_MS);
+    }
   }
   function move(e: GestureResponderEvent) {
-    const { from, pageX } = drag.current;
+    const { from, pageX, held } = drag.current;
+    if (held) return;
+    if (Math.abs(e.nativeEvent.pageX - pageX) > HOLD_SLOP) clearTimeout(holdTimer.current);
     drag.current.at = clamp(from + (e.nativeEvent.pageX - pageX) / width.current);
     setScrub(drag.current.at);
+  }
+  function release(e: GestureResponderEvent) {
+    clearTimeout(holdTimer.current);
+    if (drag.current.held) return;
+    move(e);
+    setScrub(null);
+    voicePlayer.seek(track, drag.current.at);
   }
 
   return (
@@ -51,8 +78,11 @@ export function VoiceBubble({ track, waveform }: { track: VoiceTrack; waveform?:
           accessibilityRole="button"
           accessibilityLabel={playback.playing ? 'Pause' : `Écouter le vocal, ${durationLabel(track.durationMs)}`}
           hitSlop={8}
+          disabled={recording}
           onPress={() => voicePlayer.toggle(track)}
-          style={({ pressed }) => [styles.key, pressed && styles.keyPressed]}
+          onLongPress={onLongPress}
+          delayLongPress={LONG_PRESS_MS}
+          style={({ pressed }) => [styles.key, pressed && styles.keyPressed, recording && styles.keyOff]}
         >
           {playback.loading ? (
             <ActivityIndicator color={colors.text} size="small" />
@@ -74,18 +104,18 @@ export function VoiceBubble({ track, waveform }: { track: VoiceTrack; waveform?:
             const step = 5000 / track.durationMs;
             voicePlayer.seek(track, progress + (e.nativeEvent.actionName === 'increment' ? step : -step));
           }}
-          // The waveform keeps the finger: no reply swipe, no long press while scrubbing.
-          onStartShouldSetResponder={() => true}
-          onMoveShouldSetResponder={() => true}
+          // The waveform keeps the finger: no reply swipe while scrubbing (its own
+          // long press opens the actions). While recording it lets the bubble have it.
+          onStartShouldSetResponder={() => !recording}
+          onMoveShouldSetResponder={() => !recording}
           onResponderTerminationRequest={() => false}
           onResponderGrant={grant}
           onResponderMove={move}
-          onResponderRelease={(e) => {
-            move(e);
+          onResponderRelease={release}
+          onResponderTerminate={() => {
+            clearTimeout(holdTimer.current);
             setScrub(null);
-            voicePlayer.seek(track, drag.current.at);
           }}
-          onResponderTerminate={() => setScrub(null)}
         >
           {bars.map((h, i) => (
             <View key={i} pointerEvents="none" style={[styles.bar, { height: 3 + (h / 100) * 21 }, i < lit && styles.barLit]} />
@@ -98,6 +128,8 @@ export function VoiceBubble({ track, waveform }: { track: VoiceTrack; waveform?:
             accessibilityLabel={`Vitesse ${rateLabel(playback.rate)}, touche pour changer`}
             hitSlop={8}
             onPress={() => voicePlayer.cycleRate()}
+            onLongPress={onLongPress}
+            delayLongPress={LONG_PRESS_MS}
             style={({ pressed }) => [styles.rate, pressed && styles.ratePressed]}
           >
             <Text style={styles.rateText}>{rateLabel(playback.rate)}</Text>
@@ -118,9 +150,9 @@ export function voiceTrack(session: Session, groupId: string, body: VoiceBody): 
 }
 
 /** The bubble of a voice message received or sent. */
-export function SentVoice({ session, groupId, body }: { session: Session; groupId: string; body: VoiceBody }) {
+export function SentVoice({ session, groupId, body, onLongPress }: { session: Session; groupId: string; body: VoiceBody; onLongPress?(): void }) {
   const track = useMemo(() => voiceTrack(session, groupId, body), [session, groupId, body]);
-  return <VoiceBubble track={track} waveform={body.waveform} />;
+  return <VoiceBubble track={track} waveform={body.waveform} onLongPress={onLongPress} />;
 }
 
 /** "1×", "1,5×", "2×". */
@@ -144,6 +176,8 @@ const styles = StyleSheet.create({
     borderRightColor: '#0F3D1D',
   },
   keyPressed: { transform: [{ translateY: 1 }], backgroundColor: '#185A2B' },
+  // Off while a voice message is being recorded.
+  keyOff: { opacity: 0.35 },
   // Taller than the bars: an easier target for the finger. Wide enough that
   // the speed key, when it shows up, widens the bubble instead of crushing
   // the bars (40 bars and their gaps).
