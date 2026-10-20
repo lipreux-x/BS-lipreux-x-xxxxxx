@@ -50,9 +50,9 @@
     "typescript": "~6.0.3"
   },
   "scripts": {
-    "start": "expo start",
-    "android": "expo start --android",
-    "ios": "expo start --ios",
+    "start": "node scripts/expo-dev.js",
+    "android": "node scripts/expo-dev.js --android",
+    "ios": "node scripts/expo-dev.js --ios",
     "web": "expo start --web",
     "test": "jest",
     "typecheck": "tsc --noEmit",
