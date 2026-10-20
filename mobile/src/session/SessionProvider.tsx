@@ -70,11 +70,12 @@ interface SessionContextValue {
   enableBiometrics(appCode: string): Promise<void>;
   /** Settings: blocks or allows screenshots, applied at once and at every launch. */
   setScreenshotsBlocked(blocked: boolean): Promise<void>;
-  register(input: { inviteCode: string; username: string; password: string; appCode: string }): Promise<void>;
+  /** Creates the account on this phone; resolves with `enter`, which opens the app (so the UI can show success first). */
+  register(input: { inviteCode: string; username: string; password: string; appCode: string }): Promise<() => void>;
   /** Checks username + password against the server's key backup (slow: Argon2id). */
   recover(input: { username: string; password: string }): Promise<RecoveredAccount>;
-  /** Saves a recovered account on this phone under a new app code, and opens the app. */
-  restore(account: RecoveredAccount, appCode: string): Promise<void>;
+  /** Saves a recovered account on this phone under a new app code; resolves with `enter`, like `register`. */
+  restore(account: RecoveredAccount, appCode: string): Promise<() => void>;
   lock(): void;
 }
 
@@ -293,7 +294,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       const backup = await createKeyBackup(identity, username, password);
       const { userId } = await new Api(API_URL).register(inviteCode, username, identity, backup);
       const u = await vault.commit({ userId, username }, prepared);
-      start(u, await openLocalStore(u.masterKey));
+      const local = await openLocalStore(u.masterKey);
+      return () => start(u, local);
     },
     [start],
   );
@@ -314,7 +316,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     async ({ userId, username, identity }: RecoveredAccount, appCode: string) => {
       // New device secret and master key: nothing local survives from the old phone.
       const u = await vault.commit({ userId, username }, await prepareVault(identity, appCode));
-      start(u, await openLocalStore(u.masterKey));
+      const local = await openLocalStore(u.masterKey);
+      return () => start(u, local);
     },
     [start],
   );
