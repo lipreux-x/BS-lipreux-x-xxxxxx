@@ -6,9 +6,12 @@ import { useSession, type RecoveredAccount } from '@/session/SessionProvider';
 import { ApiError, NetworkError } from '@/services/api';
 import { Button } from '@/ui/Button';
 import { CodeEntry } from '@/ui/CodeEntry';
+import { INVITE_LENGTH } from '@/ui/invite';
+import { InviteCodeInput } from '@/ui/InviteCode';
+import { Led, type LedState } from '@/ui/Led';
 import { PasswordField } from '@/ui/PasswordField';
 import { Wordmark } from '@/ui/Wordmark';
-import { colors, fonts, space, type } from '@/ui/theme';
+import { colors, fonts, mono, space, type } from '@/ui/theme';
 
 /*
  * SPEC §2.5: invite -> pseudo + password -> app code (twice) -> keys generated
@@ -28,6 +31,8 @@ export default function Onboarding() {
   const [mode, setMode] = useState<Mode>('register');
   const [step, setStep] = useState<Step>({ kind: 'form' });
   const [invite, setInvite] = useState('');
+  // Refused by the server: the invitation display turns red until it is changed.
+  const [badInvite, setBadInvite] = useState(false);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [password2, setPassword2] = useState('');
@@ -38,7 +43,7 @@ export default function Onboarding() {
   const login = mode === 'login';
   const canContinue = login
     ? USERNAME.test(username) && password.length > 0
-    : invite.replace(/[^0-9A-Za-z]/g, '').length >= 16 && USERNAME.test(username) && isValidPassword(password) && password === password2;
+    : invite.length === INVITE_LENGTH && USERNAME.test(username) && isValidPassword(password) && password === password2;
 
   function switchMode(next: Mode) {
     setMode(next);
@@ -96,12 +101,13 @@ export default function Onboarding() {
               return null;
             }
             try {
-              if (login && recovered) await restore(recovered, code);
-              else await register({ inviteCode: invite, username, password, appCode: code });
-              return null;
+              // Green LED and a success buzz on the code just typed, then straight to the home:
+              // the code was typed twice already, no need to type it a third time.
+              return login && recovered ? await restore(recovered, code) : await register({ inviteCode: invite, username, password, appCode: code });
             } catch (e) {
               setStep({ kind: 'form' });
               setError(login ? describeLogin(e) : describeRegister(e));
+              setBadInvite(!login && e instanceof ApiError && e.code === 'invalid_invite');
               return null;
             }
           }}
@@ -110,75 +116,109 @@ export default function Onboarding() {
     );
   }
 
+  const passwordState: LedState = !password
+    ? 'off'
+    : passwordProblem(password)
+      ? 'amber'
+      : password2 && password !== password2
+        ? 'red'
+        : password === password2
+          ? 'green'
+          : 'off';
+
   return (
     <SafeAreaView style={styles.screen}>
-      <View style={styles.stripes} accessibilityElementsHidden>
-        {Array.from({ length: 12 }, (_, i) => (
-          <View key={i} style={[styles.stripe, { backgroundColor: i % 2 ? colors.bg : colors.text }]} />
-        ))}
-      </View>
+      <Stripes />
       {/* 'padding' on both platforms: Android is edge-to-edge and no longer resizes for the keyboard. */}
       <KeyboardAvoidingView behavior="padding" style={styles.flex}>
         <ScrollView contentContainerStyle={styles.form} keyboardShouldPersistTaps="handled">
-          <Wordmark />
-          <Text style={type.dim}>{login ? 'Retrouve ton compte sur ce téléphone.' : 'Entrée sur invitation uniquement.'}</Text>
+          <View style={styles.header}>
+            <Wordmark size={34} />
+            <Text style={[type.dim, styles.centerText]}>
+              {login ? 'Retrouve ton compte sur ce téléphone.' : 'Entrée sur invitation uniquement.'}
+            </Text>
+          </View>
+
+          <View style={styles.segment}>
+            {(['register', 'login'] as const).map((m) => {
+              const on = mode === m;
+              return (
+                <Pressable
+                  key={m}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: on }}
+                  disabled={busy || on}
+                  onPress={() => switchMode(m)}
+                  style={[styles.option, on && styles.optionOn]}
+                >
+                  <Text style={[styles.optionText, on && styles.optionTextOn]}>{m === 'login' ? 'Se connecter' : 'Créer un compte'}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
 
           {login ? null : (
-            <>
-              <Text style={styles.label}>Code d’invitation</Text>
-              <TextInput
+            <Card title="Invitation">
+              <InviteCodeInput
                 value={invite}
-                onChangeText={(t) => setInvite(t.toUpperCase())}
-                placeholder="XXXX-XXXX-XXXX-XXXX"
-                placeholderTextColor={colors.textDim}
-                autoCapitalize="characters"
-                autoCorrect={false}
-                style={styles.input}
+                onChange={(code) => {
+                  setInvite(code);
+                  setBadInvite(false);
+                }}
+                error={badInvite}
               />
-            </>
+              <Text style={styles.hint}>16 caractères, donnés par un membre. Valable 2 heures. Pas besoin de taper les tirets.</Text>
+            </Card>
           )}
 
-          <Text style={styles.label}>Pseudo</Text>
-          <TextInput
-            value={username}
-            onChangeText={setUsername}
-            placeholder="3 à 24 caractères"
-            placeholderTextColor={colors.textDim}
-            autoCapitalize="none"
-            autoCorrect={false}
-            textContentType="username"
-            style={styles.input}
-          />
+          <Card title={login ? 'Ton compte' : 'Ton profil'}>
+            <Text style={styles.label}>Pseudo</Text>
+            <TextInput
+              value={username}
+              onChangeText={setUsername}
+              placeholder="3 à 24 caractères"
+              placeholderTextColor={colors.textDim}
+              autoCapitalize="none"
+              autoCorrect={false}
+              textContentType="username"
+              style={styles.input}
+            />
 
-          <Text style={styles.label}>Mot de passe</Text>
-          <PasswordField
-            value={password}
-            onChangeText={setPassword}
-            placeholder={login ? 'Ton mot de passe' : `${MIN_PASSWORD_LENGTH} caractères minimum`}
-            textContentType={login ? 'password' : 'newPassword'}
-            style={styles.input}
-          />
-          {login ? null : (
-            <>
-              <PasswordField
-                value={password2}
-                onChangeText={setPassword2}
-                placeholder="Confirme le mot de passe"
-                textContentType="newPassword"
-                style={styles.input}
-              />
-              <Text style={styles.hint}>
-                {password && passwordProblem(password)
-                  ? passwordProblem(password)
-                  : password2 && password !== password2
-                    ? 'Les mots de passe ne correspondent pas.'
-                    : 'Il sert à te reconnecter si tu changes de téléphone ou réinstalles l’app. Personne ne peut le retrouver pour toi.'}
-              </Text>
-            </>
-          )}
+            <Text style={styles.label}>Mot de passe</Text>
+            <PasswordField
+              value={password}
+              onChangeText={setPassword}
+              placeholder={login ? 'Ton mot de passe' : `${MIN_PASSWORD_LENGTH} caractères minimum`}
+              textContentType={login ? 'password' : 'newPassword'}
+              style={styles.input}
+            />
+            {login ? null : (
+              <>
+                <PasswordField
+                  value={password2}
+                  onChangeText={setPassword2}
+                  placeholder="Confirme le mot de passe"
+                  textContentType="newPassword"
+                  style={styles.input}
+                />
+                <View style={styles.status}>
+                  <View style={styles.statusLed}>
+                    <Led state={passwordState} />
+                  </View>
+                  <Text style={[styles.hint, styles.flex]}>
+                    {password && passwordProblem(password)
+                      ? passwordProblem(password)
+                      : password2 && password !== password2
+                        ? 'Les mots de passe ne correspondent pas.'
+                        : 'Il sert à te reconnecter si tu changes de téléphone ou réinstalles l’app. Personne ne peut le retrouver pour toi.'}
+                  </Text>
+                </View>
+              </>
+            )}
+          </Card>
 
           {error ? <Text style={styles.error}>{error}</Text> : null}
-          {busy ? <Text style={styles.hint}>Vérification… quelques secondes.</Text> : null}
+          {busy ? <Text style={[styles.hint, styles.centerText]}>Vérification… quelques secondes.</Text> : null}
           <Button
             title={login ? 'Se connecter' : 'Continuer'}
             busy={busy}
@@ -189,20 +229,29 @@ export default function Onboarding() {
               setStep({ kind: 'code' });
             }}
           />
-
-          <Pressable
-            accessibilityRole="button"
-            disabled={busy}
-            onPress={() => switchMode(login ? 'register' : 'login')}
-            style={styles.switch}
-          >
-            <Text style={styles.switchText}>
-              {login ? 'J’ai une invitation : créer un compte' : 'Déjà un compte ? Se connecter'}
-            </Text>
-          </Pressable>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
+  );
+}
+
+/** Fine black and white stripes along the top, a nod to Sephora (SPEC §8, this screen only). */
+function Stripes() {
+  return (
+    <View style={styles.stripes} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+      {Array.from({ length: 48 }, (_, i) => (
+        <View key={i} style={[styles.flex, { backgroundColor: i % 2 ? colors.bg : colors.text }]} />
+      ))}
+    </View>
+  );
+}
+
+function Card({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <View style={styles.card}>
+      <Text style={styles.cardTitle}>{title}</Text>
+      {children}
+    </View>
   );
 }
 
@@ -234,23 +283,32 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   flex: { flex: 1 },
   center: { flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center' },
-  stripes: { flexDirection: 'row', height: 56 },
-  stripe: { flex: 1 },
-  form: { flexGrow: 1, padding: space.lg, gap: space.sm, justifyContent: 'center' },
-  label: { ...type.dim, marginTop: space.md },
+  centerText: { textAlign: 'center' },
+  stripes: { flexDirection: 'row', height: 10, opacity: 0.85 },
+  form: { flexGrow: 1, padding: space.lg, gap: space.md, justifyContent: 'center' },
+  header: { alignItems: 'center', gap: space.xs, marginBottom: space.sm },
+  segment: { flexDirection: 'row', gap: space.sm },
+  option: { flex: 1, alignItems: 'center', paddingVertical: 12, borderRadius: 10, borderWidth: 1, borderColor: colors.border },
+  optionOn: { backgroundColor: colors.accent, borderColor: colors.accentFg },
+  optionText: { color: colors.textDim, fontFamily: fonts.medium, fontSize: 15 },
+  optionTextOn: { color: colors.text, fontFamily: fonts.semibold },
+  card: { gap: space.sm, padding: space.md, borderRadius: 14, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
+  cardTitle: { color: colors.accentFg, fontFamily: mono, fontSize: 12, letterSpacing: 2, textTransform: 'uppercase', marginBottom: space.xs },
+  label: { ...type.dim, fontSize: 13 },
   input: {
     height: 52,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: colors.border,
-    backgroundColor: colors.surface,
+    backgroundColor: colors.bg,
     color: colors.text,
     paddingHorizontal: space.md,
     fontSize: 16,
-    marginBottom: space.sm,
+    marginBottom: space.xs,
   },
-  hint: { ...type.dim, fontSize: 13 },
-  error: { color: colors.danger, marginVertical: space.sm },
-  switch: { alignSelf: 'center', paddingVertical: space.md, paddingHorizontal: space.sm },
-  switchText: { color: colors.accentFg, fontFamily: fonts.semibold, fontSize: 15 },
+  hint: { ...type.dim, fontSize: 13, lineHeight: 18 },
+  status: { flexDirection: 'row', gap: space.sm },
+  // Centred on the first line of the hint.
+  statusLed: { height: 18, justifyContent: 'center' },
+  error: { color: colors.danger, textAlign: 'center' },
 });

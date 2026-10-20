@@ -11,6 +11,8 @@ import { WIPE_AFTER_CHOICES } from '@/services/vault';
 import { Avatar, isAvatarId, type AvatarId } from '@/ui/avatars';
 import { AvatarPicker } from '@/ui/AvatarPicker';
 import { Button } from '@/ui/Button';
+import { timeLabel } from '@/ui/chat/timeline';
+import { InviteCodeDisplay } from '@/ui/InviteCode';
 import { colors, space, type } from '@/ui/theme';
 
 export default function Settings() {
@@ -108,14 +110,13 @@ export default function Settings() {
         <Text style={type.dim}>Un code à usage unique, valable 2 heures. Donne-le en main propre.</Text>
         {invite ? (
           <View style={styles.inviteBox}>
-            <Text selectable style={styles.invite}>
-              {invite.code}
-            </Text>
+            <InviteCodeDisplay code={invite.code} />
+            <Text style={styles.inviteExpiry}>Valable jusqu’à {timeLabel(new Date(invite.expiresAt))}</Text>
             <Button title="Copier" variant="ghost" onPress={() => void copySensitive(invite.code)} />
           </View>
         ) : null}
         {error ? <Text style={styles.error}>{error}</Text> : null}
-        <Button title="Créer une invitation" onPress={createInvite} busy={busy} />
+        <Button title={invite ? 'Nouvelle invitation' : 'Créer une invitation'} onPress={createInvite} busy={busy} />
       </Section>
 
       <Section title="Mon numéro de sécurité" icon={ShieldCheck}>
@@ -240,7 +241,7 @@ const styles = StyleSheet.create({
   subTitleRow: { marginTop: space.sm },
   subTitle: { color: colors.accentFg, fontSize: 15, fontWeight: '600' },
   inviteBox: { gap: space.sm, paddingVertical: space.sm },
-  invite: { color: colors.text, fontSize: 22, fontFamily: 'monospace', letterSpacing: 1, textAlign: 'center' },
+  inviteExpiry: { ...type.dim, fontSize: 13, textAlign: 'center' },
   error: { color: colors.danger },
   segment: { flexDirection: 'row', gap: space.sm },
   option: { flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: colors.border },
