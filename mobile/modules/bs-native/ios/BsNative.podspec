@@ -18,6 +18,9 @@ Pod::Spec.new do |s|
   s.source_files = '**/*.{h,m,swift}'
   s.pod_target_xcconfig = {
     'DEFINES_MODULE' => 'YES',
-    'SWIFT_COMPILATION_MODE' => 'wholemodule'
+    'SWIFT_COMPILATION_MODE' => 'wholemodule',
+    # Argon2Swift's interface imports its C module `argon2`, whose module map
+    # it only exposes to itself: importers have to find it too.
+    'SWIFT_INCLUDE_PATHS' => '$(inherited) "$(PODS_ROOT)/Argon2Swift/Sources/Modules"'
   }
 end
