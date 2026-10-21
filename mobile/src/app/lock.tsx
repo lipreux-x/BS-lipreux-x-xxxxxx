@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Animated, Easing, Pressable, StyleSheet, Text } from 'react-native';
+import { Animated, Easing, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeCryptoMissingError } from '@/crypto';
 import { useSession } from '@/session/SessionProvider';
@@ -15,7 +15,7 @@ import { VaultDoor } from '@/ui/VaultDoor';
 // portal pulling you in and the `calm` backdrop filling the screen, so the calm background shows
 // at once and only the keypad fades in, as if it were waiting on the other side.
 // With the fingerprint on (Settings), the door opens on the safe's fingerprint reader instead of
-// the keypad: tap the green print, it scans, the safe opens. "Taper le code" switches to the
+// the keypad, under the same name plate: tap the green print, it scans, the safe opens. "Taper le code" switches to the
 // keypad; it is shown by itself when the code is due (every 48 h) or the fingerprint was dropped.
 export default function LockScreen() {
   const { status, vault, unlock, unlockWithBiometrics } = useSession();
@@ -85,8 +85,13 @@ export default function LockScreen() {
         >
           {bio && !useCode ? (
             <>
-              <Text style={styles.title}>BaseSecrète</Text>
-              {status.kind === 'locked' ? <Text style={styles.subtitle}>{status.username}</Text> : null}
+              {status.kind === 'locked' ? (
+                <View style={styles.plate}>
+                  <NamePlate name={status.username} />
+                </View>
+              ) : (
+                <Text style={styles.title}>BaseSecrète</Text>
+              )}
               <FingerprintPad onScan={scan} />
               <Pressable accessibilityRole="button" onPress={() => setUseCode(true)} style={styles.switch} hitSlop={8}>
                 <Text style={styles.switchText}>Taper le code</Text>
@@ -122,7 +127,7 @@ function beforeWipe(n: number): string {
 const styles = StyleSheet.create({
   screen: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   title: { ...type.title, textAlign: 'center' },
-  subtitle: { ...type.dim, textAlign: 'center', marginTop: space.xs, marginBottom: space.lg },
+  plate: { marginBottom: space.lg },
   switch: { alignSelf: 'center', marginTop: space.lg, paddingVertical: space.sm, paddingHorizontal: space.md },
   switchText: { color: colors.accentFg, fontFamily: fonts.medium, fontSize: 16 },
 });
