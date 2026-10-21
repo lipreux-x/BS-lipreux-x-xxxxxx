@@ -1,10 +1,12 @@
 import { useEffect, useRef, type ReactNode } from 'react';
 import { AppState, Modal, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import type { ReactionId } from '@/crypto';
 import { copySensitive } from '@/services/clipboard';
 import { PrivacyCover } from '../PrivacyCover';
 import { colors, fonts, space } from '../theme';
 import { QuoteBlock } from './MessageBubble';
+import { ReactionKeys } from './ReactionKeys';
 import type { Quote } from './replies';
 
 // Android: longest wait for the window focus to come back after the panel closes.
@@ -12,16 +14,22 @@ const HIDDEN_FALLBACK_MS = 600;
 
 /**
  * Long press on a message: a panel slides up from the bottom with the
- * message quoted and its actions, as metal keys of the control panel.
+ * message quoted, the five reaction keys (mine lit) and its actions, as
+ * metal keys of the control panel.
  */
 export function MessageActions({
   target,
+  reaction,
+  onReact,
   onReply,
   onClose,
   onHidden,
 }: {
   /** The pressed message: how to quote it, and its text when it has one (to copy). */
   target: { quote: Quote; text: string | null } | null;
+  /** My reaction to it, if any. */
+  reaction?: ReactionId | null;
+  onReact?(id: ReactionId): void;
   onReply(): void;
   onClose(): void;
   /** The panel is gone (see `ActionSheet`): the keyboard can come up for a reply. */
@@ -30,6 +38,15 @@ export function MessageActions({
   return (
     <ActionSheet visible={target !== null} onClose={onClose} onHidden={onHidden}>
       {target ? <QuoteBlock quote={target.quote} /> : null}
+      {onReact ? (
+        <ReactionKeys
+          current={reaction ?? null}
+          onPick={(id) => {
+            onReact(id);
+            onClose();
+          }}
+        />
+      ) : null}
       <ActionKey
         label="Répondre"
         onPress={() => {

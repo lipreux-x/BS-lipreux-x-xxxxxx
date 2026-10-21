@@ -906,12 +906,14 @@ app.post('/groups/:groupId/messages', async (c) => {
       attachmentId: z.uuid().optional(),
       // A story: lives 24 h, even in a group without disappearing messages (never longer than them).
       expiresInSeconds: z.literal(STORY_SECONDS).optional(),
+      // A reaction: stored and relayed like any message, but nobody's phone rings for it.
+      quiet: z.literal(true).optional(),
     }),
   );
   const me = c.get('userId');
   const { currentKeyVersion, ephemeralSeconds } = await requireMember(groupId, me);
   if (input.keyVersion !== currentKeyVersion) throw new HTTPException(409, { message: 'stale_key_version' });
-  const { attachmentId, expiresInSeconds, ...msg } = input;
+  const { attachmentId, expiresInSeconds, quiet, ...msg } = input;
   const lifetimes = [ephemeralSeconds, expiresInSeconds].filter((s): s is number => !!s);
   const expiresAt = lifetimes.length ? new Date(Date.now() + Math.min(...lifetimes) * 1000) : null;
 
@@ -958,8 +960,8 @@ app.post('/groups/:groupId/messages', async (c) => {
     return stored!;
   });
   realtime.nudge();
-  // A replayed send (same clientId, already stored earlier) does not ring again.
-  if (Date.now() - row.createdAt.getTime() < 60_000) await notifyGroup(groupId, me);
+  // A replayed send (same clientId, already stored earlier) does not ring again; a quiet one never does.
+  if (!quiet && Date.now() - row.createdAt.getTime() < 60_000) await notifyGroup(groupId, me);
   return c.json(toWireMessage(row), 201);
 });
 

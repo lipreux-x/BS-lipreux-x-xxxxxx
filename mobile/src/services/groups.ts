@@ -22,6 +22,7 @@ import {
   type FileBody,
   type GroupMeta,
   type ImageBody,
+  type ReactionBody,
   type ReplyRef,
   type StoryBody,
   type VoiceBody,
@@ -738,6 +739,8 @@ export interface ChatMessage {
   file: FileBody | null;
   /** A story: shown in the story strip, not in the chat. */
   story: StoryBody | null;
+  /** A reaction to another message: counted under it, never shown as a message. */
+  reaction: ReactionBody | null;
   /** The message this one answers (quoted inside the encrypted body). */
   replyTo: ReplyRef | null;
   createdAt: string;
@@ -756,6 +759,7 @@ export async function decryptMessages(s: Session, profiles: ProfileCache, keys: 
     let voice: VoiceBody | null = null;
     let file: FileBody | null = null;
     let story: StoryBody | null = null;
+    let reaction: ReactionBody | null = null;
     let replyTo: ReplyRef | null = null;
     if (p && groupKey) {
       try {
@@ -772,7 +776,8 @@ export async function decryptMessages(s: Session, profiles: ProfileCache, keys: 
         if (body?.kind === 'voice') voice = body;
         if (body?.kind === 'file') file = body;
         if (body?.kind === 'story') story = body;
-        replyTo = (body?.kind === 'story' ? null : body?.replyTo) ?? null;
+        if (body?.kind === 'reaction') reaction = body;
+        replyTo = (body?.kind === 'story' || body?.kind === 'reaction' ? null : body?.replyTo) ?? null;
       } catch {
         // tampered, forged or other key version: shown as unreadable
       }
@@ -789,6 +794,7 @@ export async function decryptMessages(s: Session, profiles: ProfileCache, keys: 
       voice,
       file,
       story,
+      reaction,
       replyTo,
       createdAt: m.createdAt,
       expiresAt: m.expiresAt ?? null,
@@ -913,6 +919,19 @@ export async function uploadVoice(s: Session, groupId: string, voice: PreparedVo
     durationMs: voice.durationMs,
     ...(voice.waveform && { waveform: voice.waveform }),
   };
+}
+
+/** A reaction to a message: a quiet message (the server rings nobody for it), never shown as one. */
+export async function sendReaction(
+  s: Session,
+  groupId: string,
+  groupKey: Uint8Array,
+  keyVersion: number,
+  body: ReactionBody,
+  clientId: string,
+): Promise<WireMessage> {
+  const encrypted = encryptMessage(encodeMessageBody(body), { groupId, senderId: s.account.userId, clientId, keyVersion }, groupKey, s.identity);
+  return s.api.sendMessage(groupId, { clientId, keyVersion, ...encrypted, quiet: true });
 }
 
 /**

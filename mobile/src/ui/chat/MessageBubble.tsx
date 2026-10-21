@@ -2,7 +2,10 @@ import type { ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Avatar, isAvatarId } from '../avatars';
 import { Led, type LedState } from '../Led';
+import type { ReactionId } from '@/crypto';
 import { colors, fonts, led, mono, space } from '../theme';
+import { ReactionChips } from './ReactionKeys';
+import type { ReactionCount } from './reactions';
 import type { Quote } from './replies';
 
 export type DeliveryStatus = 'sending' | 'sent' | 'failed';
@@ -41,9 +44,11 @@ export function MessageBubble({
   media,
   quote,
   highlighted,
+  reactions,
   onRetry,
   onQuotePress,
   onLongPress,
+  onReact,
   children,
 }: {
   mine: boolean;
@@ -63,10 +68,14 @@ export function MessageBubble({
   quote?: Quote;
   /** Briefly lit after jumping here from a quote. */
   highlighted?: boolean;
+  /** What the message got, shown under it. */
+  reactions?: ReactionCount[];
   onRetry?(): void;
   onQuotePress?(): void;
   /** Actions (reply, copy); absent for messages still on their way. */
   onLongPress?(): void;
+  /** Tap on one of the reactions under the bubble: the same one (toggle). */
+  onReact?(id: ReactionId): void;
   children: ReactNode;
 }) {
   const failed = status === 'failed';
@@ -103,6 +112,7 @@ export function MessageBubble({
           ) : null}
         </View>
       </Pressable>
+      {reactions?.length ? <ReactionChips counts={reactions} onPress={onReact} /> : null}
       {failed ? <Text style={styles.failure}>{`${error ?? 'Échec de l’envoi'} — touche pour renvoyer`}</Text> : null}
     </View>
   );

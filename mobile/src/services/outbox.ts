@@ -1,4 +1,4 @@
-import { b64, type FileBody, type ImageBody, type ReplyRef, type StoryBody, type VoiceBody } from '@/crypto';
+import { b64, type FileBody, type ImageBody, type ReactionBody, type ReplyRef, type StoryBody, type VoiceBody } from '@/crypto';
 import type { PreparedFile, PreparedImage, PreparedVoice } from './groups';
 import { records, type LocalStore } from './localStore';
 
@@ -30,10 +30,13 @@ export type Pending = {
   | { kind: 'story'; image: PreparedImage; body?: StoryBody }
   // A document, sent as it is.
   | { kind: 'file'; file: PreparedFile; body?: FileBody }
+  // A reaction to a message (never shown as a message).
+  | { kind: 'reaction'; reaction: ReactionBody }
 );
 
 type Saved =
   | Extract<Pending, { kind: 'text' }>
+  | Extract<Pending, { kind: 'reaction' }>
   | (Omit<Extract<Pending, { kind: 'image' }>, 'image'> & { image: Omit<PreparedImage, 'jpeg'> & { jpeg: string } })
   | (Omit<Extract<Pending, { kind: 'story' }>, 'image'> & { image: Omit<PreparedImage, 'jpeg'> & { jpeg: string } })
   | (Omit<Extract<Pending, { kind: 'file' }>, 'file'> & { file: Omit<PreparedFile, 'bytes'> & { bytes: string } })
@@ -43,7 +46,7 @@ export async function loadOutbox(local: LocalStore, groupId: string): Promise<Pe
   const saved = (await local.getRecord<Saved[]>(records.outbox(groupId))) ?? [];
   return saved.flatMap((p): Pending[] => {
     try {
-      if (p.kind === 'text') return [p];
+      if (p.kind === 'text' || p.kind === 'reaction') return [p];
       if (p.kind === 'image' || p.kind === 'story') return [{ ...p, image: { ...p.image, jpeg: b64.decode(p.image.jpeg) } }];
       if (p.kind === 'voice') return [{ ...p, voice: { ...p.voice, audio: b64.decode(p.voice.audio) } }];
       if (p.kind === 'file') return [{ ...p, file: { ...p.file, bytes: b64.decode(p.file.bytes) } }];

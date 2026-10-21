@@ -347,6 +347,8 @@ export class Api {
       attachmentId?: string;
       /** A story: gone after this long, whatever the group's disappearing-messages setting. */
       expiresInSeconds?: number;
+      /** Nobody is rung for it (a reaction): the server learns only that it is not worth a notification. */
+      quiet?: true;
     },
   ) {
     return this.request<WireMessage>(`/groups/${id(groupId)}/messages`, { method: 'POST', json: msg });

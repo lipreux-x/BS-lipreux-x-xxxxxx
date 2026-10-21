@@ -121,7 +121,22 @@ export interface TextBody {
   replyTo?: ReplyRef;
 }
 
-export type MessageBody = TextBody | ImageBody | VoiceBody | StoryBody | FileBody;
+/** The five reactions a message can get, drawn by the app (ui/chat/ReactionKeys.tsx), never as emoji. */
+export const REACTIONS = ['like', 'crown', 'money', 'fire', 'secret'] as const;
+export type ReactionId = (typeof REACTIONS)[number];
+
+/**
+ * Someone's reaction to a message: one per member and message, the latest
+ * sent wins, null takes it back. Sent as a quiet message (the server rings
+ * nobody for it), never shown as one. Cannot be a reply.
+ */
+export interface ReactionBody {
+  kind: 'reaction';
+  messageId: string;
+  reaction: ReactionId | null;
+}
+
+export type MessageBody = TextBody | ImageBody | VoiceBody | StoryBody | FileBody | ReactionBody;
 
 /** How long a story lives, on the server and on the phones. */
 export const STORY_TTL_SECONDS = 24 * 60 * 60;
@@ -141,6 +156,7 @@ export function replyExcerpt(body: MessageBody): Pick<ReplyRef, 'excerpt' | 'ima
   if (body.kind === 'image' || body.kind === 'story') return { excerpt: '', image: true };
   if (body.kind === 'voice') return { excerpt: '', voice: true };
   if (body.kind === 'file') return { excerpt: body.name, file: true };
+  if (body.kind === 'reaction') return { excerpt: '' }; // never quoted (not shown as a message)
   const flat = body.text.replace(/\s+/g, ' ').trim();
   return { excerpt: flat.length > MAX_EXCERPT ? flat.slice(0, MAX_EXCERPT - 1) + '…' : flat };
 }
@@ -162,6 +178,10 @@ export function encodeMessageBody(body: MessageBody): string {
   if (body.kind === 'file') {
     const { kind, attachmentId, fileKey, mime, name, size, replyTo } = body;
     return STRUCTURED_PREFIX + JSON.stringify({ kind, attachmentId, fileKey, mime, name, size, replyTo });
+  }
+  if (body.kind === 'reaction') {
+    const { kind, messageId, reaction } = body;
+    return STRUCTURED_PREFIX + JSON.stringify({ kind, messageId, reaction });
   }
   const { kind, attachmentId, fileKey, mime, width, height, size, preview, replyTo } = body;
   return STRUCTURED_PREFIX + JSON.stringify({ kind, attachmentId, fileKey, mime, width, height, size, preview, replyTo });
@@ -206,6 +226,11 @@ export function parseMessageBody(plaintext: string): MessageBody | null {
     if (v.kind === 'text') {
       if (typeof v.text !== 'string' || v.text.length === 0 || v.text.length > MAX_TEXT || !replyTo) return null;
       return { kind: 'text', text: v.text, ...reply };
+    }
+    if (v.kind === 'reaction') {
+      const known = v.reaction === null || (REACTIONS as readonly unknown[]).includes(v.reaction);
+      if (replyTo || typeof v.messageId !== 'string' || !UUID.test(v.messageId) || !known) return null;
+      return { kind: 'reaction', messageId: v.messageId, reaction: v.reaction as ReactionId | null };
     }
     const fileOk = (v: Record<string, unknown>) =>
       typeof v.attachmentId === 'string' &&

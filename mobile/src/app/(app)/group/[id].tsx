@@ -16,7 +16,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { API_URL } from '@/config';
-import type { FileBody, ImageBody, ReplyRef, VoiceBody } from '@/crypto';
+import type { FileBody, ImageBody, ReactionId, ReplyRef, VoiceBody } from '@/crypto';
 import { wipe } from '@/crypto/encoding';
 import { useUnlocked, type OpenGroup } from '@/session/SessionProvider';
 import { useInsideGroup } from '@/session/useInsideGroup';
@@ -35,6 +35,7 @@ import {
   newClientId,
   rejectMember,
   sendAttachment,
+  sendReaction,
   sendText,
   relockGroup,
   syncGroup,
@@ -58,6 +59,7 @@ import { useVoiceRecorder, voiceCache, voicePlayer } from '@/services/voice';
 import { RealtimeClient } from '@/services/realtime';
 import { LockedOutError, WrongCodeError } from '@/services/vault';
 import { Composer } from '@/ui/chat/Composer';
+import { myReaction, nextReaction, tallyReactions, type ReactionCount } from '@/ui/chat/reactions';
 import { ActionKey, ActionSheet, MessageActions } from '@/ui/chat/MessageActions';
 import { DaySeparator, MessageBubble, type DeliveryStatus } from '@/ui/chat/MessageBubble';
 import { quoteResolver, replyRefFor, resolveQuote, type Quote } from '@/ui/chat/replies';
@@ -688,9 +690,22 @@ function Chat({ groupId, group, onUpdate, onLocked }: { groupId: string; group: 
   useEffect(() => {
     if (seenLoaded.current) void keep((l) => l.setRecord(records.stories(groupId), { seen: pruneSeen(seen, storyMessages as StoryMessage[]) }));
   }, [seen, storyMessages, keep, groupId]);
-  // The chat shows everything but the stories, which live in the band above it.
-  const chatMessages = useMemo(() => (storyMessages.length ? messages.filter((m) => !m.story) : messages), [messages, storyMessages]);
-  const chatPending = useMemo(() => (pending.some((p) => p.kind === 'story') ? pending.filter((p) => p.kind !== 'story') : pending), [pending]);
+  // The chat shows everything but the stories (in the band above it) and the reactions (under their messages).
+  const chatMessages = useMemo(() => (messages.some((m) => m.story || m.reaction) ? messages.filter((m) => !m.story && !m.reaction) : messages), [messages]);
+  const chatPending = useMemo(
+    () => (pending.some((p) => p.kind === 'story' || p.kind === 'reaction') ? pending.filter((p) => p.kind !== 'story' && p.kind !== 'reaction') : pending),
+    [pending],
+  );
+  // What each message got: every member's latest reaction, mine on their way included.
+  const reactionTally = useMemo(
+    () =>
+      tallyReactions(
+        messages.flatMap((m) => (m.reaction ? [{ senderId: m.senderId, seq: m.seq, reaction: m.reaction }] : [])),
+        pending.flatMap((p) => (p.kind === 'reaction' ? [p.reaction] : [])),
+        session.account.userId,
+      ),
+    [messages, pending, session.account.userId],
+  );
   const storySending = pending.some((p) => p.kind === 'story' && !p.failed);
   const storyFailed = pending.find((p) => p.kind === 'story' && p.failed);
 
@@ -742,7 +757,9 @@ function Chat({ groupId, group, onUpdate, onLocked }: { groupId: string; group: 
       const attempt = (g: OpenGroup) =>
         ready.kind === 'text'
           ? sendText(session, groupId, g.keys.get(g.keyVersion)!, g.keyVersion, ready.text, clientId, ready.replyTo)
-          : sendAttachment(session, groupId, g.keys.get(g.keyVersion)!, g.keyVersion, { ...ready.body!, ...(ready.replyTo && { replyTo: ready.replyTo }) }, clientId);
+          : ready.kind === 'reaction'
+            ? sendReaction(session, groupId, g.keys.get(g.keyVersion)!, g.keyVersion, ready.reaction, clientId)
+            : sendAttachment(session, groupId, g.keys.get(g.keyVersion)!, g.keyVersion, { ...ready.body!, ...(ready.replyTo && { replyTo: ready.replyTo }) }, clientId);
       let wire: WireMessage;
       try {
         wire = await attempt(current.current);
@@ -867,6 +884,19 @@ function Chat({ groupId, group, onUpdate, onLocked }: { groupId: string; group: 
     sendLatest.current = send;
   });
   const retry = useCallback((p: Pending) => void sendLatest.current(p), []);
+
+  /** One of the five keys for `m`: the same as mine takes it back, another replaces it. Goes out like a message. */
+  const react = useCallback(
+    (m: ChatMessage, id: ReactionId) => {
+      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      const reaction = nextReaction(myReaction(reactionTally.get(m.id)), id);
+      void sendLatest.current(
+        { clientId: newClientId(), at: new Date().toISOString(), kind: 'reaction', reaction: { kind: 'reaction', messageId: m.id, reaction }, failed: false },
+        { scroll: false },
+      );
+    },
+    [reactionTally],
+  );
 
   const renderContent = useCallback(
     (item: Line, onLongPress?: () => void) =>
@@ -1035,6 +1065,8 @@ function Chat({ groupId, group, onUpdate, onLocked }: { groupId: string; group: 
             onLongPress={openActions}
             onReply={startReply}
             onDayLongPress={eraseMenu}
+            reactions={reactionTally}
+            onReact={react}
           />
           <StoriesBand
             session={session}
@@ -1119,6 +1151,10 @@ function Chat({ groupId, group, onUpdate, onLocked }: { groupId: string; group: 
       </ActionSheet>
       <MessageActions
         target={pressed ? { quote: resolveQuote(replyRefFor(pressed)!, messages, session.account.userId), text: pressed.text } : null}
+        reaction={pressed ? myReaction(reactionTally.get(pressed.id)) : null}
+        onReact={(id) => {
+          if (pressed) react(pressed, id);
+        }}
         onReply={() => {
           if (!pressed) return;
           // Strip shown now; the keyboard once the sheet is gone (focused under it, it would not come up).
@@ -1232,6 +1268,8 @@ interface Line {
   localVoice?: PreparedVoice;
   file?: FileBody;
   localFile?: PreparedFile;
+  /** What it got (delivered messages only). */
+  reactions?: ReactionCount[];
   status?: DeliveryStatus;
   pending?: Pending;
   replyTo?: ReplyRef;
@@ -1255,6 +1293,8 @@ const Timeline = memo(function Timeline({
   onLongPress,
   onReply,
   onDayLongPress,
+  reactions,
+  onReact,
 }: {
   listRef: React.RefObject<FlatList<Item> | null>;
   loaded: boolean;
@@ -1268,6 +1308,10 @@ const Timeline = memo(function Timeline({
   onReply(m: ChatMessage): void;
   /** Long press on a day separator (admins: erase menu). */
   onDayLongPress?(day: Date): void;
+  /** Per message id, what it got. */
+  reactions: ReadonlyMap<string, ReactionCount[]>;
+  /** Tap on a reaction under a message, or one of the keys in its panel. */
+  onReact(m: ChatMessage, id: ReactionId): void;
 }) {
   const { session } = useUnlocked();
   const me = session.account.userId;
@@ -1291,6 +1335,7 @@ const Timeline = memo(function Timeline({
         image: m.image ?? undefined,
         voice: m.voice ?? undefined,
         file: m.file ?? undefined,
+        reactions: reactions.get(m.id),
         status: m.mine ? ('sent' as const) : undefined,
         replyTo: m.replyTo ?? undefined,
         quote: m.replyTo ? quoteOf(m.replyTo) : undefined,
@@ -1314,7 +1359,7 @@ const Timeline = memo(function Timeline({
       })),
     ];
     return buildTimeline(lines, new Date()).reverse();
-  }, [messages, pending, me]);
+  }, [messages, pending, me, reactions]);
 
   const jumpTo = useCallback(
     (messageId: string) => {
@@ -1345,11 +1390,12 @@ const Timeline = memo(function Timeline({
           onRetry={onRetry}
           onLongPress={onLongPress}
           onReply={onReply}
+          onReact={onReact}
           onQuotePress={jumpTo}
         />
       );
     },
-    [highlight, renderContent, onRetry, onLongPress, onReply, onDayLongPress, jumpTo],
+    [highlight, renderContent, onRetry, onLongPress, onReply, onDayLongPress, jumpTo, onReact],
   );
 
   return (
@@ -1389,6 +1435,7 @@ const TimelineRow = memo(function TimelineRow({
   onRetry,
   onLongPress,
   onReply,
+  onReact,
   onQuotePress,
 }: {
   line: Line;
@@ -1398,6 +1445,7 @@ const TimelineRow = memo(function TimelineRow({
   onRetry(p: Pending): void;
   onLongPress(m: ChatMessage): void;
   onReply(m: ChatMessage): void;
+  onReact(m: ChatMessage, id: ReactionId): void;
   /** Tap on the quote: to the original (by id). */
   onQuotePress(messageId: string): void;
 }) {
@@ -1417,9 +1465,11 @@ const TimelineRow = memo(function TimelineRow({
           media={!!(line.image || line.local)}
           quote={line.quote}
           highlighted={highlighted}
+          reactions={line.reactions}
           onRetry={pending ? () => onRetry(pending) : undefined}
           onQuotePress={replyTo ? () => onQuotePress(replyTo.messageId) : undefined}
           onLongPress={longPress}
+          onReact={message ? (id) => onReact(message, id) : undefined}
         >
           {renderContent(line, longPress)}
         </MessageBubble>

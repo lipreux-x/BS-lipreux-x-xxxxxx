@@ -4,6 +4,13 @@
 
 ## Derniers ajouts et changements
 
+### Réactions (21/10)
+
+- **Cinq réactions par message**, dessinées dans le style de l'app (touches métal biseautées, icônes au trait, jamais d'emoji) : pouce (j'aime), couronne, pièces, flamme, cadenas (secret). **Appui long** sur un message → les cinq touches en haut du panneau (la mienne allumée en vert) ; toucher la même la retire, une autre la remplace. Sous la bulle : ce que le message a reçu, en petites plaques avec le compte (la mienne allumée) ; toucher une plaque donne ou retire la même réaction.
+- **Une réaction par membre et par message** : la dernière envoyée compte. Elle part comme un message chiffré et signé (`kind: 'reaction'` : id du message visé + identifiant de la réaction, ou `null` pour la retirer), par la même file d'envoi (hors ligne, elle attend), et n'apparaît jamais dans le fil. Une réaction à un message disparu ne s'affiche pas.
+- **Serveur** : le message est marqué `quiet` : stocké et relayé comme les autres, mais **personne n'est notifié**. Le serveur apprend seulement qu'il ne vaut pas une notification, pas ce que c'est.
+- Tests : corps `reaction` (aller-retour, réaction inconnue ou emoji refusés, pas de réponse), comptage par message (dernière réaction de chaque membre, retrait, envois en attente) dans `ui/chat/reactions.ts`.
+
 ### Documents chiffrés (21/10)
 
 - **Envoyer un fichier** (PDF, tableur, archive… jusqu'à 10 Mo) : le « + » du composer ouvre un panneau **Une photo / Un document**. Le document est choisi avec le sélecteur du système, envoyé **tel quel** et chiffré exactement comme une photo (clé de fichier aléatoire, transportée dans un message chiffré et signé). Son **nom et son type voyagent dans le chiffré** : le serveur ne voit qu'un blob et sa taille. Même file d'envoi que les photos (hors ligne, il attend le réseau).
