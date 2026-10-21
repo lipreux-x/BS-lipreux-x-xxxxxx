@@ -37,7 +37,7 @@ export default function GroupSettings() {
   const [dialog, dialogView] = useDialog();
   // The keywords stay hidden until the group code is typed again (a phone left
   // unlocked in someone's hands should not give them away); shown until the
-  // screen is left.
+  // screen is left or « Masquer » is tapped.
   const [keywordsShown, setKeywordsShown] = useState<'hidden' | 'asking' | 'shown'>('hidden');
   const [lockedFor, setLockedFor] = useState(0);
   useEffect(() => () => setKeywordsShown('hidden'), []);
@@ -191,6 +191,9 @@ export default function GroupSettings() {
                 </View>
               ))}
             </View>
+            <Pressable accessibilityRole="button" onPress={() => setKeywordsShown('hidden')} style={styles.reveal}>
+              <Text style={styles.revealText}>Masquer</Text>
+            </Pressable>
             <Text style={[type.dim, styles.note]}>À donner en vrai avec le code, jamais par message.</Text>
           </>
         ) : keywordsShown === 'asking' ? (
