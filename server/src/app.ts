@@ -36,7 +36,7 @@ import {
   utf8,
   verifyEd25519,
 } from './lib/crypto';
-import { notifyGroup, PUSH_TOKEN } from './lib/push';
+import { notifyAction, notifyGroup, PUSH_TOKEN } from './lib/push';
 import { deleteObjects, downloadUrl, objectKey, uploadUrl } from './lib/storage';
 import { issueAccessToken, issueChallenge, readAccessToken, verifyAccessToken, verifyChallenge } from './lib/tokens';
 import { realtime } from './realtime';
@@ -565,11 +565,17 @@ app.post('/groups/join', async (c) => {
     .where(and(eq(groupBans.groupId, group.id), eq(groupBans.userId, me)));
   if (banned) throw new HTTPException(403, { message: 'wrong_code' });
 
-  await db.insert(groupMembers).values({ groupId: group.id, userId: me, role: 'member', status: 'pending' }).onConflictDoNothing();
+  const filed = await db
+    .insert(groupMembers)
+    .values({ groupId: group.id, userId: me, role: 'member', status: 'pending' })
+    .onConflictDoNothing()
+    .returning({ userId: groupMembers.userId });
   const [row] = await db
     .select({ status: groupMembers.status })
     .from(groupMembers)
     .where(and(eq(groupMembers.groupId, group.id), eq(groupMembers.userId, me)));
+  // A new request: the admins have someone to let in (asking again does not ring twice).
+  if (filed.length) await notifyAction(group.id, 'admins', me);
   return c.json({ groupId: group.id, status: row!.status });
 });
 
@@ -631,6 +637,7 @@ app.post('/groups/:groupId/members/:userId/approve', async (c) => {
       .where(eq(groups.id, groupId));
   });
   realtime.nudge();
+  await notifyAction(groupId, [target]);
   return c.json({ approved: true });
 });
 
@@ -710,6 +717,7 @@ app.post('/groups/:groupId/leave', async (c) => {
     throw new HTTPException(409, { message: 'handover_required' });
   }
   await removeMember(groupId, me, false);
+  await notifyAction(groupId, 'admins', me);
   return c.json({ left: true });
 });
 
@@ -868,6 +876,7 @@ app.put('/groups/:groupId/code', async (c) => {
       .where(eq(groups.id, groupId));
     return g.codeVersion + 1;
   });
+  await notifyAction(groupId, 'members', me);
   return c.json({ codeVersion });
 });
 

@@ -6,11 +6,13 @@ import { whileSystemUi } from '@/session/autoLock';
 import type { Api } from './api';
 
 /*
- * Push notifications (SPEC §4.7). The server sends one fixed line, "message
- * reçu" written backwards, with no sender, group name or content; its data
- * only carries the group id. Tapping it opens the app on the lock screen as
- * usual: app code (or fingerprint), then the group's code, then straight
- * into that group (see `pendingGroup`, consumed by app/(app)/_layout.tsx).
+ * Push notifications (SPEC §4.7). The server sends one of two fixed lines
+ * written backwards, "message reçu" or "action requise" (a join request to
+ * approve, a key or a new code to type), with no sender, group name or
+ * content; its data only carries the group id. Tapping it opens the app on
+ * the lock screen as usual: app code (or fingerprint), then the group's
+ * code, then straight into that group, which shows what is waiting (see
+ * `pendingGroup`, consumed by app/(app)/_layout.tsx).
  *
  * Needs a native build (not Expo Go); on Android, Firebase credentials for
  * the Expo push service as well. Every step here is best effort: without
