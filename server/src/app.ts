@@ -52,6 +52,7 @@ const OPEN_INVITES_PER_USER = 3; // unused and unexpired
 const INVITES_PER_DAY = 10;
 const GROUP_CODES_PER_DAY = 10; // group creations + code changes: each costs two Argon2id hashes
 const MESSAGES_PER_MINUTE = 60;
+const STORY_SECONDS = 24 * 3600; // a story's lifetime (mobile src/crypto/attachment.ts: STORY_TTL_SECONDS)
 const REGISTER_FAILURES_PER_INVITE = 3; // username already taken
 // Argon2id cost of a key backup (mobile src/crypto/backup.ts, native Argon2),
 // also given for decoys. It is also the floor: a weaker backup is refused, so
@@ -903,12 +904,16 @@ app.post('/groups/:groupId/messages', async (c) => {
       signature,
       // Image or voice message: the upload it refers to (the file key is inside the ciphertext).
       attachmentId: z.uuid().optional(),
+      // A story: lives 24 h, even in a group without disappearing messages (never longer than them).
+      expiresInSeconds: z.literal(STORY_SECONDS).optional(),
     }),
   );
   const me = c.get('userId');
   const { currentKeyVersion, ephemeralSeconds } = await requireMember(groupId, me);
   if (input.keyVersion !== currentKeyVersion) throw new HTTPException(409, { message: 'stale_key_version' });
-  const { attachmentId, ...msg } = input;
+  const { attachmentId, expiresInSeconds, ...msg } = input;
+  const lifetimes = [ephemeralSeconds, expiresInSeconds].filter((s): s is number => !!s);
+  const expiresAt = lifetimes.length ? new Date(Date.now() + Math.min(...lifetimes) * 1000) : null;
 
   const row = await db.transaction(async (tx) => {
     // One sender at a time: the rate limit below cannot be raced.
@@ -924,7 +929,7 @@ app.post('/groups/:groupId/messages', async (c) => {
         ...msg,
         groupId,
         senderId: me,
-        expiresAt: ephemeralSeconds ? new Date(Date.now() + ephemeralSeconds * 1000) : null,
+        expiresAt,
       })
       .onConflictDoNothing({ target: [messages.senderId, messages.clientId] });
     // Idempotent: a replayed send returns the row stored the first time (in this group only).

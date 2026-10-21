@@ -1,4 +1,4 @@
-import { b64, type ImageBody, type ReplyRef, type VoiceBody } from '@/crypto';
+import { b64, type ImageBody, type ReplyRef, type StoryBody, type VoiceBody } from '@/crypto';
 import type { PreparedImage, PreparedVoice } from './groups';
 import { records, type LocalStore } from './localStore';
 
@@ -26,11 +26,14 @@ export type Pending = {
   // `body` is set once the encrypted file is uploaded: a retry only resends the message.
   | { kind: 'image'; image: PreparedImage; body?: ImageBody }
   | { kind: 'voice'; voice: PreparedVoice; body?: VoiceBody }
+  // A story: a photo for the story strip, gone after 24 h.
+  | { kind: 'story'; image: PreparedImage; body?: StoryBody }
 );
 
 type Saved =
   | Extract<Pending, { kind: 'text' }>
   | (Omit<Extract<Pending, { kind: 'image' }>, 'image'> & { image: Omit<PreparedImage, 'jpeg'> & { jpeg: string } })
+  | (Omit<Extract<Pending, { kind: 'story' }>, 'image'> & { image: Omit<PreparedImage, 'jpeg'> & { jpeg: string } })
   | (Omit<Extract<Pending, { kind: 'voice' }>, 'voice'> & { voice: Omit<PreparedVoice, 'audio'> & { audio: string } });
 
 export async function loadOutbox(local: LocalStore, groupId: string): Promise<Pending[]> {
@@ -38,7 +41,7 @@ export async function loadOutbox(local: LocalStore, groupId: string): Promise<Pe
   return saved.flatMap((p): Pending[] => {
     try {
       if (p.kind === 'text') return [p];
-      if (p.kind === 'image') return [{ ...p, image: { ...p.image, jpeg: b64.decode(p.image.jpeg) } }];
+      if (p.kind === 'image' || p.kind === 'story') return [{ ...p, image: { ...p.image, jpeg: b64.decode(p.image.jpeg) } }];
       if (p.kind === 'voice') return [{ ...p, voice: { ...p.voice, audio: b64.decode(p.voice.audio) } }];
     } catch {
       // unreadable entry: dropped
@@ -49,7 +52,7 @@ export async function loadOutbox(local: LocalStore, groupId: string): Promise<Pe
 
 export async function saveOutbox(local: LocalStore, groupId: string, items: Pending[]) {
   const saved: Saved[] = items.map((p) => {
-    if (p.kind === 'image') return { ...p, image: { ...p.image, jpeg: b64.encode(p.image.jpeg) } };
+    if (p.kind === 'image' || p.kind === 'story') return { ...p, image: { ...p.image, jpeg: b64.encode(p.image.jpeg) } };
     if (p.kind === 'voice') return { ...p, voice: { ...p.voice, audio: b64.encode(p.voice.audio) } };
     return p;
   });

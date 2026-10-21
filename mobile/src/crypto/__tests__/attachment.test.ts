@@ -129,6 +129,38 @@ describe('voice message bodies', () => {
   });
 });
 
+describe('story bodies', () => {
+  const story = {
+    kind: 'story' as const,
+    attachmentId: ctx.attachmentId,
+    fileKey: 'BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc',
+    mime: 'image/jpeg' as const,
+    width: 1200,
+    height: 1600,
+    size: 180_000,
+    preview: 'AAAA',
+  };
+
+  it('round-trips, with or without a preview', () => {
+    expect(parseMessageBody(encodeMessageBody(story))).toEqual(story);
+    const { preview: _, ...flat } = story;
+    expect(parseMessageBody(encodeMessageBody(flat))).toEqual(flat);
+  });
+
+  it('is checked like an image, and can answer nothing', () => {
+    const enc = (v: object) => '\u0000' + JSON.stringify({ ...story, ...v });
+    expect(parseMessageBody(enc({ mime: 'image/png' }))).toBeNull();
+    expect(parseMessageBody(enc({ height: 0 }))).toBeNull();
+    expect(parseMessageBody(enc({ fileKey: '!!' }))).toBeNull();
+    const replyTo = { messageId: '1b9d6bcd-0000-4000-8000-0000000000aa', senderId: '2c8e7a00-0000-4000-8000-0000000000bb', excerpt: '' };
+    expect(parseMessageBody(enc({ replyTo }))).toBeNull();
+  });
+
+  it('is quoted like an image', () => {
+    expect(replyExcerpt(story)).toEqual({ excerpt: '', image: true });
+  });
+});
+
 describe('replies', () => {
   const replyTo: ReplyRef = {
     messageId: '1b9d6bcd-0000-4000-8000-0000000000aa',

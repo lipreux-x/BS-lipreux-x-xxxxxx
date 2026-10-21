@@ -60,10 +60,12 @@ export {
   MAX_EXCERPT,
   MAX_VOICE_MS,
   MAX_WAVEFORM,
+  STORY_TTL_SECONDS,
   type AttachmentContext,
   type ImageBody,
   type MessageBody,
   type ReplyRef,
+  type StoryBody,
   type TextBody,
   type VoiceBody,
 } from './attachment';

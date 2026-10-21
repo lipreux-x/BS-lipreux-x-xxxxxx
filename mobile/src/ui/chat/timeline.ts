@@ -43,6 +43,16 @@ export function countdownLabel(date: Date, now: Date): string {
   return `dans ${Math.floor(hours / 24)} j`;
 }
 
+/** Time since a date: "à l’instant", "il y a 12 min", "il y a 5 h", "il y a 3 j". */
+export function agoLabel(date: Date, now: Date): string {
+  const min = Math.floor((now.getTime() - date.getTime()) / 60_000);
+  if (min < 1) return 'à l’instant';
+  if (min < 60) return `il y a ${min} min`;
+  const hours = Math.floor(min / 60);
+  if (hours < 24) return `il y a ${hours} h`;
+  return `il y a ${Math.floor(hours / 24)} j`;
+}
+
 /**
  * Local midnight to midnight: `days` days ending with `day` included
  * (1: that day, 2: that day and the one before, 7: the week up to it).

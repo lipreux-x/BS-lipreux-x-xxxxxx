@@ -338,7 +338,16 @@ export class Api {
   /** `attachmentId`: the upload an image message refers to (the server ties its lifetime to the message). */
   sendMessage(
     groupId: string,
-    msg: { clientId: string; keyVersion: number; nonce: string; ciphertext: string; signature: string; attachmentId?: string },
+    msg: {
+      clientId: string;
+      keyVersion: number;
+      nonce: string;
+      ciphertext: string;
+      signature: string;
+      attachmentId?: string;
+      /** A story: gone after this long, whatever the group's disappearing-messages setting. */
+      expiresInSeconds?: number;
+    },
   ) {
     return this.request<WireMessage>(`/groups/${id(groupId)}/messages`, { method: 'POST', json: msg });
   }

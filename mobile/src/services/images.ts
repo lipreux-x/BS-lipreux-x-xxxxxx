@@ -1,7 +1,7 @@
 import { randomUUID } from 'expo-crypto';
 import { File, Paths } from 'expo-file-system';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
-import { launchImageLibraryAsync } from 'expo-image-picker';
+import { launchCameraAsync, launchImageLibraryAsync, requestCameraPermissionsAsync } from 'expo-image-picker';
 import { Asset, requestPermissionsAsync } from 'expo-media-library';
 import { b64 } from '@/crypto';
 import { wipe } from '@/crypto/encoding';
@@ -26,6 +26,19 @@ const PREVIEW_SIDE = 24;
 /** Opens the photo library. Null if the user cancelled. */
 export async function pickImage(): Promise<PreparedImage | null> {
   const res = await whileSystemUi(() => launchImageLibraryAsync({ mediaTypes: ['images'], quality: 1, exif: false }));
+  const asset = res.canceled ? undefined : res.assets?.[0];
+  return asset ? prepareImage(asset.uri, asset.width, asset.height) : null;
+}
+
+/**
+ * Opens the camera (stories). 'denied' if the user refused the camera, null
+ * if they backed out. The shot goes through the same re-encoding as a picked
+ * photo: no metadata, and the camera's copy in the cache is deleted.
+ */
+export async function takePhoto(): Promise<PreparedImage | 'denied' | null> {
+  const { granted } = await whileSystemUi(() => requestCameraPermissionsAsync());
+  if (!granted) return 'denied';
+  const res = await whileSystemUi(() => launchCameraAsync({ mediaTypes: ['images'], quality: 1, exif: false }));
   const asset = res.canceled ? undefined : res.assets?.[0];
   return asset ? prepareImage(asset.uri, asset.width, asset.height) : null;
 }

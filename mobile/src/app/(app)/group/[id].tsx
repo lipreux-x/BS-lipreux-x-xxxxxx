@@ -3,7 +3,6 @@ import { router, Stack, useFocusEffect, useLocalSearchParams } from 'expo-router
 import { useHeaderHeight } from 'expo-router/react-navigation';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Alert,
   FlatList,
   Keyboard,
   KeyboardAvoidingView,
@@ -24,6 +23,7 @@ import { useInsideGroup } from '@/session/useInsideGroup';
 import { ApiError, NetworkError, type WireMessage } from '@/services/api';
 import {
   approveMember,
+  CodeChangedError,
   AttachmentTooLargeError,
   decryptMessages,
   fetchSince,
@@ -40,6 +40,7 @@ import {
   syncGroup,
   unlockGroup,
   uploadImage,
+  uploadStory,
   uploadVoice,
   type ChatMessage,
   type GroupLockState,
@@ -47,7 +48,7 @@ import {
   type PreparedImage,
   type PreparedVoice,
 } from '@/services/groups';
-import { imageCache, pickImage } from '@/services/images';
+import { imageCache, pickImage, takePhoto } from '@/services/images';
 import { records, type LocalStore } from '@/services/localStore';
 import { loadOutbox, saveOutbox, type Pending } from '@/services/outbox';
 import { useVoiceRecorder, voiceCache, voicePlayer } from '@/services/voice';
@@ -60,12 +61,16 @@ import { quoteResolver, replyRefFor, resolveQuote, type Quote } from '@/ui/chat/
 import { SwipeToReply } from '@/ui/chat/SwipeToReply';
 import { buildTimeline, countdownLabel, dateTimeLabel, dayLabel, dayRange, timeLabel } from '@/ui/chat/timeline';
 import { CodeEntry, type CodeResult } from '@/ui/CodeEntry';
+import { useDialog } from '@/ui/Dialog';
 import { ImageBubble, LocalImage } from '@/ui/ImageBubble';
 import { ImageViewer } from '@/ui/ImageViewer';
 import { KeywordsForm } from '@/ui/KeywordsForm';
 import { PrivacyCover } from '@/ui/PrivacyCover';
 import { SentVoice, VoiceBubble, voiceTrack } from '@/ui/VoiceBubble';
 import { Led } from '@/ui/Led';
+import { bandStories, pruneSeen, type StoryMessage } from '@/ui/stories/stories';
+import { STORIES_RAIL_H, StoriesBand } from '@/ui/stories/StoriesBand';
+import { StoryPreview } from '@/ui/stories/StoryPreview';
 import { colors, fonts, mono, space, type } from '@/ui/theme';
 
 export default function GroupScreen() {
@@ -82,7 +87,15 @@ export default function GroupScreen() {
   // Closed while away (10 min out of it): its code again.
   useInsideGroup(id, useCallback(() => setOpen(openGroups.get(id)), [openGroups, id]));
 
-  return open ? <Chat groupId={id} group={open} onUpdate={update} /> : <GroupUnlock groupId={id} onOpen={update} />;
+  // The admin changed the code (and the key moved on under it): the group locks, its new code opens it.
+  const relock = useCallback(() => {
+    const g = openGroups.get(id);
+    if (g) for (const k of g.keys.values()) wipe(k);
+    openGroups.delete(id);
+    setOpen(undefined);
+  }, [openGroups, id]);
+
+  return open ? <Chat groupId={id} group={open} onUpdate={update} onLocked={relock} /> : <GroupUnlock groupId={id} onOpen={update} />;
 }
 
 // ---- Unlock (SPEC §2.3) --------------------------------------------------------------
@@ -108,15 +121,17 @@ function GroupUnlock({ groupId, onOpen }: { groupId: string; onOpen(g: OpenGroup
   const [relock, setRelock] = useState<{ group: OpenGroup; first: string | null; mismatch: boolean } | null>(null);
   // No longer listed: self-destructed, or we were removed (listGroups erased what the phone kept).
   const [gone, setGone] = useState(false);
+  // The admin changed the code, and the keywords too: the new ones are typed before the new code.
+  const [newWords, setNewWords] = useState(false);
 
   useEffect(() => {
     listGroups(session)
       .then(({ items }) => {
         const g = items.find((x) => x.id === groupId);
         if (!g) setGone(true);
-        setState(g?.state ?? { kind: 'locked' });
+        setState(g?.state ?? { kind: 'locked', codeChanged: false });
       })
-      .catch(() => setState({ kind: 'locked' }));
+      .catch(() => setState({ kind: 'locked', codeChanged: false }));
   }, [session, groupId]);
 
   async function attempt(code: string): Promise<CodeResult> {
@@ -143,6 +158,32 @@ function GroupUnlock({ groupId, onOpen }: { groupId: string; onOpen(g: OpenGroup
     }
   }
 
+  // The admin changed the keywords with the code: the new ones are typed first, then the code.
+  if (newWords && !keywords) {
+    return (
+      <View style={[styles.center, { padding: space.lg }]}>
+        <Stack.Screen options={{ title: 'Groupe verrouillé' }} />
+        <KeywordsForm
+          hint="Les 3 nouveaux mots-clés donnés par l’admin, puis le nouveau code."
+          submitTitle="Continuer"
+          onSubmit={async (words) => {
+            setKeywords(words);
+            setNewWords(false);
+            return null;
+          }}
+        />
+        <Pressable accessibilityRole="button" onPress={() => setNewWords(false)} hitSlop={8} style={styles.wordsLink}>
+          <Text style={styles.wordsLinkText}>Retour au code</Text>
+        </Pressable>
+      </View>
+    );
+  }
+  const wordsLink = keywords ? null : (
+    <Pressable accessibilityRole="button" onPress={() => setNewWords(true)} hitSlop={8} style={styles.wordsLink}>
+      <Text style={styles.wordsLinkText}>Les mots-clés ont changé aussi ?</Text>
+    </Pressable>
+  );
+
   if (relock) {
     const { group } = relock;
     return (
@@ -162,6 +203,7 @@ function GroupUnlock({ groupId, onOpen }: { groupId: string; onOpen(g: OpenGroup
         ) : (
           <CodeEntry
             key="confirm-new"
+            fadeOut
             title="Confirme le nouveau code"
             onComplete={async (code) => {
               if (code !== relock.first) {
@@ -170,13 +212,13 @@ function GroupUnlock({ groupId, onOpen }: { groupId: string; onOpen(g: OpenGroup
               }
               try {
                 // The new code must open the key the admin re-wrapped with it: a wrong one is refused here.
-                const r = await relockGroup(session, profiles, groupId, group.keys, code);
+                const r = await relockGroup(session, profiles, groupId, group.keys, code, keywords ?? undefined);
                 const opened = { keys: r.keys, keyVersion: r.keyVersion, name: r.meta.name };
                 return () => onOpen(opened);
               } catch (e) {
                 if (e instanceof WrongCodeError) {
                   setRelock({ group, first: null, mismatch: false });
-                  return 'Ce n’est pas le nouveau code';
+                  return keywords ? 'Nouveau code ou mots-clés incorrects' : 'Ce n’est pas le nouveau code';
                 }
                 if (e instanceof LockedOutError) return 'Trop d’essais, réessaie plus tard';
                 if (e instanceof NetworkError) return 'Pas de réseau';
@@ -185,6 +227,7 @@ function GroupUnlock({ groupId, onOpen }: { groupId: string; onOpen(g: OpenGroup
             }}
           />
         )}
+        {relock.first === null ? wordsLink : null}
       </View>
     );
   }
@@ -254,6 +297,7 @@ function GroupUnlock({ groupId, onOpen }: { groupId: string; onOpen(g: OpenGroup
         ) : (
           <CodeEntry
             key="confirm"
+            fadeOut
             title="Confirme le code"
             onComplete={async (code) => {
               if (code !== firstCode) {
@@ -265,14 +309,26 @@ function GroupUnlock({ groupId, onOpen }: { groupId: string; onOpen(g: OpenGroup
             }}
           />
         )}
+        {/* Asked to join before the admin changed the code: the new keywords may be needed. */}
+        {firstCode === null && !state.needsKeywords ? wordsLink : null}
       </View>
     );
   }
 
+  // The admin changed the code since this phone last opened the group: the new one opens it (the old one too).
+  const codeChanged = state.kind === 'locked' && state.codeChanged;
+
   return (
     <View style={styles.center}>
       <Stack.Screen options={{ title: 'Groupe verrouillé' }} />
-      <CodeEntry title="Code du groupe" onComplete={attempt} lockedForMs={lockedFor} />
+      <CodeEntry
+        title="Code du groupe"
+        subtitle={codeChanged ? (keywords ? 'Nouveaux mots-clés notés : tape le nouveau code.' : 'L’admin a changé le code : tape le nouveau.') : undefined}
+        onComplete={attempt}
+        lockedForMs={lockedFor}
+        fadeOut
+      />
+      {codeChanged ? wordsLink : null}
     </View>
   );
 }
@@ -299,8 +355,9 @@ const ERASE_SPANS: { days: number; label: string }[] = [
   { days: 7, label: 'Les 7 jours jusqu’à ce jour' },
 ];
 
-function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup; onUpdate(g: OpenGroup): void }) {
+function Chat({ groupId, group, onUpdate, onLocked }: { groupId: string; group: OpenGroup; onUpdate(g: OpenGroup): void; onLocked(): void }) {
   const { session, profiles, openGroups } = useUnlocked();
+  const [dialog, dialogView] = useDialog();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [pending, setPending] = useState<Pending[]>([]);
   const [picking, setPicking] = useState(false);
@@ -333,6 +390,22 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
   const openImage = useCallback((jpeg: Uint8Array) => {
     Keyboard.dismiss();
     setViewing(jpeg);
+  }, []);
+
+  // Stories: ids already watched (kept on the phone), the photo waiting to be
+  // published, the "add" panel, and whether the band is pulled down.
+  const [seen, setSeen] = useState<ReadonlySet<string>>(() => new Set());
+  const seenLoaded = useRef(false);
+  const [storyPick, setStoryPick] = useState<PreparedImage | null>(null);
+  const [storySheet, setStorySheet] = useState(false);
+  const [bandOpen, setBandOpen] = useState(false);
+  const [storyNow, setStoryNow] = useState(() => new Date());
+  useEffect(() => {
+    const t = setInterval(() => setStoryNow(new Date()), 30_000);
+    return () => clearInterval(t);
+  }, []);
+  const markSeen = useCallback((id: string) => {
+    setSeen((prev) => (prev.has(id) ? prev : new Set([...prev, id])));
   }, []);
   const [online, setOnline] = useState(true);
   const [removed, setRemoved] = useState(false);
@@ -379,12 +452,13 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
       setRequests(admin ? await joinRequests(session, profiles, groupId).catch(() => []) : []);
       return g;
     } catch (e) {
+      if (e instanceof CodeChangedError) onLocked();
       if (e instanceof ApiError && e.status === 404) setRemoved(true);
       const message = securityMessage(e);
       if (message) setAlert(message);
       return current.current;
     }
-  }, [session, profiles, groupId, onUpdate]);
+  }, [session, profiles, groupId, onUpdate, onLocked]);
 
   async function decide(r: JoinRequestInfo, accept: boolean) {
     try {
@@ -393,7 +467,13 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
       setRequests((list) => list.filter((x) => x.userId !== r.userId));
       void sync();
     } catch (e) {
-      Alert.alert(
+      if (e instanceof CodeChangedError) {
+        // Its key would be wrapped under the old code: the new one first, then accept.
+        setReviewing(false);
+        dialog('Le code du groupe a changé', 'Rouvre le groupe avec le nouveau code, puis accepte la demande.', [{ text: 'OK', onPress: onLocked }]);
+        return;
+      }
+      dialog(
         accept ? 'Impossible d’accepter' : 'Impossible de refuser',
         e instanceof NetworkError ? 'Pas de réseau.' : (securityMessage(e) ?? 'Réessaie dans un instant.'),
       );
@@ -469,6 +549,11 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
         // Messages written meanwhile stay after those from before.
         setPending((p) => [...queued.filter((q) => !p.some((x) => x.clientId === q.clientId)), ...p]);
         outboxLoaded.current = true;
+      });
+      await keep(async (l) => {
+        const watched = await l.getRecord<{ seen: string[] }>(records.stories(groupId));
+        if (watched?.seen.length) setSeen((prev) => new Set([...prev, ...watched.seen]));
+        seenLoaded.current = true;
       });
       await keep(async (l) => {
         const [wire, chat] = await Promise.all([l.messages(groupId), l.getRecord<{ purgeSeq: number }>(records.chat(groupId))]);
@@ -562,7 +647,7 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
       days === 1
         ? `du ${dayLabel(day, today).toLowerCase()}`
         : `du ${dayLabel(from, today).toLowerCase()} au ${dayLabel(day, today).toLowerCase()}`;
-    Alert.alert(`Effacer les messages ${span} ?`, 'Les messages, les photos et les vocaux de cette période seront effacés pour tous les membres. C’est définitif.', [
+    dialog(`Effacer les messages ${span} ?`, 'Les messages, les photos et les vocaux de cette période seront effacés pour tous les membres. C’est définitif.', [
       { text: 'Annuler', style: 'cancel' },
       {
         text: 'Effacer',
@@ -578,7 +663,7 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
       await session.api.eraseMessages(groupId, from, to);
       await resync({ full: true });
     } catch (e) {
-      Alert.alert(
+      dialog(
         'Impossible d’effacer',
         e instanceof NetworkError
           ? 'Pas de réseau.'
@@ -592,6 +677,18 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
   useEffect(() => {
     if (outboxLoaded.current) void keep((l) => saveOutbox(l, groupId, pending));
   }, [pending, keep, groupId]);
+
+  // Stories of the group still alive, in the band's order; what was watched is kept on the phone.
+  const storyMessages = useMemo(() => messages.filter((m): m is ChatMessage & { story: NonNullable<ChatMessage['story']> } => !!m.story), [messages]);
+  const storyList = useMemo(() => bandStories(storyMessages as StoryMessage[], storyNow), [storyMessages, storyNow]);
+  useEffect(() => {
+    if (seenLoaded.current) void keep((l) => l.setRecord(records.stories(groupId), { seen: pruneSeen(seen, storyMessages as StoryMessage[]) }));
+  }, [seen, storyMessages, keep, groupId]);
+  // The chat shows everything but the stories, which live in the band above it.
+  const chatMessages = useMemo(() => (storyMessages.length ? messages.filter((m) => !m.story) : messages), [messages, storyMessages]);
+  const chatPending = useMemo(() => (pending.some((p) => p.kind === 'story') ? pending.filter((p) => p.kind !== 'story') : pending), [pending]);
+  const storySending = pending.some((p) => p.kind === 'story' && !p.failed);
+  const storyFailed = pending.find((p) => p.kind === 'story' && p.failed);
 
   // Network back (or group opened): what waits goes out, in order.
   const [flushes, setFlushes] = useState(0);
@@ -628,6 +725,11 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
         ready = { ...ready, body };
         setPending((p) => p.map((x) => (x.clientId === clientId && x.kind === 'voice' ? { ...x, body } : x)));
       }
+      if (ready.kind === 'story' && !ready.body) {
+        const body = await uploadStory(session, groupId, ready.image);
+        ready = { ...ready, body };
+        setPending((p) => p.map((x) => (x.clientId === clientId && x.kind === 'story' ? { ...x, body } : x)));
+      }
       const attempt = (g: OpenGroup) =>
         ready.kind === 'text'
           ? sendText(session, groupId, g.keys.get(g.keyVersion)!, g.keyVersion, ready.text, clientId, ready.replyTo)
@@ -640,8 +742,8 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
         if (!(e instanceof ApiError && e.code === 'stale_key_version')) throw e;
         wire = await attempt(await sync());
       }
-      // Our own image or voice message: no need to download what we just sent.
-      if (ready.kind === 'image') imageCache.set(ready.body!.attachmentId, ready.image.jpeg);
+      // Our own image, story or voice message: no need to download what we just sent.
+      if (ready.kind === 'image' || ready.kind === 'story') imageCache.set(ready.body!.attachmentId, ready.image.jpeg);
       if (ready.kind === 'voice') voiceCache.set(ready.body!.attachmentId, ready.voice.audio);
       void keep((l) => l.saveMessages(groupId, [wire]));
       merge(await decrypt([wire]));
@@ -674,6 +776,41 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
       setPicking(false);
     }
   }
+
+  /** What runs once the "story" panel is gone (camera, picker). */
+  const afterStorySheet = useRef<(() => void) | null>(null);
+  function closeStorySheet(then?: () => void) {
+    afterStorySheet.current = then ?? null;
+    setStorySheet(false);
+  }
+
+  /** A story: the camera or the library, then a look at the photo before it goes out. */
+  async function pickStory(source: 'camera' | 'library') {
+    setPicking(true);
+    try {
+      const image = source === 'camera' ? await takePhoto() : await pickImage();
+      if (image === 'denied') {
+        dialog('Appareil photo désactivé', 'Autorise l’appareil photo dans les réglages du téléphone pour prendre une story.');
+      } else if (image) {
+        setStoryPick(image);
+      }
+    } catch {
+      // Camera, picker or re-encoding failed: nothing to publish.
+    } finally {
+      setPicking(false);
+    }
+  }
+
+  function publishStory() {
+    const image = storyPick;
+    setStoryPick(null);
+    if (image) void send({ clientId: newClientId(), at: new Date().toISOString(), kind: 'story', image, failed: false }, { scroll: false });
+  }
+
+  const pullBand = useCallback((open: boolean) => {
+    if (open) Keyboard.dismiss();
+    setBandOpen(open);
+  }, []);
 
   // What the list gets keeps one identity across renders, so that its rows
   // (memoized) re-render only when they change. Retry calls the latest `send`.
@@ -756,6 +893,7 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
   return (
     <SafeAreaView style={styles.screen} edges={['bottom']}>
       <Stack.Screen options={headerOptions} />
+      {dialogView}
       {!online ? (
         <View style={styles.banner}>
           <Led state="amber" size={7} />
@@ -831,17 +969,39 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
       {/* 'padding' on both platforms: with edge-to-edge (always on since SDK 54),
           Android no longer shrinks the window for the keyboard by itself. */}
       <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding" keyboardVerticalOffset={headerHeight}>
-        <Timeline
-          listRef={list}
-          loaded={loaded}
-          messages={messages}
-          pending={pending}
-          renderContent={renderContent}
-          onRetry={retry}
-          onLongPress={openActions}
-          onReply={startReply}
-          onDayLongPress={eraseMenu}
-        />
+        {/* The messages start under the stories' rail; the band itself lies over them (rendered last: on top)
+            and comes down to the composer, never over it. */}
+        <View style={{ flex: 1 }}>
+          <View style={{ height: STORIES_RAIL_H }} />
+          <Timeline
+            listRef={list}
+            loaded={loaded}
+            messages={chatMessages}
+            pending={chatPending}
+            renderContent={renderContent}
+            onRetry={retry}
+            onLongPress={openActions}
+            onReply={startReply}
+            onDayLongPress={eraseMenu}
+          />
+          <StoriesBand
+            session={session}
+            groupId={groupId}
+            stories={storyList}
+            seen={seen}
+            open={bandOpen}
+            sending={storySending}
+            failed={!!storyFailed}
+            now={storyNow}
+            onOpenChange={pullBand}
+            onAdd={() => {
+              Keyboard.dismiss();
+              setStorySheet(true);
+            }}
+            onSeen={markSeen}
+            onView={openImage}
+          />
+        </View>
         <ChatComposer
           attaching={picking}
           onAttach={() => void sendPhoto()}
@@ -857,6 +1017,36 @@ function Chat({ groupId, group, onUpdate }: { groupId: string; group: OpenGroup;
         />
       </KeyboardAvoidingView>
       <ImageViewer jpeg={viewing} onClose={() => setViewing(null)} />
+      <StoryPreview image={storyPick} onPublish={publishStory} onCancel={() => setStoryPick(null)} />
+      {/* The camera or the picker open once the panel is gone (iOS refuses to present over a modal on its way out). */}
+      <ActionSheet
+        visible={storySheet}
+        onClose={() => closeStorySheet()}
+        onHidden={() => {
+          const next = afterStorySheet.current;
+          afterStorySheet.current = null;
+          next?.();
+        }}
+      >
+        <Text style={styles.sheetTitle}>STORY · VISIBLE 24 H PAR LE GROUPE</Text>
+        {storyFailed ? (
+          <>
+            <ActionKey
+              label={storyFailed.error ?? 'Réessayer l’envoi'}
+              danger={!!storyFailed.error}
+              onPress={() => closeStorySheet(storyFailed.error ? undefined : () => retry(storyFailed))}
+            />
+            <ActionKey
+              label="Abandonner cette story"
+              dim
+              onPress={() => closeStorySheet(() => setPending((p) => p.filter((x) => x.clientId !== storyFailed.clientId)))}
+            />
+          </>
+        ) : null}
+        <ActionKey label="Prendre une photo" onPress={() => closeStorySheet(() => void pickStory('camera'))} />
+        <ActionKey label="Choisir dans la galerie" onPress={() => closeStorySheet(() => void pickStory('library'))} />
+        <ActionKey label="Annuler" dim onPress={() => closeStorySheet()} />
+      </ActionSheet>
       <MessageActions
         target={pressed ? { quote: resolveQuote(replyRefFor(pressed)!, messages, session.account.userId), text: pressed.text } : null}
         onReply={() => {
@@ -915,39 +1105,43 @@ function ChatComposer({
 }) {
   const [draft, setDraft] = useState('');
   const recorder = useVoiceRecorder(onSendVoice);
+  const [dialog, dialogView] = useDialog();
 
   async function startVoice() {
     const res = await recorder.start();
     if (res === 'denied') {
-      Alert.alert('Micro désactivé', 'Autorise l’accès au micro dans les réglages du téléphone pour envoyer des vocaux.');
+      dialog('Micro désactivé', 'Autorise l’accès au micro dans les réglages du téléphone pour envoyer des vocaux.');
     } else if (res === 'failed') {
-      Alert.alert('Impossible d’enregistrer', 'Le micro n’a pas pu démarrer. Réessaie.');
+      dialog('Impossible d’enregistrer', 'Le micro n’a pas pu démarrer. Réessaie.');
     }
   }
 
   return (
-    <Composer
-      value={draft}
-      onChange={setDraft}
-      attaching={attaching}
-      onAttach={onAttach}
-      replyTo={replyTo}
-      onCancelReply={onCancelReply}
-      inputRef={inputRef}
-      voice={{
-        phase: recorder.phase,
-        elapsedMs: recorder.elapsedMs,
-        levels: recorder.levels,
-        onStart: () => void startVoice(),
-        onCancel: () => void recorder.cancel(),
-        onSend: () => void recorder.finish(),
-      }}
-      onSend={() => {
-        const text = draft.trim().replace(/^\u0000+/, ''); // a leading NUL marks structured bodies
-        setDraft('');
-        if (text) onSendText(text);
-      }}
-    />
+    <>
+      {dialogView}
+      <Composer
+        value={draft}
+        onChange={setDraft}
+        attaching={attaching}
+        onAttach={onAttach}
+        replyTo={replyTo}
+        onCancelReply={onCancelReply}
+        inputRef={inputRef}
+        voice={{
+          phase: recorder.phase,
+          elapsedMs: recorder.elapsedMs,
+          levels: recorder.levels,
+          onStart: () => void startVoice(),
+          onCancel: () => void recorder.cancel(),
+          onSend: () => void recorder.finish(),
+        }}
+        onSend={() => {
+          const text = draft.trim().replace(/^\u0000+/, ''); // a leading NUL marks structured bodies
+          setDraft('');
+          if (text) onSendText(text);
+        }}
+      />
+    </>
   );
 }
 
@@ -1098,8 +1292,8 @@ const Timeline = memo(function Timeline({
       keyboardShouldPersistTaps="handled"
       contentContainerStyle={styles.timeline}
       ListEmptyComponent={
-        // Inverted list: flip the empty state back upright.
-        !loaded ? undefined : <View style={[styles.empty, { transform: [{ scaleY: -1 }] }]}>
+        // The list flips its empty state back upright by itself (inversionStyle in VirtualizedList).
+        !loaded ? undefined : <View style={styles.empty}>
           <Text style={styles.emptyIcon}>🔓</Text>
           <Text style={styles.emptyTitle}>Coffre ouvert</Text>
           <Text style={[type.dim, { textAlign: 'center' }]}>
@@ -1181,6 +1375,8 @@ const styles = StyleSheet.create({
   sheetBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', padding: space.lg },
   sheet: { backgroundColor: colors.surface, borderRadius: 12, padding: space.lg, gap: space.md, borderWidth: 1, borderColor: colors.border },
   sheetClose: { alignSelf: 'center', padding: space.sm },
+  wordsLink: { marginTop: space.md, paddingVertical: space.sm, paddingHorizontal: space.md },
+  wordsLinkText: { color: colors.accentFg, fontFamily: fonts.medium, fontSize: 15 },
   request: { gap: space.sm, paddingTop: space.md, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
   requestName: { ...type.heading, fontSize: 17 },
   requestWarning: { color: colors.danger },

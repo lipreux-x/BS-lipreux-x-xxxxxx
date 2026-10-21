@@ -83,13 +83,32 @@ export interface VoiceBody {
   replyTo?: ReplyRef;
 }
 
+/**
+ * A story: a photo shown in the group's story strip (not in the chat) for 24
+ * hours. Same encryption as an image; the server is told to expire the
+ * message (and the file) after STORY_TTL_SECONDS. Cannot be a reply.
+ */
+export interface StoryBody {
+  kind: 'story';
+  attachmentId: string;
+  fileKey: string; // base64url, 32 bytes
+  mime: 'image/jpeg';
+  width: number;
+  height: number;
+  size: number; // encrypted blob size
+  preview?: string; // tiny JPEG (base64url) shown blurred while the full image loads
+}
+
 export interface TextBody {
   kind: 'text';
   text: string;
   replyTo?: ReplyRef;
 }
 
-export type MessageBody = TextBody | ImageBody | VoiceBody;
+export type MessageBody = TextBody | ImageBody | VoiceBody | StoryBody;
+
+/** How long a story lives, on the server and on the phones. */
+export const STORY_TTL_SECONDS = 24 * 60 * 60;
 
 export const MAX_EXCERPT = 140;
 export const MAX_VOICE_MS = 5 * 60 * 1000;
@@ -101,7 +120,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** The excerpt to quote for a message: its text cut to MAX_EXCERPT, empty for an image or a voice message. */
 export function replyExcerpt(body: MessageBody): Pick<ReplyRef, 'excerpt' | 'image' | 'voice'> {
-  if (body.kind === 'image') return { excerpt: '', image: true };
+  if (body.kind === 'image' || body.kind === 'story') return { excerpt: '', image: true };
   if (body.kind === 'voice') return { excerpt: '', voice: true };
   const flat = body.text.replace(/\s+/g, ' ').trim();
   return { excerpt: flat.length > MAX_EXCERPT ? flat.slice(0, MAX_EXCERPT - 1) + '…' : flat };
@@ -116,6 +135,10 @@ export function encodeMessageBody(body: MessageBody): string {
   if (body.kind === 'voice') {
     const { kind, attachmentId, fileKey, mime, durationMs, size, waveform, replyTo } = body;
     return STRUCTURED_PREFIX + JSON.stringify({ kind, attachmentId, fileKey, mime, durationMs, size, waveform, replyTo });
+  }
+  if (body.kind === 'story') {
+    const { kind, attachmentId, fileKey, mime, width, height, size, preview } = body;
+    return STRUCTURED_PREFIX + JSON.stringify({ kind, attachmentId, fileKey, mime, width, height, size, preview });
   }
   const { kind, attachmentId, fileKey, mime, width, height, size, preview, replyTo } = body;
   return STRUCTURED_PREFIX + JSON.stringify({ kind, attachmentId, fileKey, mime, width, height, size, preview, replyTo });
@@ -194,26 +217,27 @@ export function parseMessageBody(plaintext: string): MessageBody | null {
     }
     const dim = (n: unknown) => typeof n === 'number' && Number.isInteger(n) && n > 0 && n <= 20_000;
     if (
-      v.kind !== 'image' ||
+      (v.kind !== 'image' && v.kind !== 'story') ||
       !fileOk(v) ||
       v.mime !== 'image/jpeg' ||
       !dim(v.width) ||
       !dim(v.height) ||
-      (v.preview !== undefined && (typeof v.preview !== 'string' || v.preview.length > MAX_PREVIEW_CHARS))
+      (v.preview !== undefined && (typeof v.preview !== 'string' || v.preview.length > MAX_PREVIEW_CHARS)) ||
+      (v.kind === 'story' && replyTo) // a story answers nothing
     ) {
       return null;
     }
-    return {
-      kind: 'image',
+    const picture = {
       attachmentId: v.attachmentId as string,
       fileKey: v.fileKey as string,
-      mime: 'image/jpeg',
+      mime: 'image/jpeg' as const,
       width: v.width as number,
       height: v.height as number,
       size: v.size as number,
       ...(v.preview !== undefined && { preview: v.preview as string }),
-      ...reply,
     };
+    if (v.kind === 'story') return { kind: 'story', ...picture };
+    return { kind: 'image', ...picture, ...reply };
   } catch {
     return null;
   }

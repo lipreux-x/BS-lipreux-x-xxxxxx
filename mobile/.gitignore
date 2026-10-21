@@ -39,3 +39,8 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# Native module build output (expo run:android)
+/modules/bs-native/android/.cxx
+/modules/bs-native/android/.gradle
+/modules/bs-native/android/build

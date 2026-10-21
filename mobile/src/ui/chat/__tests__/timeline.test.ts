@@ -1,4 +1,4 @@
-import { buildTimeline, countdownLabel, dateTimeLabel, dayLabel, dayRange, timeLabel } from '../timeline';
+import { agoLabel, buildTimeline, countdownLabel, dateTimeLabel, dayLabel, dayRange, timeLabel } from '../timeline';
 
 const now = new Date(2026, 9, 19, 15, 0); // Mon 19 Oct 2026, 15:00 local
 const at = (d: number, h: number, m: number) => new Date(2026, 9, d, h, m);
@@ -21,6 +21,15 @@ describe('self-destruct dates', () => {
     expect(countdownLabel(at(19, 15, 12), now)).toBe('dans 12 min');
     expect(countdownLabel(at(20, 20, 0), now)).toBe('dans 29 h');
     expect(countdownLabel(at(26, 15, 0), now)).toBe('dans 7 j');
+  });
+});
+
+describe('stories', () => {
+  it('says how long ago a story was posted', () => {
+    expect(agoLabel(new Date(now.getTime() - 20_000), now)).toBe('à l’instant');
+    expect(agoLabel(at(19, 14, 48), now)).toBe('il y a 12 min');
+    expect(agoLabel(at(19, 9, 30), now)).toBe('il y a 5 h');
+    expect(agoLabel(at(17, 15, 0), now)).toBe('il y a 2 j');
   });
 });
 
