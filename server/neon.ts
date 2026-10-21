@@ -19,7 +19,11 @@ export default defineConfig({
     'purge-expired': {
       type: 'schedule',
       function: 'api',
-      cron: '0 * * * *', // hourly: delete expired ephemeral messages and self-destructed groups
+      // Every 6 hours: delete expired ephemeral messages and self-destructed
+      // groups. Expired rows are already invisible to every query, so the
+      // purge only reclaims space; each run wakes the compute for ~5 min
+      // (scale-to-zero timer), so hourly would burn ~16 CU-hours a month.
+      cron: '0 */6 * * *',
       functionPath: '/internal/purge',
     },
   },

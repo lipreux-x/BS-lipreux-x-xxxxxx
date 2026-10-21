@@ -10,6 +10,11 @@ import type { WireMessage } from './api';
  * dozes, the network changes): the server pings every 25 s, so a socket
  * silent for longer than SILENT_MS is replaced, checked on a timer and when
  * the app comes back to the foreground.
+ *
+ * In the background the socket is closed on purpose: nothing is drawn, push
+ * notifications ring, and the resync on return catches up. An open socket
+ * keeps the server's function and Postgres awake for the whole time, which is
+ * what the hosting bills (Neon: compute hours and function waiting hours).
  */
 
 const MIN_BACKOFF_MS = 1000;
@@ -31,6 +36,8 @@ export class RealtimeClient {
   private backoff = MIN_BACKOFF_MS;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private stopped = true;
+  /** App in the background: no socket until it comes back. */
+  private suspended = false;
   /** Bumped by every connect: one still waiting for its token gives up if another started since. */
   private attempt = 0;
   private lastFrameAt = 0;
@@ -48,9 +55,11 @@ export class RealtimeClient {
     this.stopped = false;
     this.watchdog = setInterval(() => this.reconnectIfSilent(), WATCH_MS);
     this.appState = AppState.addEventListener('change', (state) => {
-      if (state === 'active') this.reconnectIfSilent();
+      if (state === 'background') this.suspend();
+      else if (state === 'active') this.resume();
     });
-    void this.connect();
+    this.suspended = AppState.currentState === 'background';
+    if (!this.suspended) void this.connect();
   }
 
   stop(): void {
@@ -82,8 +91,30 @@ export class RealtimeClient {
     if (this.ws && Date.now() - this.lastFrameAt > SILENT_MS) this.reconnectNow();
   }
 
+  /** Background: close the socket and stop retrying until the app is back. */
+  private suspend(): void {
+    if (this.suspended) return;
+    this.suspended = true;
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+    const ws = this.ws;
+    this.ws = null;
+    ws?.close();
+  }
+
+  /** Foreground again: a fresh socket (its "ready" triggers the resync), or a check on the one still open. */
+  private resume(): void {
+    if (!this.suspended) {
+      this.reconnectIfSilent();
+      return;
+    }
+    this.suspended = false;
+    this.backoff = MIN_BACKOFF_MS;
+    void this.connect();
+  }
+
   private async connect(): Promise<void> {
-    if (this.stopped || this.ws) return;
+    if (this.stopped || this.suspended || this.ws) return;
     const attempt = ++this.attempt;
     let token: string;
     try {
@@ -92,7 +123,7 @@ export class RealtimeClient {
       if (attempt === this.attempt) this.scheduleReconnect();
       return;
     }
-    if (this.stopped || this.ws || attempt !== this.attempt) return;
+    if (this.stopped || this.suspended || this.ws || attempt !== this.attempt) return;
 
     const ws = new WebSocket(`${this.baseUrl.replace(/^http/, 'ws')}/ws?token=${encodeURIComponent(token)}`);
     this.ws = ws;
@@ -125,7 +156,7 @@ export class RealtimeClient {
   }
 
   private scheduleReconnect(): void {
-    if (this.stopped || this.timer) return;
+    if (this.stopped || this.suspended || this.timer) return;
     const delay = this.backoff;
     this.backoff = Math.min(this.backoff * 2, MAX_BACKOFF_MS);
     this.timer = setTimeout(() => {

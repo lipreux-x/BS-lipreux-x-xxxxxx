@@ -68,7 +68,7 @@ export const groups = pgTable(
     createdBy: uuid('created_by').references(() => profiles.id, { onDelete: 'set null' }),
     ephemeralSeconds: integer('ephemeral_seconds'),
     // Self-destructing group: past this date it is hidden from everyone, then
-    // deleted with all its messages and files by the hourly purge.
+    // deleted with all its messages and files by the purge (every 6 h).
     expiresAt: timestamp('expires_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
