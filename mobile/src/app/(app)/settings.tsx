@@ -1,7 +1,7 @@
 import { router, useFocusEffect } from 'expo-router';
 import { Bell, Bomb, CameraOff, FingerprintPattern, Lock, ShieldCheck, type LucideIcon, User, UserPlus } from 'lucide-react-native';
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, AppState, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { AppState, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { keyFingerprint } from '@/crypto';
 import { useUnlocked } from '@/session/SessionProvider';
@@ -13,12 +13,14 @@ import { Avatar, isAvatarId, type AvatarId } from '@/ui/avatars';
 import { AvatarPicker } from '@/ui/AvatarPicker';
 import { Button } from '@/ui/Button';
 import { timeLabel } from '@/ui/chat/timeline';
+import { useDialog } from '@/ui/Dialog';
 import { InviteCodeDisplay } from '@/ui/InviteCode';
 import { colors, mono, space, type } from '@/ui/theme';
 
 export default function Settings() {
   const { session, profiles, vault, lock, setScreenshotsBlocked } = useUnlocked();
   const insets = useSafeAreaInsets();
+  const [dialog, dialogView] = useDialog();
   // Per-phone security options, read from the Secure Store (undefined until then).
   const [wipeAfter, setWipeAfter] = useState<number | null | undefined>(undefined);
   const [noScreenshots, setNoScreenshots] = useState<boolean | undefined>(undefined);
@@ -51,7 +53,7 @@ export default function Settings() {
   function chooseWipeAfter(next: number | null) {
     const save = () => void vault.setWipeAfter(next).then(() => setWipeAfter(next));
     if (next === null) return save();
-    Alert.alert(
+    dialog(
       `Tout effacer après ${next} codes faux ?`,
       'Clés, groupes et messages seront effacés de ce téléphone, sans retour possible. Tu pourras revenir avec « Se connecter » (pseudo + mot de passe), puis le code et les mots-clés de chaque groupe.',
       [
@@ -93,7 +95,7 @@ export default function Settings() {
     try {
       setInvite(await session.api.createInvite());
     } catch (e) {
-      setError(e instanceof NetworkError ? 'Pas de réseau.' : e instanceof ApiError ? `Erreur (${e.code})` : 'Erreur');
+      setError(inviteError(e));
     } finally {
       setBusy(false);
     }
@@ -102,6 +104,7 @@ export default function Settings() {
   return (
     // Edge to edge: the last options stay above the navigation bar / home indicator.
     <ScrollView contentContainerStyle={[styles.screen, { paddingBottom: insets.bottom + space.md }]}>
+      {dialogView}
       <Section title="Profil" icon={User}>
         <View style={styles.profile}>
           <Avatar id={avatar ?? null} size={64} />
@@ -165,7 +168,7 @@ export default function Settings() {
         <SubTitle icon={Bell}>Notifications</SubTitle>
         <Text style={type.dim}>
           {push === 'on'
-            ? 'Activées. Elles disent seulement « uçer egassem » (« message reçu » à l’envers) : ni nom, ni groupe, ni texte. En touchant la notification, tu tapes tes codes, puis le groupe s’ouvre.'
+            ? 'Activées. Elles disent seulement « uçer egassem » (« message reçu » à l’envers) ou « esiuqer noitca » (« action requise » : une demande d’accès à accepter, un nouveau code à entrer) : ni nom, ni groupe, ni texte. En touchant la notification, tu tapes tes codes, puis le groupe s’ouvre.'
             : push === 'denied' || push === 'blocked'
               ? 'Refusées. Autorise les notifications de BaseSecrète dans les réglages du téléphone.'
               : push === 'unavailable'
@@ -199,6 +202,16 @@ export default function Settings() {
 }
 
 /** A row of choices; `value` undefined: not loaded yet (disabled). */
+/** Server limits (server src/app.ts): 3 invitations waiting at once, 10 a day. */
+function inviteError(e: unknown): string {
+  if (e instanceof NetworkError) return 'Pas de réseau.';
+  if (e instanceof ApiError && e.code === 'too_many_invites') {
+    return 'Tu as déjà 3 invitations pas encore utilisées. Donne-les, ou attends qu’elles expirent (2 h après leur création).';
+  }
+  if (e instanceof ApiError && e.code === 'too_many_requests') return 'Limite de 10 invitations par jour atteinte. Réessaie demain.';
+  return e instanceof ApiError ? `Erreur (${e.code})` : 'Erreur';
+}
+
 function Segment<T>({ options, value, onChange }: { options: { label: string; value: T }[]; value: T | undefined; onChange(v: T): void }) {
   return (
     <View style={styles.segment}>
