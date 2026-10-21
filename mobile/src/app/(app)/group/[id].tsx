@@ -66,6 +66,7 @@ import { quoteResolver, replyRefFor, resolveQuote, type Quote } from '@/ui/chat/
 import { SwipeToReply } from '@/ui/chat/SwipeToReply';
 import { buildTimeline, countdownLabel, dateTimeLabel, dayLabel, dayRange, timeLabel } from '@/ui/chat/timeline';
 import { CodeEntry, type CodeResult } from '@/ui/CodeEntry';
+import { NamePlate } from '@/ui/InviteCode';
 import { useDialog } from '@/ui/Dialog';
 import { FileBubble, LocalFile } from '@/ui/FileBubble';
 import { ImageBubble, LocalImage } from '@/ui/ImageBubble';
@@ -118,6 +119,8 @@ function securityMessage(e: unknown): string | null {
 function GroupUnlock({ groupId, onOpen }: { groupId: string; onOpen(g: OpenGroup): void }) {
   const { session, profiles } = useUnlocked();
   const [state, setState] = useState<GroupLockState | null>(null);
+  // The group's name, when this phone already holds its meta: printed on the keypad's plate.
+  const [name, setName] = useState<string | null>(null);
   // Signed in again on this phone: the keywords are needed once, with the code.
   const [keywords, setKeywords] = useState<string[] | null>(null);
   const [firstCode, setFirstCode] = useState<string | null>(null);
@@ -135,6 +138,7 @@ function GroupUnlock({ groupId, onOpen }: { groupId: string; onOpen(g: OpenGroup
       .then(({ items }) => {
         const g = items.find((x) => x.id === groupId);
         if (!g) setGone(true);
+        setName(g?.name ?? null);
         setState(g?.state ?? { kind: 'locked', codeChanged: false });
       })
       .catch(() => setState({ kind: 'locked', codeChanged: false }));
@@ -163,6 +167,10 @@ function GroupUnlock({ groupId, onOpen }: { groupId: string; onOpen(g: OpenGroup
       return securityMessage(e) ?? 'Impossible d’ouvrir le groupe';
     }
   }
+
+  // "Code" beside the group's name on the safe's screen; the plain title when the name is not known yet.
+  const codeHeader = name ? <NamePlate label="Code" name={name} /> : undefined;
+  const codeTitle = name ? undefined : 'Code du groupe';
 
   // The admin changed the keywords with the code: the new ones are typed first, then the code.
   if (newWords && !keywords) {
@@ -293,7 +301,8 @@ function GroupUnlock({ groupId, onOpen }: { groupId: string; onOpen(g: OpenGroup
           <CodeEntry
             key="code"
             initialError={mismatch ? 'Les codes ne correspondent pas' : undefined}
-            title="Code du groupe"
+            header={codeHeader}
+            title={codeTitle}
             subtitle="La clé est arrivée. Entre le code du groupe pour la protéger sur ce téléphone."
             onComplete={async (code) => {
               setFirstCode(code);
@@ -328,7 +337,8 @@ function GroupUnlock({ groupId, onOpen }: { groupId: string; onOpen(g: OpenGroup
     <View style={styles.center}>
       <Stack.Screen options={{ title: 'Groupe verrouillé' }} />
       <CodeEntry
-        title="Code du groupe"
+        header={codeHeader}
+        title={codeTitle}
         subtitle={codeChanged ? (keywords ? 'Nouveaux mots-clés notés : tape le nouveau code.' : 'L’admin a changé le code : tape le nouveau.') : undefined}
         onComplete={attempt}
         lockedForMs={lockedFor}
