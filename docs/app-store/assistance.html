@@ -1,0 +1,230 @@
+<title>Assistance BaseSecrète</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chivo:wght@400;600;800&family=Chivo+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #000000;
+    --plate: #0d0d0d;
+    --plate-2: #151716;
+    --rule: #2a2a2a;
+    --text: #f2f3f3;
+    --dim: #8f969b;
+    --steel: #9aa1a7;
+    --forest: #1e6b34;
+    --led: #3dd68c;
+    --body: "Chivo", "Helvetica Neue", Arial, sans-serif;
+    --mono: "Chivo Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  }
+  html, body { background: var(--bg); color: var(--text); }
+  body {
+    font-family: var(--body);
+    font-size: 16px;
+    line-height: 1.6;
+    padding-inline: 20px;
+    padding-block: 0 64px;
+  }
+  .wrap { max-width: 720px; margin: 0 auto; display: grid; gap: 48px; }
+  header { padding-block: 56px 8px; display: grid; gap: 20px; }
+  .brand { display: flex; align-items: center; gap: 14px; }
+  .mark {
+    width: 44px; height: 44px; border-radius: 10px;
+    background: linear-gradient(145deg, #2b2f32, #121314);
+    border: 1px solid #3a3f43;
+    display: grid; place-items: center;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.06);
+  }
+  .mark span { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--steel); }
+  .brand b { font-weight: 800; font-size: 20px; letter-spacing: .01em; }
+  .lcd {
+    font-family: var(--mono); font-size: 12px; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--led); display: inline-flex; align-items: center; gap: 8px;
+  }
+  .lcd::before {
+    content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--led);
+    box-shadow: 0 0 8px var(--led);
+  }
+  h1 { font-size: clamp(34px, 7vw, 52px); line-height: 1.05; font-weight: 800; margin: 0; text-wrap: balance; letter-spacing: -.01em; }
+  .lede { color: var(--dim); font-size: 18px; margin: 0; max-width: 60ch; }
+
+  .contact {
+    background: var(--plate);
+    border: 1px solid var(--rule);
+    border-radius: 14px;
+    padding: 24px;
+    display: grid; gap: 14px;
+  }
+  .contact h2 { margin: 0; font-size: 13px; font-family: var(--mono); font-weight: 500; letter-spacing: .14em; text-transform: uppercase; color: var(--steel); }
+  .mailrow { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+  .mail { font-family: var(--mono); font-size: clamp(17px, 4.4vw, 22px); color: var(--text); user-select: all; word-break: break-all; }
+  button.copy {
+    font: 600 14px var(--body); color: #fff; background: var(--forest);
+    border: 0; border-radius: 8px; padding: 9px 14px; cursor: pointer;
+  }
+  button.copy:focus-visible { outline: 2px solid var(--led); outline-offset: 2px; }
+  .contact p { margin: 0; color: var(--dim); font-size: 15px; }
+
+  section { display: grid; gap: 4px; }
+  section > h2 {
+    font-family: var(--mono); font-size: 13px; font-weight: 500; letter-spacing: .14em;
+    text-transform: uppercase; color: var(--steel); margin: 0 0 8px;
+  }
+  details { border-top: 1px solid var(--rule); }
+  details:last-of-type { border-bottom: 1px solid var(--rule); }
+  summary {
+    list-style: none; cursor: pointer; padding: 18px 36px 18px 0; position: relative;
+    font-weight: 600; font-size: 17px;
+  }
+  summary::-webkit-details-marker { display: none; }
+  summary::after {
+    content: "+"; position: absolute; right: 4px; top: 14px; font-family: var(--mono);
+    font-size: 22px; color: var(--steel);
+  }
+  details[open] summary::after { content: "×"; }
+  summary:focus-visible { outline: 2px solid var(--led); outline-offset: 2px; }
+  .answer { padding: 0 0 20px; color: #c9cdd0; max-width: 62ch; }
+  .answer p { margin: 0 0 10px; }
+  .answer p:last-child { margin: 0; }
+  .answer strong { color: var(--text); }
+  .flip { font-family: var(--mono); color: var(--led); }
+
+  footer { color: var(--dim); font-size: 14px; display: flex; flex-wrap: wrap; gap: 8px 20px; border-top: 1px solid var(--rule); padding-top: 20px; }
+  footer a { color: var(--steel); }
+  @media (prefers-reduced-motion: no-preference) {
+    .lcd::before { animation: blink 2.4s ease-in-out infinite; }
+    @keyframes blink { 50% { opacity: .35; } }
+  }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="brand"><div class="mark" aria-hidden="true"><span></span></div><b>BaseSecrète</b></div>
+    <span class="lcd">Assistance</span>
+    <h1>Une question sur ton coffre ?</h1>
+    <p class="lede">BaseSecrète est une messagerie privée, chiffrée de bout en bout, réservée à un petit cercle d'amis. Tu trouveras ici les réponses aux questions les plus courantes, et comment nous écrire.</p>
+  </header>
+
+  <div class="contact">
+    <h2>Nous écrire</h2>
+    <div class="mailrow">
+      <span class="mail" id="mail">maxall-dev@outlook.com</span>
+      <button class="copy" id="copy" type="button">Copier l'adresse</button>
+    </div>
+    <p>Une réponse sous 72 heures en général. N'envoie jamais ton code, tes mots clés ni ton mot de passe : personne n'en a besoin pour t'aider.</p>
+  </div>
+
+  <section>
+    <h2>Entrer dans l'app</h2>
+    <details>
+      <summary>Comment créer un compte ?</summary>
+      <div class="answer">
+        <p>Il n'y a pas d'inscription publique. Un membre crée une invitation depuis ses Réglages et te donne le code de 16 caractères, valable 2 heures.</p>
+        <p>Dans l'app, choisis <strong>Créer un compte</strong>, tape l'invitation, ton pseudo et un mot de passe, puis choisis ton code app à 6 chiffres.</p>
+      </div>
+    </details>
+    <details>
+      <summary>Comment rejoindre un groupe ?</summary>
+      <div class="answer">
+        <p>Demande en vrai à un membre le code du groupe et ses trois mots clés. Entre ces informations dans l'app : cela envoie une demande.</p>
+        <p>Un admin du groupe l'accepte depuis son téléphone, après avoir comparé avec toi ton numéro de sécurité (Réglages, Mon numéro de sécurité).</p>
+      </div>
+    </details>
+    <details>
+      <summary>J'ai changé de téléphone</summary>
+      <div class="answer">
+        <p>Installe l'app, choisis <strong>Se connecter</strong> et tape ton pseudo et ton mot de passe. Choisis ensuite un nouveau code app.</p>
+        <p>Chaque groupe te redemandera son code et ses mots clés : ils ne sont jamais gardés par le serveur.</p>
+      </div>
+    </details>
+  </section>
+
+  <section>
+    <h2>Codes et mots de passe</h2>
+    <details>
+      <summary>J'ai oublié mon code app</summary>
+      <div class="answer">
+        <p>Le code app ne quitte jamais ton téléphone, personne ne peut le retrouver. Supprime puis réinstalle l'app, et choisis <strong>Se connecter</strong> avec ton pseudo et ton mot de passe.</p>
+      </div>
+    </details>
+    <details>
+      <summary>J'ai oublié mon mot de passe</summary>
+      <div class="answer">
+        <p>Ton mot de passe protège une copie chiffrée de tes clés que le serveur ne peut pas ouvrir. Il ne peut donc pas être réinitialisé.</p>
+        <p>Tant que ton téléphone garde l'app, ton compte continue de marcher normalement. Si tu perds aussi le téléphone, il faudra une nouvelle invitation et un nouveau compte.</p>
+      </div>
+    </details>
+    <details>
+      <summary>J'ai oublié le code d'un groupe</summary>
+      <div class="answer">
+        <p>Les mots clés sont visibles dans la fiche du groupe une fois qu'il est ouvert. Pour le code, un membre du groupe peut te le redonner en vrai.</p>
+      </div>
+    </details>
+    <details>
+      <summary>Trop de codes faux</summary>
+      <div class="answer">
+        <p>Après 5 essais faux, l'app impose une attente qui augmente (30 s, 1 min, 5 min, 15 min, 1 h).</p>
+        <p>Si tu as activé l'autodestruction dans les Réglages, l'app efface tout ce qu'elle garde sur le téléphone au 10e ou au 20e code faux. Tu reviens ensuite avec <strong>Se connecter</strong>.</p>
+      </div>
+    </details>
+  </section>
+
+  <section>
+    <h2>Dans l'app</h2>
+    <details>
+      <summary>Que veut dire « <span class="flip">uçer egassem</span> » ?</summary>
+      <div class="answer">
+        <p>C'est « message reçu » écrit à l'envers. Les notifications de BaseSecrète n'affichent jamais de nom, de groupe ni de texte. En la touchant, tu ouvres le coffre puis la bonne conversation.</p>
+      </div>
+    </details>
+    <details>
+      <summary>Ouvrir l'app avec mon empreinte</summary>
+      <div class="answer">
+        <p>Réglages, Sécurité, Empreinte digitale, Activer. L'option n'apparaît que sur un téléphone avec un capteur d'empreinte (Touch ID sur iPhone). La reconnaissance faciale n'est pas utilisée.</p>
+        <p>Le code app reste demandé si tu ne l'as pas tapé depuis 48 heures, et chaque groupe demande toujours son code.</p>
+      </div>
+    </details>
+    <details>
+      <summary>Les vocaux ne s'enregistrent pas</summary>
+      <div class="answer">
+        <p>Vérifie que BaseSecrète a accès au micro : Réglages de l'iPhone, BaseSecrète, Micro. Le micro sert uniquement à enregistrer les vocaux que tu envoies.</p>
+      </div>
+    </details>
+  </section>
+
+  <section>
+    <h2>Compte et signalement</h2>
+    <details>
+      <summary>Signaler un membre ou un contenu</summary>
+      <div class="answer">
+        <p>Les admins d'un groupe peuvent retirer un membre depuis la fiche du groupe. Il est alors banni et la clé du groupe change tout de suite.</p>
+        <p>Pour signaler un abus, envoie un message à l'adresse en haut de cette page avec le pseudo concerné. Comme tout est chiffré, nous ne voyons pas les messages : décris ce qui s'est passé.</p>
+      </div>
+    </details>
+    <details>
+      <summary>Supprimer mon compte</summary>
+      <div class="answer">
+        <p>Envoie un message à l'adresse en haut de cette page en indiquant ton pseudo. Nous supprimons ton compte et tout ce que le serveur garde à ton sujet sous 30 jours.</p>
+        <p>Sur le téléphone, supprimer l'app efface ses données.</p>
+      </div>
+    </details>
+  </section>
+
+  <footer>
+    <span>BaseSecrète, 2026</span>
+    <a href="https://claude.ai/artifact/JHLnoKzzVYr7vyDmVGzX59" id="privacy-link">Politique de confidentialité</a>
+  </footer>
+</div>
+
+<script>
+  document.getElementById('copy').addEventListener('click', function () {
+    var btn = this, text = document.getElementById('mail').textContent;
+    var done = function () { btn.textContent = 'Adresse copiée'; setTimeout(function () { btn.textContent = "Copier l'adresse"; }, 2000); };
+    var fallback = function () {
+      var r = document.createRange(); r.selectNodeContents(document.getElementById('mail'));
+      var s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+      btn.textContent = 'Adresse sélectionnée';
+    };
+    try { navigator.clipboard.writeText(text).then(done, fallback); } catch (e) { fallback(); }
+  });
+</script>

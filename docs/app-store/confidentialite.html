@@ -1,0 +1,168 @@
+<title>Confidentialité BaseSecrète</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chivo:wght@400;600;800&family=Chivo+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #000000;
+    --plate: #0d0d0d;
+    --rule: #2a2a2a;
+    --text: #f2f3f3;
+    --body-text: #c9cdd0;
+    --dim: #8f969b;
+    --steel: #9aa1a7;
+    --forest: #1e6b34;
+    --led: #3dd68c;
+    --red: #e5484d;
+    --body: "Chivo", "Helvetica Neue", Arial, sans-serif;
+    --mono: "Chivo Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  }
+  html, body { background: var(--bg); color: var(--text); }
+  body { font-family: var(--body); font-size: 16px; line-height: 1.65; padding-inline: 20px; padding-block: 0 64px; }
+  .wrap { max-width: 760px; margin: 0 auto; display: grid; gap: 44px; }
+  header { padding-block: 56px 0; display: grid; gap: 20px; }
+  .brand { display: flex; align-items: center; gap: 14px; }
+  .mark {
+    width: 44px; height: 44px; border-radius: 10px;
+    background: linear-gradient(145deg, #2b2f32, #121314); border: 1px solid #3a3f43;
+    display: grid; place-items: center; box-shadow: inset 0 1px 0 rgba(255,255,255,.06);
+  }
+  .mark span { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--steel); }
+  .brand b { font-weight: 800; font-size: 20px; }
+  .lcd { font-family: var(--mono); font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--led); display: inline-flex; align-items: center; gap: 8px; }
+  .lcd::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--led); box-shadow: 0 0 8px var(--led); }
+  h1 { font-size: clamp(32px, 6.5vw, 48px); line-height: 1.08; font-weight: 800; margin: 0; text-wrap: balance; letter-spacing: -.01em; }
+  .lede { color: var(--dim); font-size: 18px; margin: 0; max-width: 62ch; }
+  .meta { font-family: var(--mono); font-size: 13px; color: var(--dim); }
+
+  section { display: grid; gap: 12px; }
+  h2 { font-size: 22px; line-height: 1.25; margin: 0; font-weight: 800; text-wrap: balance; }
+  .num { font-family: var(--mono); font-size: 13px; color: var(--steel); letter-spacing: .1em; display: block; margin-bottom: 4px; font-weight: 400; }
+  p, li { color: var(--body-text); max-width: 66ch; }
+  p { margin: 0; }
+  ul { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
+  strong { color: var(--text); }
+
+  .ledger { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .col { background: var(--plate); border: 1px solid var(--rule); border-radius: 14px; padding: 20px; display: grid; gap: 12px; align-content: start; }
+  .col h3 { margin: 0; font-family: var(--mono); font-size: 12px; font-weight: 500; letter-spacing: .14em; text-transform: uppercase; display: flex; align-items: center; gap: 8px; }
+  .col h3::before { content: ""; width: 8px; height: 8px; border-radius: 50%; }
+  .col.sees h3 { color: var(--steel); }
+  .col.sees h3::before { background: var(--steel); }
+  .col.blind h3 { color: var(--led); }
+  .col.blind h3::before { background: var(--led); box-shadow: 0 0 8px var(--led); }
+  .col ul { padding: 0; list-style: none; gap: 8px; }
+  .col li { font-size: 15px; padding-top: 8px; border-top: 1px solid var(--rule); }
+  .col li:first-child { border-top: 0; padding-top: 0; }
+
+  .table-wrap { overflow-x: auto; border: 1px solid var(--rule); border-radius: 14px; }
+  table { border-collapse: collapse; width: 100%; min-width: 520px; font-size: 15px; }
+  th, td { text-align: left; padding: 12px 16px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  tr:last-child td { border-bottom: 0; }
+  th { font-family: var(--mono); font-size: 12px; font-weight: 500; letter-spacing: .12em; text-transform: uppercase; color: var(--steel); background: var(--plate); }
+  td { color: var(--body-text); }
+  td:first-child { color: var(--text); font-weight: 600; }
+
+  .mail { font-family: var(--mono); color: var(--text); user-select: all; word-break: break-all; }
+  footer { color: var(--dim); font-size: 14px; display: flex; flex-wrap: wrap; gap: 8px 20px; border-top: 1px solid var(--rule); padding-top: 20px; }
+  footer a { color: var(--steel); }
+  @media (max-width: 560px) { .ledger { grid-template-columns: 1fr; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="brand"><div class="mark" aria-hidden="true"><span></span></div><b>BaseSecrète</b></div>
+    <span class="lcd">Politique de confidentialité</span>
+    <h1>Ce que nous voyons, et surtout ce que nous ne voyons pas</h1>
+    <p class="lede">BaseSecrète chiffre tes messages, photos et vocaux sur ton téléphone avant qu'ils en partent. Le serveur ne garde que ce qu'il faut pour les acheminer, et ne peut pas lire leur contenu.</p>
+    <span class="meta">En vigueur le 20 octobre 2026</span>
+  </header>
+
+  <section>
+    <h2><span class="num">1</span>Qui est responsable</h2>
+    <p>BaseSecrète est éditée par Maxence Allier, responsable du traitement des données décrites ici. Pour toute question ou demande : <span class="mail">maxall-dev@outlook.com</span></p>
+  </section>
+
+  <section>
+    <h2><span class="num">2</span>En un coup d'œil</h2>
+    <div class="ledger">
+      <div class="col sees">
+        <h3>Le serveur voit</h3>
+        <ul>
+          <li>Ton pseudo et l'icône choisie comme photo de profil</li>
+          <li>Tes clés publiques</li>
+          <li>Les identifiants des groupes dont tu es membre</li>
+          <li>L'heure et la taille des messages chiffrés</li>
+          <li>Les demandes d'entrée en attente</li>
+          <li>Le jeton de notification de ton téléphone</li>
+        </ul>
+      </div>
+      <div class="col blind">
+        <h3>Le serveur ne voit jamais</h3>
+        <ul>
+          <li>Le contenu des messages, photos et vocaux</li>
+          <li>Le nom et l'image des groupes</li>
+          <li>Ton code app, les codes et mots clés des groupes</li>
+          <li>Ton mot de passe</li>
+          <li>Tes clés privées et les clés des groupes</li>
+          <li>Ta position, tes contacts, ton nom réel, ton numéro</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">3</span>Les données conservées par le serveur</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Donnée</th><th>Pourquoi</th><th>Combien de temps</th></tr></thead>
+        <tbody>
+          <tr><td>Pseudo, icône de profil, clés publiques</td><td>Identifier ton compte et permettre aux membres de tes groupes de vérifier tes messages</td><td>Tant que le compte existe</td></tr>
+          <tr><td>Copie chiffrée de tes clés</td><td>Te permettre de retrouver ton compte sur un nouveau téléphone. Elle est scellée par ton mot de passe, que le serveur ne connaît pas</td><td>Tant que le compte existe</td></tr>
+          <tr><td>Appartenance aux groupes</td><td>Distribuer les messages aux bons membres</td><td>Tant que tu es membre</td></tr>
+          <tr><td>Messages, photos et vocaux chiffrés</td><td>Les remettre aux membres du groupe, y compris hors connexion</td><td>Jusqu'à leur suppression. Les messages éphémères sont supprimés après 24 h ou 7 jours selon le réglage du groupe</td></tr>
+          <tr><td>Jeton de notification</td><td>Prévenir ton téléphone qu'un message est arrivé</td><td>Jusqu'à la désinstallation de l'app ou la désactivation des notifications</td></tr>
+          <tr><td>Essais de connexion et d'entrée dans un groupe</td><td>Bloquer les tentatives de deviner un mot de passe ou un code</td><td>24 heures</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Les photos sont recompressées avant l'envoi, ce qui retire leurs métadonnées (position, modèle de l'appareil). Une photo envoyée mais jamais rattachée à un message est supprimée après 24 heures.</p>
+  </section>
+
+  <section>
+    <h2><span class="num">4</span>Ce qui reste sur ton téléphone</h2>
+    <p>Tes clés privées, ton code app et les clés des groupes ne quittent jamais ton téléphone. Les messages gardés pour la lecture hors connexion y sont stockés chiffrés. L'app n'utilise ni la caméra, ni la localisation, ni tes contacts.</p>
+    <ul>
+      <li><strong>Micro</strong> : uniquement pour enregistrer les vocaux que tu envoies.</li>
+      <li><strong>Photos</strong> : pour choisir les photos que tu envoies, et enregistrer dans ta galerie celles que tu décides de télécharger.</li>
+      <li><strong>Empreinte</strong> : la vérification est faite par le système du téléphone. L'app ne reçoit jamais ton empreinte.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2><span class="num">5</span>Prestataires</h2>
+    <p>Nous ne vendons aucune donnée et n'affichons aucune publicité. BaseSecrète n'intègre aucun outil d'analyse ni de suivi.</p>
+    <ul>
+      <li><strong>Neon</strong> héberge la base de données et les fichiers chiffrés, dans l'Union européenne.</li>
+      <li><strong>Expo, Apple et Google</strong> acheminent les notifications. Ils reçoivent uniquement la phrase « uçer egassem » (message reçu, écrit à l'envers) et un identifiant aléatoire du groupe. Aucun nom ni contenu.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2><span class="num">6</span>Tes droits</h2>
+    <p>Conformément au RGPD, tu peux demander l'accès à tes données, leur rectification ou leur suppression, et t'opposer à leur traitement. Envoie ta demande à <span class="mail">maxall-dev@outlook.com</span> en indiquant ton pseudo. Nous répondons sous 30 jours.</p>
+    <p>Supprimer ton compte efface du serveur ton profil, ta copie chiffrée de clés, ton jeton de notification et ton appartenance aux groupes. Tu peux aussi adresser une réclamation à la CNIL (cnil.fr).</p>
+  </section>
+
+
+  <section>
+    <h2><span class="num">7</span>Modifications</h2>
+    <p>Si cette politique change, la nouvelle version sera publiée sur cette page avec sa date d'entrée en vigueur.</p>
+  </section>
+
+  <footer>
+    <span>BaseSecrète, 2026</span>
+    <a href="https://claude.ai/artifact/G9JCXy2DPGZNzMq46phW1K" id="support-link">Assistance</a>
+  </footer>
+</div>

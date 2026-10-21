@@ -4,9 +4,22 @@
 
 ## Derniers ajouts et changements
 
+### Stories (20/10)
+
+- **Une bande « STORIES · 24 H »** en haut de chaque conversation, **repliée** par défaut : on ne voit que son bord (LED verte s'il y a des nouvelles, « 3 NOUVELLES », touche verte « + »). On la **tire vers le bas** (ou on touche le bord) et elle se déroule comme un **rideau de fer** (lames d'acier, fentes d'aération décalées comme la grille d'un coffre-fort, le bord replié en est la barre du bas avec sa poignée) **sur les messages, jusqu'à la zone de saisie** (jamais par-dessus) : c'est **la photo elle-même qui descend avec la poignée** et elle est tout le rideau, jusqu'à la zone de saisie : la photo **entière** (jamais recadrée), aussi grande que possible et centrée, et derrière elle la même photo floutée qui remplit le reste, comme une story (la grille d'acier ne se voit plus que sans story). **Toucher la moitié droite** passe à la suivante, **la moitié gauche** revient à la précédente (un glissement horizontal marche aussi) ; après la dernière, un toucher à droite replie le rideau. Ouverte directement sur la première pas encore vue, de la plus ancienne à la plus récente ; la barre affiche « 2 / 5 ». Sans story, le **logo (l'œil à la serrure dorée) + « Story »** sur une plaque sombre au centre du rideau, qu'on touche pour en ajouter une. Chaque photo porte l'avatar, le pseudo, « il y a 2 h » et les heures restantes. Un court tirage (quelques dizaines de pixels) suffit à l'ouvrir, elle ne rebondit pas comme un « tirer pour rafraîchir » ; on la replie en la remontant (ou en touchant la barre). Les bandeaux (hors ligne, autodestruction, demandes d'accès, admins changés) restent au-dessus de la barre : le rideau ne les recouvre jamais. Testé sur l'émulateur Android (Pixel 9, build dev) avec trois photos de formats différents. Le rideau est une translation animée nativement (pas une hauteur animée) : au repliage, la barre ne saute plus en bas de l'écran avant de remonter (un re-rendu recréait le nœud animé à partir d'une valeur périmée).
+- **Ajouter une story** : « + » → panneau avec **Prendre une photo** ou **Choisir dans la galerie**, puis aperçu plein écran et « Publier la story ». La photo part par la même file d'envoi que les images (hors ligne : elle attend le réseau ; refus du serveur : « ÉCHEC » et LED rouge sur le bord de la bande, avec « Réessayer » ou « Abandonner »).
+- **Regarder** : la photo à l'écran compte comme vue. Un **appui long** l'ouvre en plein écran, où **Enregistrer dans la galerie** est possible, avec le rappel que la photo n'y est plus chiffrée et ne disparaît plus. (Remplace la bande de 200 px avec les petites cartes côte à côte du premier jet, et avant elle le visionneur plein écran façon Instagram avec défilement automatique.)
+- **Chiffrement** : identique aux images (recompression JPEG sans métadonnées, clé de fichier aléatoire, clé transportée dans un message de groupe chiffré et signé). Nouveau corps de message `kind: 'story'`. Le serveur reçoit `expiresInSeconds: 86400` et fixe la date de suppression à 24 h (ou moins si le groupe efface déjà plus vite) ; la purge (toutes les 6 h) supprime message et fichier. Le serveur ne sait pas que c'est une story, seulement que le message vit 24 h.
+- **Vu / pas vu** reste sur le téléphone (store local chiffré, `stories/<groupe>`), effacé avec le groupe. Pas de « vu par » envoyé aux autres.
+- Les stories ne sont **pas dans le fil** de la conversation et ne peuvent pas être citées en réponse. Elles ne sont visibles qu'une fois le groupe ouvert avec son code (la liste des groupes ne les montre pas : la clé n'est pas disponible avant).
+- **Permission caméra rétablie** (elle avait été retirée) : « BaseSecrète utilise l'appareil photo pour les stories et les photos que tu envoies, chiffrées, dans tes groupes. » Nouveau build nécessaire.
+- Tests : corps `story` (aller-retour, refus d'une réponse, validation comme une image), ordre de la bande, photo d'ouverture, tapes gauche/droite et taille de la photo dans le rideau (`ui/stories/stories.ts`), libellé « il y a… ».
+- Au passage : le texte « Coffre ouvert » d'une conversation vide s'affichait à l'envers (la liste inversée le remettait déjà à l'endroit, l'app le retournait une seconde fois). Corrigé.
+
 ### Notifications (20/10)
 
 - Un message reçu fait sonner le téléphone avec **une seule phrase : « uçer egassem »** (« message reçu » à l'envers). Pas de titre, pas de nom, pas de groupe, pas de texte du message.
+- Quand le groupe attend quelqu'un, la phrase est **« esiuqer noitca »** (« action requise ») : l'admin a une demande d'accès à accepter ou un membre est parti (la clé se renouvelle dès qu'il ouvre le groupe), le nouveau membre a été accepté et doit entrer le code du groupe, ou l'admin a changé le code et chacun doit entrer le nouveau.
 - **Toucher la notification** ouvre l'app sur l'écran du coffre : code app (ou empreinte), puis code du groupe, puis **directement la bonne conversation**.
 - Au plus une notification toutes les 30 s par téléphone : un groupe actif ne sonne pas sans arrêt.
 - La permission est demandée au premier déverrouillage. Réglages → Sécurité → Notifications montre l'état, avec un bouton si elles sont refusées.
@@ -18,7 +31,7 @@
 
 - **Micro corrigé** : l'option `microphonePermission: false` du sélecteur de photos retirait le micro de toute l'app. Sur Android, `RECORD_AUDIO` était supprimé, et sur iOS il manquait la phrase d'autorisation. Les vocaux ne pouvaient donc pas s'enregistrer. C'est corrigé.
 - **Lecture en arrière-plan retirée** : `FOREGROUND_SERVICE` et `FOREGROUND_SERVICE_MEDIA_PLAYBACK` ne sont plus demandés. Un vocal s'arrête quand on quitte l'app, qui de toute façon se masque.
-- Restent : internet, vibration, micro, biométrie, photos (lecture pour le sélecteur, écriture pour « Enregistrer dans la galerie »), notifications. La caméra est explicitement retirée.
+- Restent : internet, vibration, micro, biométrie, photos (lecture pour le sélecteur, écriture pour « Enregistrer dans la galerie »), notifications. La caméra, retirée à ce moment-là, est revenue avec les stories (voir plus haut).
 - À revoir avant le Play Store : `READ_MEDIA_IMAGES` (Google limite cette permission), et `SYSTEM_ALERT_WINDOW`, ajouté par le build de développement.
 
 ### Mot de passe affiché à l'envers (20/10)
@@ -104,7 +117,7 @@ Un audit (serveur, chiffrement, app) a trouvé deux failles critiques : le serve
 
 - **À la création**, une étape « Durée de vie » arrive entre les mots-clés et le code. Choix : permanent, 24 h, 3 jours, 1 semaine, 1 mois, puis réglage au jour près avec − / + (365 jours au maximum).
 - Un bandeau « AUTODESTRUCTION DANS 3 J » s'affiche dans la conversation. La liste des groupes montre « 💣 dans 3 j » et les réglages affichent la date.
-- **À la date prévue**, le serveur cache le groupe à tout le monde : plus de messages, et il ne peut plus être rejoint. La purge horaire supprime ensuite définitivement le groupe, ses membres, ses clés, ses messages, ses photos et ses tentatives d'adhésion.
+- **À la date prévue**, le serveur cache le groupe à tout le monde : plus de messages, et il ne peut plus être rejoint. La purge (toutes les 6 h) supprime ensuite définitivement le groupe, ses membres, ses clés, ses messages, ses photos et ses tentatives d'adhésion.
 - Sur les téléphones, les clés, le nom et les compteurs du groupe sont effacés. Une conversation ouverte affiche « Ce groupe n'existe plus ». C'est aussi le cas pour un groupe dont on a été retiré.
 - La date ne peut pas être changée après la création.
 
@@ -152,9 +165,19 @@ Le changement s'applique à tous les écrans de code : verrouillage, inscription
 - **Expo Go** : l'app tourne dans Expo Go grâce à une version 100 % JavaScript de la crypto.
 - **Couleur d'accent** : gris anthracite au lieu de l'or.
 
+### Coûts d'hébergement (Neon, plan Free)
+
+- Mesuré le 20/10 : 7 profils, 3 groupes, 92 messages, 12 fichiers (1,4 Mo). Base : ~1 Mo de données utiles sur 1 Go autorisé ; bucket : 1,4 Mo sur 5 Go. Le stockage n'est pas la contrainte (de l'ordre du million de messages texte, ou ~40 000 images, avant d'y toucher).
+- Ce qui compte, c'est le **temps éveillé** : 100 CU-heures de Postgres par mois (soit 400 h à 0,25 CU) et 400 h « waiting » de Function. Les deux se consomment tant qu'un WebSocket est ouvert (le serveur interroge Postgres chaque seconde pour ses clients connectés). Quota dépassé = compute suspendu jusqu'au mois suivant.
+- Réductions faites le 21/10 :
+  - L'app ferme son WebSocket quand elle passe en arrière-plan et le rouvre au retour (resync HTTP) ; les notifications push couvrent l'absence. Avant, un téléphone laissé sur une conversation gardait le serveur éveillé.
+  - Purge planifiée toutes les 6 h au lieu de chaque heure : chaque réveil coûte ~5 min de compute (délai de mise en veille), soit ~16 CU-h/mois pour le cron horaire, par branche déployée. Les données expirées sont déjà invisibles dans toutes les requêtes, la purge ne fait que libérer de la place.
+- Reste à surveiller dans la console Neon (page Usage du projet) : heures de Function et CU-heures. Au-delà du Free, le plan Launch facture 0,106 $/CU-h et 0,025 $/h de Function en attente, soit ~37 $/mois dans le pire cas (serveur éveillé 24 h/24).
+- La branche `dev` consomme le même quota : son cron et ses tests comptent aussi.
+
 ### Production (branche Neon `main`)
 
-- 20/10 : migrations `0000` à `0011` appliquées, API, bucket `attachments` et purge horaire déployés, avec des secrets propres à la prod (`server/.env.production`, jamais commité). Smoke test passé contre l'API déployée. Première invitation créée.
+- 20/10 : migrations `0000` à `0011` appliquées, API, bucket `attachments` et purge planifiée déployés, avec des secrets propres à la prod (`server/.env.production`, jamais commité). Smoke test passé contre l'API déployée. Première invitation créée.
 - API : `https://br-green-silence-bahz9z6m-api.compute.c-8.eu-central-1.aws.neon.tech/`.
 - Les profils EAS `preview` (APK Android à partager) et `production` (iOS, TestFlight) pointent sur cette API ; `development` reste sur `dev`.
 - Déployer : `neon deploy --branch main --env .env.production --no-env-pull` dans `server/`.
@@ -221,8 +244,8 @@ Le changement s'applique à tous les écrans de code : verrouillage, inscription
 | | Fonction | État |
 |---|---|---|
 | ✅ | Images et vocaux chiffrés | Images : envoi depuis la galerie (recompressées en JPEG, métadonnées GPS retirées), chiffrées avec une clé par fichier, stockées dans un bucket Neon privé, affichées en mémoire seulement, et enregistrables dans la galerie depuis la vue plein écran. Vocaux : bouton micro quand le champ est vide, enregistrement AAC mono 32 kb/s (5 min max), chiffrés comme les images (clé par fichier, même bucket, aucun changement serveur), forme d'onde dans le message chiffré, lecture au toucher. Comme sur les messageries courantes : toucher la forme d'onde saute à cet endroit, la glisser fait défiler ; bouton de vitesse 1× / 1,5× / 2× (gardée d'un vocal à l'autre pendant la session) ; un vocal terminé enchaîne sur le suivant de la conversation, jusqu'à une pause, un autre vocal lancé ou la sortie de la conversation. Le fichier de l'enregistreur est lu puis supprimé aussitôt ; pour l'écoute, l'audio déchiffré passe par un fichier temporaire du cache, supprimé au vocal suivant et au verrouillage (avec tout ce que l'enregistreur aurait laissé). Quitter l'app pendant un enregistrement l'annule. À tester sur téléphone (nouvelle build : module natif expo-audio). |
-| ✅ | Notifications push génériques | Fait : « uçer egassem » seulement ; le toucher demande les codes puis ouvre le groupe. Il manque les identifiants Firebase pour Android. |
-| ✅ | Messages éphémères | Fait : réglage admin dans les réglages du groupe, purge toutes les heures sur le serveur |
+| ✅ | Notifications push génériques | Fait : « uçer egassem » (message) et « esiuqer noitca » (demande d'accès, acceptation, nouveau code, départ d'un membre) ; le toucher demande les codes puis ouvre le groupe. Il manque les identifiants Firebase pour Android. |
+| ✅ | Messages éphémères | Fait : réglage admin dans les réglages du groupe, purge toutes les 6 h sur le serveur |
 | ✅ | Rotation de clé quand un membre part | Fait, avec « quitter » et « retirer un membre » |
 
 ### v0.3
