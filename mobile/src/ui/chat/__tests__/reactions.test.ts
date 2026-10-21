@@ -1,5 +1,5 @@
 import type { ReactionBody } from '@/crypto';
-import { myReaction, nextReaction, tallyReactions, type ReactionMessage } from '../reactions';
+import { moveKey, myReaction, nextReaction, orderCounts, reactionOrder, tallyReactions, withAlpha, type ReactionMessage } from '../reactions';
 
 const M1 = '1b9d6bcd-0000-4000-8000-0000000000aa';
 const M2 = '1b9d6bcd-0000-4000-8000-0000000000ab';
@@ -42,5 +42,30 @@ describe('a tap on a reaction', () => {
     expect(nextReaction(null, 'like')).toBe('like');
     expect(nextReaction('like', 'like')).toBeNull();
     expect(nextReaction('like', 'crown')).toBe('crown');
+  });
+});
+
+describe('the order of the keys', () => {
+  it('moves a key, keeps the others in place', () => {
+    expect(moveKey(['like', 'crown', 'money', 'fire', 'secret'], 0, 2)).toEqual(['crown', 'money', 'like', 'fire', 'secret']);
+    expect(moveKey(['like', 'crown', 'money', 'fire', 'secret'], 4, 0)).toEqual(['secret', 'like', 'crown', 'money', 'fire']);
+  });
+
+  it('reads a stored order, falls back to the palette on anything else', () => {
+    expect(reactionOrder(['secret', 'fire', 'money', 'crown', 'like'])).toEqual(['secret', 'fire', 'money', 'crown', 'like']);
+    expect(reactionOrder(['secret', 'fire'])).toEqual(['like', 'crown', 'money', 'fire', 'secret']);
+    expect(reactionOrder(null)).toEqual(['like', 'crown', 'money', 'fire', 'secret']);
+  });
+
+  it('sorts counts by it', () => {
+    const counts = [
+      { reaction: 'like' as const, count: 1, mine: false },
+      { reaction: 'fire' as const, count: 2, mine: true },
+    ];
+    expect(orderCounts(counts, ['fire', 'like', 'crown', 'money', 'secret']).map((c) => c.reaction)).toEqual(['fire', 'like']);
+  });
+
+  it('colours get an alpha', () => {
+    expect(withAlpha('#3DD68C', 0.5)).toBe('rgba(61,214,140,0.5)');
   });
 });

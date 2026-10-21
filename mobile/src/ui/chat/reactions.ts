@@ -15,6 +15,38 @@ export const REACTION_LABELS: Record<ReactionId, string> = {
   secret: 'Secret',
 };
 
+/** Each reaction's colour, in the safe's palette: LED green, keyhole gold, amber, ember, ice. */
+export const REACTION_COLORS: Record<ReactionId, string> = {
+  like: '#3DD68C',
+  crown: '#D3B03A',
+  money: '#E8A33D',
+  fire: '#F06A3A',
+  secret: '#8FB8E8',
+};
+
+/** "#RRGGBB" with an alpha, as rgba(). */
+export function withAlpha(hex: string, alpha: number): string {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`;
+}
+
+/** An order of the five chosen on this phone, checked (anything else: the palette's). */
+export function reactionOrder(v: unknown): ReactionId[] {
+  const ok = Array.isArray(v) && v.length === REACTIONS.length && REACTIONS.every((id) => v.includes(id));
+  return ok ? [...(v as ReactionId[])] : [...REACTIONS];
+}
+
+/** `order` with the key at `from` moved to `to`. */
+export function moveKey(order: ReactionId[], from: number, to: number): ReactionId[] {
+  const next = [...order];
+  const [k] = next.splice(from, 1);
+  next.splice(to, 0, k!);
+  return next;
+}
+
+/** Counts in the order chosen on this phone. */
+export const orderCounts = (counts: ReactionCount[], order: ReactionId[]) => [...counts].sort((a, b) => order.indexOf(a.reaction) - order.indexOf(b.reaction));
+
 export interface ReactionCount {
   reaction: ReactionId;
   count: number;

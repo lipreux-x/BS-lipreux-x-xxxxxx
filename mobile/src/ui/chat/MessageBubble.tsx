@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useRef, type ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Avatar, isAvatarId } from '../avatars';
 import { Led, type LedState } from '../Led';
@@ -19,6 +19,7 @@ const STATUS_LABEL: Record<DeliveryStatus, string> = { sending: 'Envoi en cours'
  * too, with the same delay: the bubble itself never sees it.
  */
 export const LONG_PRESS_MS = 300;
+const DOUBLE_TAP_MS = 300;
 
 /**
  * A message as a small plate of the safe: bevelled edges like the keypad
@@ -49,6 +50,7 @@ export function MessageBubble({
   onQuotePress,
   onLongPress,
   onReact,
+  onDoubleTap,
   children,
 }: {
   mine: boolean;
@@ -76,9 +78,21 @@ export function MessageBubble({
   onLongPress?(): void;
   /** Tap on one of the reactions under the bubble: the same one (toggle). */
   onReact?(id: ReactionId): void;
+  /** Two quick taps on the bubble: the first reaction of the phone's order. */
+  onDoubleTap?(): void;
   children: ReactNode;
 }) {
   const failed = status === 'failed';
+  const lastTap = useRef(0);
+  const tap = () => {
+    const now = Date.now();
+    if (now - lastTap.current < DOUBLE_TAP_MS) {
+      lastTap.current = 0;
+      onDoubleTap?.();
+    } else {
+      lastTap.current = now;
+    }
+  };
   const bubble = (
     <View style={[styles.column, mine ? styles.columnMine : styles.columnTheirs]}>
       {author ? (
@@ -87,8 +101,8 @@ export function MessageBubble({
         </Text>
       ) : null}
       <Pressable
-        disabled={!failed && !onLongPress}
-        onPress={failed ? onRetry : undefined}
+        disabled={!failed && !onLongPress && !onDoubleTap}
+        onPress={failed ? onRetry : onDoubleTap ? tap : undefined}
         onLongPress={onLongPress}
         delayLongPress={LONG_PRESS_MS}
         accessibilityHint={failed ? 'Touche pour renvoyer' : onLongPress ? 'Appui long pour répondre' : undefined}

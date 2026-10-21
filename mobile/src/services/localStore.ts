@@ -249,4 +249,6 @@ export const records = {
   profiles: 'profiles',
   /** Contacts checked in person: user id -> public keys at the time. */
   verified: 'verified',
+  /** The five reaction keys in the order chosen on this phone: { order: ReactionId[] } (ui/chat/reactions). */
+  reactionOrder: 'reactions/order',
 };

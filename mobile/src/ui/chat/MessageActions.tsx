@@ -20,7 +20,9 @@ const HIDDEN_FALLBACK_MS = 600;
 export function MessageActions({
   target,
   reaction,
+  order,
   onReact,
+  onReorder,
   onReply,
   onClose,
   onHidden,
@@ -29,7 +31,11 @@ export function MessageActions({
   target: { quote: Quote; text: string | null } | null;
   /** My reaction to it, if any. */
   reaction?: ReactionId | null;
+  /** The five keys in this phone's order. */
+  order?: ReactionId[];
   onReact?(id: ReactionId): void;
+  /** A key dragged to a new place (long press, then slide). */
+  onReorder?(order: ReactionId[]): void;
   onReply(): void;
   onClose(): void;
   /** The panel is gone (see `ActionSheet`): the keyboard can come up for a reply. */
@@ -38,13 +44,15 @@ export function MessageActions({
   return (
     <ActionSheet visible={target !== null} onClose={onClose} onHidden={onHidden}>
       {target ? <QuoteBlock quote={target.quote} /> : null}
-      {onReact ? (
+      {onReact && order ? (
         <ReactionKeys
+          order={order}
           current={reaction ?? null}
           onPick={(id) => {
             onReact(id);
             onClose();
           }}
+          onReorder={(next) => onReorder?.(next)}
         />
       ) : null}
       <ActionKey

@@ -59,7 +59,7 @@ import { useVoiceRecorder, voiceCache, voicePlayer } from '@/services/voice';
 import { RealtimeClient } from '@/services/realtime';
 import { LockedOutError, WrongCodeError } from '@/services/vault';
 import { Composer } from '@/ui/chat/Composer';
-import { myReaction, nextReaction, tallyReactions, type ReactionCount } from '@/ui/chat/reactions';
+import { myReaction, nextReaction, orderCounts, reactionOrder, tallyReactions, type ReactionCount } from '@/ui/chat/reactions';
 import { ActionKey, ActionSheet, MessageActions } from '@/ui/chat/MessageActions';
 import { DaySeparator, MessageBubble, type DeliveryStatus } from '@/ui/chat/MessageBubble';
 import { quoteResolver, replyRefFor, resolveQuote, type Quote } from '@/ui/chat/replies';
@@ -696,16 +696,28 @@ function Chat({ groupId, group, onUpdate, onLocked }: { groupId: string; group: 
     () => (pending.some((p) => p.kind === 'story' || p.kind === 'reaction') ? pending.filter((p) => p.kind !== 'story' && p.kind !== 'reaction') : pending),
     [pending],
   );
-  // What each message got: every member's latest reaction, mine on their way included.
-  const reactionTally = useMemo(
-    () =>
-      tallyReactions(
-        messages.flatMap((m) => (m.reaction ? [{ senderId: m.senderId, seq: m.seq, reaction: m.reaction }] : [])),
-        pending.flatMap((p) => (p.kind === 'reaction' ? [p.reaction] : [])),
-        session.account.userId,
-      ),
-    [messages, pending, session.account.userId],
+  // The five reaction keys in the order chosen on this phone (long press in the panel), kept in the local store.
+  const [order, setOrder] = useState(() => reactionOrder(null));
+  useEffect(() => {
+    void keep(async (l) => setOrder(reactionOrder((await l.getRecord<{ order: unknown }>(records.reactionOrder))?.order)));
+  }, [keep]);
+  const reorder = useCallback(
+    (next: ReactionId[]) => {
+      setOrder(next);
+      void keep((l) => l.setRecord(records.reactionOrder, { order: next }));
+    },
+    [keep],
   );
+  // What each message got: every member's latest reaction, mine on their way included, in this phone's order.
+  const reactionTally = useMemo(() => {
+    const tally = tallyReactions(
+      messages.flatMap((m) => (m.reaction ? [{ senderId: m.senderId, seq: m.seq, reaction: m.reaction }] : [])),
+      pending.flatMap((p) => (p.kind === 'reaction' ? [p.reaction] : [])),
+      session.account.userId,
+    );
+    for (const [id, counts] of tally) tally.set(id, orderCounts(counts, order));
+    return tally;
+  }, [messages, pending, session.account.userId, order]);
   const storySending = pending.some((p) => p.kind === 'story' && !p.failed);
   const storyFailed = pending.find((p) => p.kind === 'story' && p.failed);
 
@@ -897,6 +909,8 @@ function Chat({ groupId, group, onUpdate, onLocked }: { groupId: string; group: 
     },
     [reactionTally],
   );
+  /** Two taps on a message: the first key of this phone's order (the same one again takes it back). */
+  const quickReact = useCallback((m: ChatMessage) => react(m, order[0]!), [react, order]);
 
   const renderContent = useCallback(
     (item: Line, onLongPress?: () => void) =>
@@ -1067,6 +1081,7 @@ function Chat({ groupId, group, onUpdate, onLocked }: { groupId: string; group: 
             onDayLongPress={eraseMenu}
             reactions={reactionTally}
             onReact={react}
+            onDoubleTap={quickReact}
           />
           <StoriesBand
             session={session}
@@ -1152,6 +1167,8 @@ function Chat({ groupId, group, onUpdate, onLocked }: { groupId: string; group: 
       <MessageActions
         target={pressed ? { quote: resolveQuote(replyRefFor(pressed)!, messages, session.account.userId), text: pressed.text } : null}
         reaction={pressed ? myReaction(reactionTally.get(pressed.id)) : null}
+        order={order}
+        onReorder={reorder}
         onReact={(id) => {
           if (pressed) react(pressed, id);
         }}
@@ -1295,6 +1312,7 @@ const Timeline = memo(function Timeline({
   onDayLongPress,
   reactions,
   onReact,
+  onDoubleTap,
 }: {
   listRef: React.RefObject<FlatList<Item> | null>;
   loaded: boolean;
@@ -1312,6 +1330,8 @@ const Timeline = memo(function Timeline({
   reactions: ReadonlyMap<string, ReactionCount[]>;
   /** Tap on a reaction under a message, or one of the keys in its panel. */
   onReact(m: ChatMessage, id: ReactionId): void;
+  /** Two quick taps on a delivered message: the first reaction of this phone's order. */
+  onDoubleTap(m: ChatMessage): void;
 }) {
   const { session } = useUnlocked();
   const me = session.account.userId;
@@ -1391,11 +1411,12 @@ const Timeline = memo(function Timeline({
           onLongPress={onLongPress}
           onReply={onReply}
           onReact={onReact}
+          onDoubleTap={onDoubleTap}
           onQuotePress={jumpTo}
         />
       );
     },
-    [highlight, renderContent, onRetry, onLongPress, onReply, onDayLongPress, jumpTo, onReact],
+    [highlight, renderContent, onRetry, onLongPress, onReply, onDayLongPress, jumpTo, onReact, onDoubleTap],
   );
 
   return (
@@ -1436,6 +1457,7 @@ const TimelineRow = memo(function TimelineRow({
   onLongPress,
   onReply,
   onReact,
+  onDoubleTap,
   onQuotePress,
 }: {
   line: Line;
@@ -1446,6 +1468,7 @@ const TimelineRow = memo(function TimelineRow({
   onLongPress(m: ChatMessage): void;
   onReply(m: ChatMessage): void;
   onReact(m: ChatMessage, id: ReactionId): void;
+  onDoubleTap(m: ChatMessage): void;
   /** Tap on the quote: to the original (by id). */
   onQuotePress(messageId: string): void;
 }) {
@@ -1470,6 +1493,7 @@ const TimelineRow = memo(function TimelineRow({
           onQuotePress={replyTo ? () => onQuotePress(replyTo.messageId) : undefined}
           onLongPress={longPress}
           onReact={message ? (id) => onReact(message, id) : undefined}
+          onDoubleTap={message ? () => onDoubleTap(message) : undefined}
         >
           {renderContent(line, longPress)}
         </MessageBubble>
