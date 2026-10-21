@@ -1,12 +1,12 @@
 import * as Haptics from 'expo-haptics';
-import { useEffect, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { Animated, AppState, Easing, StyleSheet, Text, View } from 'react-native';
 import { PinPad } from './PinPad';
 import { SafeDisplay, type SafeDisplayHandle } from './SafeDisplay';
 import { colors, space, type } from './theme';
 
 /**
- * Title + safe display + safe keypad. `onComplete` returns an error message to
+ * Title (or a free `header`, e.g. a name on the safe's screen) + safe display + safe keypad. `onComplete` returns an error message to
  * show (the display shakes, its LED goes red), null to move on, or an `open`
  * callback: the LED goes green for a beat, then `open` runs. While it runs, the
  * pad is disabled and the LED turns amber: Argon2id takes a moment on the phone.
@@ -20,6 +20,7 @@ const FADE_OUT_MS = 320;
 
 export function CodeEntry({
   title,
+  header,
   subtitle,
   length = 6,
   onComplete,
@@ -27,7 +28,9 @@ export function CodeEntry({
   initialError,
   fadeOut = false,
 }: {
-  title: string;
+  title?: string;
+  /** Shown in place of the title, stretched to the keypad's width. */
+  header?: ReactNode;
   subtitle?: string;
   length?: number;
   onComplete(code: string): Promise<CodeResult>;
@@ -115,7 +118,8 @@ export function CodeEntry({
   const locked = wait > 0;
   return (
     <Animated.View style={[styles.wrap, { opacity }]}>
-      <Text style={type.heading}>{title}</Text>
+      {header ? <View style={styles.header}>{header}</View> : null}
+      {title ? <Text style={type.heading}>{title}</Text> : null}
       {subtitle ? <Text style={[type.dim, styles.center]}>{subtitle}</Text> : null}
       <View style={styles.display}>
         <SafeDisplay
@@ -140,6 +144,7 @@ export function CodeEntry({
 
 const styles = StyleSheet.create({
   wrap: { alignItems: 'center', gap: space.md },
+  header: { alignSelf: 'stretch' },
   display: { marginTop: space.md },
   error: { color: colors.danger, minHeight: 20, fontSize: 14 },
   center: { textAlign: 'center', paddingHorizontal: space.lg },

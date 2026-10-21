@@ -1,8 +1,8 @@
 import { Fragment, useState } from 'react';
 import { Platform, StyleSheet, Text, TextInput, View } from 'react-native';
 import { INVITE_LENGTH, nextInvite } from './invite';
-import { Led } from './Led';
-import { colors, mono } from './theme';
+import { Led, type LedState } from './Led';
+import { colors, mono, space, type } from './theme';
 
 /**
  * Invitation code typed on the safe's backlit screen, same as the app code
@@ -59,16 +59,47 @@ export function InviteCodeInput({ value, onChange, error }: { value: string; onC
   );
 }
 
-/** A created invitation, shown on the same screen; green LED: ready to give. */
-export function InviteCodeDisplay({ code }: { code: string }) {
+/**
+ * A created invitation, shown on the same screen; green LED: ready to give.
+ * `led` null: no LED (a name plate, see below, must not read as a second code
+ * display). `size`: the text size, 18 by default.
+ */
+export function InviteCodeDisplay({
+  code,
+  led = 'green',
+  size,
+  compact = false,
+}: {
+  code: string;
+  led?: LedState | null;
+  size?: number;
+  /** A low screen, the height of a line of text, as wide as the text (name plates). */
+  compact?: boolean;
+}) {
   return (
-    <View style={styles.bezel}>
-      <View style={styles.screen}>
-        <Text selectable style={[styles.chars, styles.on]} numberOfLines={1} adjustsFontSizeToFit>
+    <View style={[styles.bezel, led === null && styles.bezelPlain, compact && styles.bezelCompact]}>
+      <View style={[styles.screen, compact && styles.screenCompact]}>
+        <Text selectable style={[styles.chars, styles.on, size !== undefined && { fontSize: size }]} numberOfLines={1} adjustsFontSizeToFit>
           {code}
         </Text>
       </View>
-      <Led state="green" size={10} />
+      {led === null ? null : <Led state={led} size={10} />}
+    </View>
+  );
+}
+
+/**
+ * Name plate above a code keypad: the pseudo (app lock) or the group's name
+ * printed on the safe's screen, with an optional word beside it ("Code"), the
+ * same size as the name.
+ */
+export function NamePlate({ label, name }: { label?: string; name: string }) {
+  return (
+    <View style={styles.plate}>
+      {label ? <Text style={type.heading}>{label}</Text> : null}
+      <View style={styles.plateScreen}>
+        <InviteCodeDisplay code={name} led={null} size={type.heading.fontSize} compact />
+      </View>
     </View>
   );
 }
@@ -91,6 +122,11 @@ const styles = StyleSheet.create({
     borderBottomColor: '#050505',
     borderRightColor: '#050505',
   },
+  bezelPlain: { paddingRight: 8 },
+  bezelCompact: { padding: 4, paddingRight: 4, alignSelf: 'center', maxWidth: '100%' },
+  screenCompact: { flex: 0, flexShrink: 1, height: 34, paddingHorizontal: 10 },
+  plate: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: space.md },
+  plateScreen: { flexShrink: 1 },
   screen: {
     flex: 1,
     height: 52,

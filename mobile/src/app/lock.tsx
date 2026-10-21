@@ -6,6 +6,7 @@ import { useSession } from '@/session/SessionProvider';
 import { LockedOutError, WipedError, WrongCodeError } from '@/services/vault';
 import { CodeEntry, type CodeResult } from '@/ui/CodeEntry';
 import { FingerprintPad } from '@/ui/FingerprintPad';
+import { NamePlate } from '@/ui/InviteCode';
 import { calm, colors, fonts, space, type } from '@/ui/theme';
 import { VaultDoor } from '@/ui/VaultDoor';
 
@@ -94,8 +95,8 @@ export default function LockScreen() {
           ) : (
             <>
               <CodeEntry
-                title="Code BaseSecrète"
-                subtitle={status.kind === 'locked' ? status.username : undefined}
+                header={status.kind === 'locked' ? <NamePlate name={status.username} /> : undefined}
+                title={status.kind === 'locked' ? undefined : 'Code BaseSecrète'}
                 onComplete={submit}
                 lockedForMs={lockedFor}
               />
