@@ -115,6 +115,7 @@ export default function Onboarding() {
         {backLink}
         <CodeEntry
           key="confirm"
+          fadeOut
           title="Confirme ton code"
           subtitle={login ? 'Enregistrement de ton compte sur ce téléphone…' : 'Création de tes clés sur le téléphone…'}
           onComplete={async (code) => {

@@ -1,6 +1,6 @@
 import * as Haptics from 'expo-haptics';
 import { useEffect, useRef, useState } from 'react';
-import { AppState, StyleSheet, Text, View } from 'react-native';
+import { Animated, AppState, Easing, StyleSheet, Text, View } from 'react-native';
 import { PinPad } from './PinPad';
 import { SafeDisplay, type SafeDisplayHandle } from './SafeDisplay';
 import { colors, space, type } from './theme';
@@ -10,10 +10,13 @@ import { colors, space, type } from './theme';
  * show (the display shakes, its LED goes red), null to move on, or an `open`
  * callback: the LED goes green for a beat, then `open` runs. While it runs, the
  * pad is disabled and the LED turns amber: Argon2id takes a moment on the phone.
+ * `fadeOut`: after the green beat, the entry fades out before `open` runs, for
+ * screens that `open` swaps in place (no transition would keep the green on).
  */
 export type CodeResult = string | null | (() => void);
 
 const GREEN_BEAT_MS = 550;
+const FADE_OUT_MS = 320;
 
 export function CodeEntry({
   title,
@@ -22,6 +25,7 @@ export function CodeEntry({
   onComplete,
   lockedForMs = 0,
   initialError,
+  fadeOut = false,
 }: {
   title: string;
   subtitle?: string;
@@ -30,6 +34,7 @@ export function CodeEntry({
   lockedForMs?: number;
   /** Shown until the first key press, e.g. "codes do not match" from the previous step. */
   initialError?: string;
+  fadeOut?: boolean;
 }) {
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
@@ -37,6 +42,7 @@ export function CodeEntry({
   const [error, setError] = useState<string | null>(initialError ?? null);
   const [wait, setWait] = useState(lockedForMs);
   const display = useRef<SafeDisplayHandle>(null);
+  const [opacity] = useState(() => new Animated.Value(1));
 
   // Arriving with an error (e.g. sent back from the confirm step): red LED, shake.
   useEffect(() => {
@@ -78,6 +84,11 @@ export function CodeEntry({
       setSuccess(true);
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       await new Promise((r) => setTimeout(r, GREEN_BEAT_MS));
+      if (fadeOut) {
+        await new Promise<void>((r) =>
+          Animated.timing(opacity, { toValue: 0, duration: FADE_OUT_MS, easing: Easing.in(Easing.cubic), useNativeDriver: true }).start(() => r()),
+        );
+      }
       result();
       return;
     }
@@ -103,7 +114,7 @@ export function CodeEntry({
 
   const locked = wait > 0;
   return (
-    <View style={styles.wrap}>
+    <Animated.View style={[styles.wrap, { opacity }]}>
       <Text style={type.heading}>{title}</Text>
       {subtitle ? <Text style={[type.dim, styles.center]}>{subtitle}</Text> : null}
       <View style={styles.display}>
@@ -123,7 +134,7 @@ export function CodeEntry({
         onClear={() => setCode('')}
         disabled={busy || locked}
       />
-    </View>
+    </Animated.View>
   );
 }
 

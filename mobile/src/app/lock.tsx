@@ -28,11 +28,16 @@ export default function LockScreen() {
     void vault.canUseBiometrics().then(setBio);
   }, [vault]);
 
+  // The screen has no exit fade (see _layout), so it fades out here, the green LED still lit,
+  // before the app takes over; otherwise the green beat is cut off dry.
+  const leave = (enter: () => void) => () =>
+    Animated.timing(reveal, { toValue: 0, duration: 320, easing: Easing.in(Easing.cubic), useNativeDriver: true }).start(() => enter());
+
   async function scan() {
     const enter = await unlockWithBiometrics().catch(() => null);
     // Not allowed anymore (copy dropped by the system): the keypad takes over.
     if (!enter) setBio(await vault.canUseBiometrics());
-    return enter;
+    return enter && leave(enter);
   }
 
   useEffect(() => {
@@ -46,7 +51,7 @@ export default function LockScreen() {
 
   async function submit(code: string): Promise<CodeResult> {
     try {
-      return await unlock(code);
+      return leave(await unlock(code));
     } catch (e) {
       if (e instanceof LockedOutError) {
         setLockedFor(e.retryInMs);
