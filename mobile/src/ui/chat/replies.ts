@@ -18,13 +18,16 @@ export interface Quotable {
   text: string | null;
   image: { kind: 'image' } | null;
   voice?: { kind: 'voice' } | null;
+  file?: { kind: 'file'; name: string } | null;
 }
 
 export interface Quote {
   author: string;
+  /** The text's start, or the document's name. */
   excerpt: string;
   image: boolean;
   voice?: true;
+  file?: true;
   /** The original is loaded: tapping the quote can scroll to it. */
   found: boolean;
 }
@@ -32,6 +35,7 @@ export interface Quote {
 function bodyOf(m: Quotable): MessageBody | null {
   if (m.image) return m.image as MessageBody;
   if (m.voice) return m.voice as MessageBody;
+  if (m.file) return m.file as MessageBody;
   return m.text === null ? null : { kind: 'text', text: m.text };
 }
 
@@ -67,8 +71,9 @@ export function quoteResolver(messages: Quotable[], me: string): (ref: ReplyRef)
   };
 }
 
-const withImage = (e: Pick<ReplyRef, 'excerpt' | 'image' | 'voice'>) => ({
+const withImage = (e: Pick<ReplyRef, 'excerpt' | 'image' | 'voice' | 'file'>) => ({
   excerpt: e.excerpt,
   image: e.image === true,
   ...(e.voice === true && { voice: true as const }),
+  ...(e.file === true && { file: true as const }),
 });

@@ -16,7 +16,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { API_URL } from '@/config';
-import type { ImageBody, ReplyRef, VoiceBody } from '@/crypto';
+import type { FileBody, ImageBody, ReplyRef, VoiceBody } from '@/crypto';
 import { wipe } from '@/crypto/encoding';
 import { useUnlocked, type OpenGroup } from '@/session/SessionProvider';
 import { useInsideGroup } from '@/session/useInsideGroup';
@@ -39,15 +39,18 @@ import {
   relockGroup,
   syncGroup,
   unlockGroup,
+  uploadDocument,
   uploadImage,
   uploadStory,
   uploadVoice,
   type ChatMessage,
   type GroupLockState,
   type JoinRequestInfo,
+  type PreparedFile,
   type PreparedImage,
   type PreparedVoice,
 } from '@/services/groups';
+import { FileTooLargeError, openDocument, pickDocument } from '@/services/files';
 import { imageCache, pickImage, takePhoto } from '@/services/images';
 import { records, type LocalStore } from '@/services/localStore';
 import { loadOutbox, saveOutbox, type Pending } from '@/services/outbox';
@@ -62,6 +65,7 @@ import { SwipeToReply } from '@/ui/chat/SwipeToReply';
 import { buildTimeline, countdownLabel, dateTimeLabel, dayLabel, dayRange, timeLabel } from '@/ui/chat/timeline';
 import { CodeEntry, type CodeResult } from '@/ui/CodeEntry';
 import { useDialog } from '@/ui/Dialog';
+import { FileBubble, LocalFile } from '@/ui/FileBubble';
 import { ImageBubble, LocalImage } from '@/ui/ImageBubble';
 import { ImageViewer } from '@/ui/ImageViewer';
 import { KeywordsForm } from '@/ui/KeywordsForm';
@@ -730,6 +734,11 @@ function Chat({ groupId, group, onUpdate, onLocked }: { groupId: string; group: 
         ready = { ...ready, body };
         setPending((p) => p.map((x) => (x.clientId === clientId && x.kind === 'story' ? { ...x, body } : x)));
       }
+      if (ready.kind === 'file' && !ready.body) {
+        const body = await uploadDocument(session, groupId, ready.file);
+        ready = { ...ready, body };
+        setPending((p) => p.map((x) => (x.clientId === clientId && x.kind === 'file' ? { ...x, body } : x)));
+      }
       const attempt = (g: OpenGroup) =>
         ready.kind === 'text'
           ? sendText(session, groupId, g.keys.get(g.keyVersion)!, g.keyVersion, ready.text, clientId, ready.replyTo)
@@ -775,6 +784,40 @@ function Chat({ groupId, group, onUpdate, onLocked }: { groupId: string; group: 
     } finally {
       setPicking(false);
     }
+  }
+
+  /** A document (a PDF…), sent as it is: the system's picker, then the outbox like a photo. */
+  async function sendDocument() {
+    setPicking(true);
+    try {
+      const file = await pickDocument();
+      if (file) void send({ clientId: newClientId(), at: new Date().toISOString(), kind: 'file', file, failed: false, replyTo: takeReply() });
+    } catch (e) {
+      if (e instanceof FileTooLargeError) dialog('Fichier trop lourd', 'Un document fait 10 Mo au maximum.');
+      // Picker or read failed otherwise: nothing was sent.
+    } finally {
+      setPicking(false);
+    }
+  }
+
+  /** A document tapped in the chat, decrypted: handed to another app (the share sheet). */
+  const openFile = useCallback(
+    async (bytes: Uint8Array, body: FileBody) => {
+      try {
+        await openDocument(bytes, body.name, body.mime);
+      } catch {
+        dialog('Impossible d’ouvrir', 'Aucune app n’a pu recevoir ce document.');
+      }
+    },
+    [dialog],
+  );
+
+  // The "+" key of the composer: a photo or a document, chosen in a panel.
+  const [attachSheet, setAttachSheet] = useState(false);
+  const afterAttachSheet = useRef<(() => void) | null>(null);
+  function closeAttachSheet(then?: () => void) {
+    afterAttachSheet.current = then ?? null;
+    setAttachSheet(false);
   }
 
   /** What runs once the "story" panel is gone (camera, picker). */
@@ -833,12 +876,16 @@ function Chat({ groupId, group, onUpdate, onLocked }: { groupId: string; group: 
         />
       ) : item.local ? (
         <LocalImage jpeg={item.local.jpeg} width={item.local.width} height={item.local.height} />
+      ) : item.file ? (
+        <FileBubble session={session} groupId={groupId} body={item.file} onOpen={openFile} onLongPress={onLongPress} />
+      ) : item.localFile ? (
+        <LocalFile file={item.localFile} />
       ) : item.text === null ? (
         <Text style={styles.unreadable}>Message illisible (signature ou clé invalide)</Text>
       ) : (
         <Text style={styles.text}>{item.text}</Text>
       ),
-    [session, groupId, openImage],
+    [session, groupId, openImage, openFile],
   );
 
   const eraseMenu = useMemo(
@@ -1004,7 +1051,10 @@ function Chat({ groupId, group, onUpdate, onLocked }: { groupId: string; group: 
         </View>
         <ChatComposer
           attaching={picking}
-          onAttach={() => void sendPhoto()}
+          onAttach={() => {
+            Keyboard.dismiss();
+            setAttachSheet(true);
+          }}
           replyTo={replying ? resolveQuote(replyRefFor(replying)!, messages, session.account.userId) : null}
           onCancelReply={() => setReplying(null)}
           inputRef={input}
@@ -1018,6 +1068,21 @@ function Chat({ groupId, group, onUpdate, onLocked }: { groupId: string; group: 
       </KeyboardAvoidingView>
       <ImageViewer jpeg={viewing} onClose={() => setViewing(null)} />
       <StoryPreview image={storyPick} onPublish={publishStory} onCancel={() => setStoryPick(null)} />
+      {/* The pickers open once the panel is gone (iOS refuses to present over a modal on its way out). */}
+      <ActionSheet
+        visible={attachSheet}
+        onClose={() => closeAttachSheet()}
+        onHidden={() => {
+          const next = afterAttachSheet.current;
+          afterAttachSheet.current = null;
+          next?.();
+        }}
+      >
+        <Text style={styles.sheetTitle}>ENVOYER · CHIFFRÉ POUR LE GROUPE</Text>
+        <ActionKey label="Une photo" onPress={() => closeAttachSheet(() => void sendPhoto())} />
+        <ActionKey label="Un document (PDF, …)" onPress={() => closeAttachSheet(() => void sendDocument())} />
+        <ActionKey label="Annuler" dim onPress={() => closeAttachSheet()} />
+      </ActionSheet>
       {/* The camera or the picker open once the panel is gone (iOS refuses to present over a modal on its way out). */}
       <ActionSheet
         visible={storySheet}
@@ -1160,6 +1225,8 @@ interface Line {
   local?: PreparedImage;
   voice?: VoiceBody;
   localVoice?: PreparedVoice;
+  file?: FileBody;
+  localFile?: PreparedFile;
   status?: DeliveryStatus;
   pending?: Pending;
   replyTo?: ReplyRef;
@@ -1218,11 +1285,12 @@ const Timeline = memo(function Timeline({
         text: m.text,
         image: m.image ?? undefined,
         voice: m.voice ?? undefined,
+        file: m.file ?? undefined,
         status: m.mine ? ('sent' as const) : undefined,
         replyTo: m.replyTo ?? undefined,
         quote: m.replyTo ? quoteOf(m.replyTo) : undefined,
         // Unreadable messages cannot be quoted.
-        message: m.text !== null || m.image || m.voice ? m : undefined,
+        message: m.text !== null || m.image || m.voice || m.file ? m : undefined,
       })),
       ...pending.map((p) => ({
         key: p.clientId,
@@ -1233,6 +1301,7 @@ const Timeline = memo(function Timeline({
         text: p.kind === 'text' ? p.text : null,
         local: p.kind === 'image' ? p.image : undefined,
         localVoice: p.kind === 'voice' ? p.voice : undefined,
+        localFile: p.kind === 'file' ? p.file : undefined,
         status: p.failed ? ('failed' as const) : ('sending' as const),
         pending: p,
         replyTo: p.replyTo,

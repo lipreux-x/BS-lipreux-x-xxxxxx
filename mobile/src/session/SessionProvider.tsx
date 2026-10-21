@@ -15,6 +15,7 @@ import type { LocalStore } from '@/services/localStore';
 import { voiceCache } from '@/services/voice';
 import { secureStore } from '@/services/secureStore';
 import { isFreshInstall, markInstalled } from '@/services/install';
+import { dropOpenedDocuments } from '@/services/files';
 import { sweepPlaintextCache } from '@/services/sweep';
 import { prepareVault, Vault, WipedError, type UnlockedVault } from '@/services/vault';
 import { systemUiOpen } from './autoLock';
@@ -163,6 +164,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     leftAt.clear();
     imageCache.clear();
     voiceCache.clear();
+    dropOpenedDocuments();
   }, [openGroups, leftAt]);
 
   /** Closes the groups left more than 10 min ago (keys and decrypted media out of memory). */

@@ -1,5 +1,5 @@
-import { b64, type ImageBody, type ReplyRef, type StoryBody, type VoiceBody } from '@/crypto';
-import type { PreparedImage, PreparedVoice } from './groups';
+import { b64, type FileBody, type ImageBody, type ReplyRef, type StoryBody, type VoiceBody } from '@/crypto';
+import type { PreparedFile, PreparedImage, PreparedVoice } from './groups';
 import { records, type LocalStore } from './localStore';
 
 /*
@@ -28,12 +28,15 @@ export type Pending = {
   | { kind: 'voice'; voice: PreparedVoice; body?: VoiceBody }
   // A story: a photo for the story strip, gone after 24 h.
   | { kind: 'story'; image: PreparedImage; body?: StoryBody }
+  // A document, sent as it is.
+  | { kind: 'file'; file: PreparedFile; body?: FileBody }
 );
 
 type Saved =
   | Extract<Pending, { kind: 'text' }>
   | (Omit<Extract<Pending, { kind: 'image' }>, 'image'> & { image: Omit<PreparedImage, 'jpeg'> & { jpeg: string } })
   | (Omit<Extract<Pending, { kind: 'story' }>, 'image'> & { image: Omit<PreparedImage, 'jpeg'> & { jpeg: string } })
+  | (Omit<Extract<Pending, { kind: 'file' }>, 'file'> & { file: Omit<PreparedFile, 'bytes'> & { bytes: string } })
   | (Omit<Extract<Pending, { kind: 'voice' }>, 'voice'> & { voice: Omit<PreparedVoice, 'audio'> & { audio: string } });
 
 export async function loadOutbox(local: LocalStore, groupId: string): Promise<Pending[]> {
@@ -43,6 +46,7 @@ export async function loadOutbox(local: LocalStore, groupId: string): Promise<Pe
       if (p.kind === 'text') return [p];
       if (p.kind === 'image' || p.kind === 'story') return [{ ...p, image: { ...p.image, jpeg: b64.decode(p.image.jpeg) } }];
       if (p.kind === 'voice') return [{ ...p, voice: { ...p.voice, audio: b64.decode(p.voice.audio) } }];
+      if (p.kind === 'file') return [{ ...p, file: { ...p.file, bytes: b64.decode(p.file.bytes) } }];
     } catch {
       // unreadable entry: dropped
     }
@@ -54,6 +58,7 @@ export async function saveOutbox(local: LocalStore, groupId: string, items: Pend
   const saved: Saved[] = items.map((p) => {
     if (p.kind === 'image' || p.kind === 'story') return { ...p, image: { ...p.image, jpeg: b64.encode(p.image.jpeg) } };
     if (p.kind === 'voice') return { ...p, voice: { ...p.voice, audio: b64.encode(p.voice.audio) } };
+    if (p.kind === 'file') return { ...p, file: { ...p.file, bytes: b64.encode(p.file.bytes) } };
     return p;
   });
   await local.setRecord(records.outbox(groupId), saved);

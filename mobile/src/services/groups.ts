@@ -19,6 +19,7 @@ import {
   sameKeywords,
   sealHandout,
   STORY_TTL_SECONDS,
+  type FileBody,
   type GroupMeta,
   type ImageBody,
   type ReplyRef,
@@ -733,6 +734,8 @@ export interface ChatMessage {
   text: string | null;
   image: ImageBody | null;
   voice: VoiceBody | null;
+  /** A document (a PDF…): its name is inside the encrypted body. */
+  file: FileBody | null;
   /** A story: shown in the story strip, not in the chat. */
   story: StoryBody | null;
   /** The message this one answers (quoted inside the encrypted body). */
@@ -751,6 +754,7 @@ export async function decryptMessages(s: Session, profiles: ProfileCache, keys: 
     let text: string | null = null;
     let image: ImageBody | null = null;
     let voice: VoiceBody | null = null;
+    let file: FileBody | null = null;
     let story: StoryBody | null = null;
     let replyTo: ReplyRef | null = null;
     if (p && groupKey) {
@@ -766,6 +770,7 @@ export async function decryptMessages(s: Session, profiles: ProfileCache, keys: 
         if (body?.kind === 'text') text = body.text;
         if (body?.kind === 'image') image = body;
         if (body?.kind === 'voice') voice = body;
+        if (body?.kind === 'file') file = body;
         if (body?.kind === 'story') story = body;
         replyTo = (body?.kind === 'story' ? null : body?.replyTo) ?? null;
       } catch {
@@ -782,6 +787,7 @@ export async function decryptMessages(s: Session, profiles: ProfileCache, keys: 
       text,
       image,
       voice,
+      file,
       story,
       replyTo,
       createdAt: m.createdAt,
@@ -832,6 +838,13 @@ export interface PreparedImage {
   width: number;
   height: number;
   preview?: string; // base64url JPEG, a few hundred bytes
+}
+
+/** A document picked on the phone, sent as it is. */
+export interface PreparedFile {
+  bytes: Uint8Array;
+  name: string;
+  mime: string;
 }
 
 /** A recorded voice message ready to send: AAC audio in an MP4 container. */
@@ -886,6 +899,11 @@ export async function uploadStory(s: Session, groupId: string, image: PreparedIm
   };
 }
 
+/** Same for a document: sent as it is, its name and type inside the encrypted message. */
+export async function uploadDocument(s: Session, groupId: string, file: PreparedFile): Promise<FileBody> {
+  return { kind: 'file', ...(await uploadFile(s, groupId, file.bytes)), mime: file.mime, name: file.name };
+}
+
 /** Same for a voice message. */
 export async function uploadVoice(s: Session, groupId: string, voice: PreparedVoice): Promise<VoiceBody> {
   return {
@@ -907,7 +925,7 @@ export async function sendAttachment(
   groupId: string,
   groupKey: Uint8Array,
   keyVersion: number,
-  body: ImageBody | VoiceBody | StoryBody,
+  body: ImageBody | VoiceBody | StoryBody | FileBody,
   clientId: string,
 ): Promise<WireMessage> {
   const encrypted = encryptMessage(encodeMessageBody(body), { groupId, senderId: s.account.userId, clientId, keyVersion }, groupKey, s.identity);
@@ -925,7 +943,7 @@ export async function sendAttachment(
  * else downloaded (and kept for offline use). Throws CryptoError if the blob
  * was tampered with or swapped.
  */
-export async function loadAttachment(s: Session, groupId: string, body: ImageBody | VoiceBody | StoryBody): Promise<Uint8Array> {
+export async function loadAttachment(s: Session, groupId: string, body: ImageBody | VoiceBody | StoryBody | FileBody): Promise<Uint8Array> {
   const ctx = { groupId, attachmentId: body.attachmentId };
   const fileKey = b64.decode(body.fileKey);
   const kept = await s.local.blob(body.attachmentId).catch(() => null);
