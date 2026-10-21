@@ -1,5 +1,5 @@
 import { router, Stack, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { wipe } from '@/crypto/encoding';
@@ -8,8 +8,10 @@ import { useInsideGroup } from '@/session/useInsideGroup';
 import { ApiError, NetworkError } from '@/services/api';
 import { groupInfo, leaveGroup, type GroupInfo, type GroupInfoMember } from '@/services/groupInfo';
 import { CodeChangedError, fingerprintOf, GroupTamperedError, KeyChangedError, rotateNow, setAdmins } from '@/services/groups';
+import { LockedOutError, WrongCodeError } from '@/services/vault';
 import { Avatar, isAvatarId } from '@/ui/avatars';
 import { countdownLabel, dateTimeLabel } from '@/ui/chat/timeline';
+import { CodeEntry } from '@/ui/CodeEntry';
 import { useDialog } from '@/ui/Dialog';
 import { colors, space, type } from '@/ui/theme';
 
@@ -33,6 +35,29 @@ export default function GroupSettings() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [dialog, dialogView] = useDialog();
+  // The keywords stay hidden until the group code is typed again (a phone left
+  // unlocked in someone's hands should not give them away); shown until the
+  // screen is left.
+  const [keywordsShown, setKeywordsShown] = useState<'hidden' | 'asking' | 'shown'>('hidden');
+  const [lockedFor, setLockedFor] = useState(0);
+  useEffect(() => () => setKeywordsShown('hidden'), []);
+
+  /** The group code against the key locked on this phone: a wrong one counts as an attempt, like at the door. */
+  async function revealKeywords(code: string) {
+    const open = openGroups.get(id);
+    if (!open) return null;
+    try {
+      wipe(await session.vault.openGroupKey(id, open.keyVersion, code, session.masterKey));
+      return () => setKeywordsShown('shown');
+    } catch (e) {
+      if (e instanceof WrongCodeError) return 'Code incorrect';
+      if (e instanceof LockedOutError) {
+        setLockedFor(e.retryInMs);
+        return 'Trop d’essais, réessaie plus tard';
+      }
+      return 'Impossible de vérifier le code';
+    }
+  }
 
   const load = useCallback(() => {
     // Reached by a link while the group is locked: nothing is shown without its code.
@@ -157,14 +182,39 @@ export default function GroupSettings() {
 
       <Text style={styles.section}>Mots-clés pour rejoindre</Text>
       <View style={styles.card}>
-        <View style={styles.keywords}>
-          {(info.keywords ?? []).map((k, i) => (
-            <View key={i} style={styles.chip}>
-              <Text style={styles.chipText}>{k}</Text>
+        {keywordsShown === 'shown' ? (
+          <>
+            <View style={styles.keywords}>
+              {(info.keywords ?? []).map((k, i) => (
+                <View key={i} style={styles.chip}>
+                  <Text style={styles.chipText}>{k}</Text>
+                </View>
+              ))}
             </View>
-          ))}
-        </View>
-        <Text style={[type.dim, styles.note]}>À donner en vrai avec le code, jamais par message.</Text>
+            <Text style={[type.dim, styles.note]}>À donner en vrai avec le code, jamais par message.</Text>
+          </>
+        ) : keywordsShown === 'asking' ? (
+          <>
+            <CodeEntry title="Code du groupe" subtitle="Pour afficher les mots-clés." onComplete={revealKeywords} lockedForMs={lockedFor} />
+            <Pressable accessibilityRole="button" onPress={() => setKeywordsShown('hidden')} hitSlop={8} style={styles.link}>
+              <Text style={styles.linkText}>Annuler</Text>
+            </Pressable>
+          </>
+        ) : (
+          <>
+            <View style={styles.keywords}>
+              {(info.keywords ?? []).map((k, i) => (
+                <View key={i} style={[styles.chip, styles.chipHidden]}>
+                  <Text style={styles.chipText}>{'•'.repeat(Math.max(4, Math.min(8, k.length)))}</Text>
+                </View>
+              ))}
+            </View>
+            <Pressable accessibilityRole="button" onPress={() => setKeywordsShown('asking')} style={styles.reveal} disabled={!info.keywords}>
+              <Text style={styles.revealText}>Afficher · code du groupe</Text>
+            </Pressable>
+            <Text style={[type.dim, styles.note]}>Masqués tant que le code du groupe n’est pas retapé. À donner en vrai avec le code, jamais par message.</Text>
+          </>
+        )}
       </View>
 
       <Text style={styles.section}>Membres · {info.members.length}</Text>
@@ -290,6 +340,11 @@ const styles = StyleSheet.create({
   keywords: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
   chip: { backgroundColor: colors.accent, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 },
   chipText: { color: colors.text, fontSize: 16, fontWeight: '600' },
+  chipHidden: { backgroundColor: colors.surface2, opacity: 0.8 },
+  reveal: { marginTop: space.md, alignSelf: 'flex-start', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 8, borderWidth: 1, borderColor: colors.border },
+  revealText: { color: colors.accentFg, fontSize: 14, fontWeight: '600' },
+  link: { marginTop: space.sm, alignSelf: 'center', paddingVertical: space.sm, paddingHorizontal: space.md },
+  linkText: { color: colors.textDim, fontSize: 15 },
   note: { marginTop: space.md, fontSize: 13 },
   row: { flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingVertical: space.sm },
   divider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },

@@ -4,6 +4,10 @@
 
 ## Derniers ajouts et changements
 
+### Mots-clés masqués dans les réglages du groupe (21/10)
+
+- Dans Réglages du groupe, les **trois mots-clés sont masqués** (pastilles de points). **Afficher · code du groupe** fait apparaître le clavier du code en place ; le bon code les révèle jusqu'à ce qu'on quitte l'écran. Un code faux compte comme un essai, comme à l'ouverture du groupe (même compteur, mêmes délais) : un téléphone laissé déverrouillé entre d'autres mains ne donne pas les mots-clés.
+
 ### Réactions (21/10)
 
 - **Cinq réactions par message**, dessinées dans le style de l'app (touches métal biseautées, icônes au trait, jamais d'emoji) : pouce (j'aime), couronne, pièces, flamme, cadenas (secret). **Appui long** sur un message → les cinq touches en haut du panneau (la mienne allumée en vert) ; toucher la même la retire, une autre la remplace. Sous la bulle : ce que le message a reçu, en petites plaques avec le compte (la mienne allumée) ; toucher une plaque donne ou retire la même réaction.

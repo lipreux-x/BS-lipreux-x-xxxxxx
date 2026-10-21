@@ -249,7 +249,7 @@ join_attempts (user_id uuid, group_id uuid, attempted_at timestamptz)
 4. `GroupUnlockModal` — saisie du code de groupe
 5. `Chat` — conversation
 6. `CreateGroup` / `JoinGroup` — création (nom, code, membres) / rejoindre
-7. `GroupSettings` — membres, éphémère, changer le code, quitter
+7. `GroupSettings` — mots-clés (masqués : le code du groupe les révèle, un code faux compte comme un essai), membres, éphémère, changer le code, quitter
 8. `Settings` — profil, code app, auto-lock, biométrie, empreinte de sécurité
 
 Composants partagés : `PinPad`, `PinDots`, `VaultSquare` (animation), `MessageBubble`, `LockBadge`.
