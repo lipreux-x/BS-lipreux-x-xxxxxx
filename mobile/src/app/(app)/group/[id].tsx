@@ -50,7 +50,7 @@ import {
   type PreparedImage,
   type PreparedVoice,
 } from '@/services/groups';
-import { FileTooLargeError, openDocument, pickDocument } from '@/services/files';
+import { DocumentsUnavailableError, FileTooLargeError, openDocument, pickDocument } from '@/services/files';
 import { imageCache, pickImage, takePhoto } from '@/services/images';
 import { records, type LocalStore } from '@/services/localStore';
 import { loadOutbox, saveOutbox, type Pending } from '@/services/outbox';
@@ -794,6 +794,7 @@ function Chat({ groupId, group, onUpdate, onLocked }: { groupId: string; group: 
       if (file) void send({ clientId: newClientId(), at: new Date().toISOString(), kind: 'file', file, failed: false, replyTo: takeReply() });
     } catch (e) {
       if (e instanceof FileTooLargeError) dialog('Fichier trop lourd', 'Un document fait 10 Mo au maximum.');
+      else if (e instanceof DocumentsUnavailableError) dialog('Nouveau build nécessaire', 'Cette version de l’app ne sait pas encore envoyer de documents : installe le dernier build.');
       // Picker or read failed otherwise: nothing was sent.
     } finally {
       setPicking(false);
@@ -805,8 +806,12 @@ function Chat({ groupId, group, onUpdate, onLocked }: { groupId: string; group: 
     async (bytes: Uint8Array, body: FileBody) => {
       try {
         await openDocument(bytes, body.name, body.mime);
-      } catch {
-        dialog('Impossible d’ouvrir', 'Aucune app n’a pu recevoir ce document.');
+      } catch (e) {
+        if (e instanceof DocumentsUnavailableError) {
+          dialog('Nouveau build nécessaire', 'Cette version de l’app ne sait pas encore ouvrir de documents : installe le dernier build.');
+        } else {
+          dialog('Impossible d’ouvrir', 'Aucune app n’a pu recevoir ce document.');
+        }
       }
     },
     [dialog],

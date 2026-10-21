@@ -1,6 +1,4 @@
-import * as DocumentPicker from 'expo-document-picker';
 import { Directory, File, Paths } from 'expo-file-system';
-import * as Sharing from 'expo-sharing';
 import { MAX_ATTACHMENT_BYTES } from '@/crypto';
 import { whileSystemUi } from '@/session/autoLock';
 import { safeFileName } from '@/ui/chat/files';
@@ -13,6 +11,10 @@ import type { PreparedFile } from './groups';
  * cache and handed to the system share sheet (a viewer, a save). That copy
  * is the only plaintext one; it is deleted before the next document is
  * handed out, at lock (dropOpenedDocuments) and at launch (services/sweep.ts).
+ *
+ * The picker and the share sheet are native modules newer than some
+ * installed builds: they are loaded on first use, so an older build still
+ * starts and only these two actions say that a new build is needed.
  */
 
 /** Room for the nonce and the tag of the encrypted blob (crypto/attachment.ts). */
@@ -26,12 +28,37 @@ export class FileTooLargeError extends Error {
   }
 }
 
+/** The installed build predates the document modules: a new build is needed. */
+export class DocumentsUnavailableError extends Error {
+  constructor() {
+    super('documents_unavailable');
+    this.name = 'DocumentsUnavailableError';
+  }
+}
+
+async function picker() {
+  try {
+    return await import('expo-document-picker');
+  } catch {
+    throw new DocumentsUnavailableError();
+  }
+}
+
+async function sharing() {
+  try {
+    return await import('expo-sharing');
+  } catch {
+    throw new DocumentsUnavailableError();
+  }
+}
+
 /**
  * The system's document picker. null if the user backed out; throws
  * FileTooLargeError above the attachment limit. The picker's copy in the
  * cache is deleted once read.
  */
 export async function pickDocument(): Promise<PreparedFile | null> {
+  const DocumentPicker = await picker();
   const res = await whileSystemUi(() => DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true, multiple: false }));
   const asset = res.canceled ? undefined : res.assets?.[0];
   if (!asset) return null;
@@ -56,6 +83,7 @@ export async function pickDocument(): Promise<PreparedFile | null> {
  * own name so the other app sees it; see the note at the top.
  */
 export async function openDocument(bytes: Uint8Array, name: string, mime: string): Promise<void> {
+  const Sharing = await sharing();
   dropOpenedDocuments();
   const dir = OPEN_DIR();
   dir.create();
