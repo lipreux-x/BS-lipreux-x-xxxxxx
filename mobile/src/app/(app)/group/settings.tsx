@@ -1,15 +1,16 @@
 import { router, Stack, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { wipe } from '@/crypto/encoding';
 import { useUnlocked } from '@/session/SessionProvider';
 import { useInsideGroup } from '@/session/useInsideGroup';
 import { ApiError, NetworkError } from '@/services/api';
 import { groupInfo, leaveGroup, type GroupInfo, type GroupInfoMember } from '@/services/groupInfo';
-import { fingerprintOf, GroupTamperedError, KeyChangedError, rotateNow, setAdmins } from '@/services/groups';
+import { CodeChangedError, fingerprintOf, GroupTamperedError, KeyChangedError, rotateNow, setAdmins } from '@/services/groups';
 import { Avatar, isAvatarId } from '@/ui/avatars';
 import { countdownLabel, dateTimeLabel } from '@/ui/chat/timeline';
+import { useDialog } from '@/ui/Dialog';
 import { colors, space, type } from '@/ui/theme';
 
 const EPHEMERAL: { label: string; seconds: number | null }[] = [
@@ -31,6 +32,7 @@ export default function GroupSettings() {
   const [info, setInfo] = useState<GroupInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [dialog, dialogView] = useDialog();
 
   const load = useCallback(() => {
     // Reached by a link while the group is locked: nothing is shown without its code.
@@ -53,14 +55,14 @@ export default function GroupSettings() {
     try {
       await action();
     } catch (e) {
-      Alert.alert(failure, message(e, 'Réessaie plus tard.'));
+      dialog(failure, message(e, 'Réessaie plus tard.'));
     } finally {
       setBusy(false);
     }
   }
 
   function remove(m: GroupInfoMember) {
-    Alert.alert(
+    dialog(
       `Retirer ${m.username} ?`,
       'Une nouvelle clé sera créée tout de suite : il ne pourra plus lire les nouveaux messages, ni revenir avec le code. Change aussi le code et les mots-clés s’il pourrait les avoir donnés à quelqu’un.',
       [
@@ -88,7 +90,7 @@ export default function GroupSettings() {
   async function showFingerprint(m: GroupInfoMember) {
     const f = await fingerprintOf(profiles, m.userId);
     if (!f) return;
-    Alert.alert(
+    dialog(
       `Numéro de sécurité de ${m.username}`,
       f.keyChanged
         ? `Attention : ses clés ont changé depuis que ce téléphone les a vues. Ses nouveaux messages ne sont pas considérés comme les siens.\n\nNuméro connu :\n${f.fingerprint}`
@@ -99,7 +101,7 @@ export default function GroupSettings() {
   function leave(i: GroupInfo) {
     const others = i.members.filter((m) => !m.me && !m.unknown);
     const lastAdmin = i.myRole === 'admin' && i.members.filter((m) => m.role === 'admin').length === 1 && others.length > 0;
-    Alert.alert(
+    dialog(
       'Quitter le groupe ?',
       lastAdmin
         ? 'Tu es le seul admin : le membre le plus ancien le deviendra. Tu ne pourras revenir qu’avec le code, les mots-clés et l’accord d’un admin.'
@@ -151,6 +153,7 @@ export default function GroupSettings() {
     // Edge to edge: "Quitter le groupe" stays above the navigation bar / home indicator.
     <ScrollView style={styles.screen} contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + space.xl }]}>
       {info.name ? <Stack.Screen options={{ title: info.name }} /> : null}
+      {dialogView}
 
       <Text style={styles.section}>Mots-clés pour rejoindre</Text>
       <View style={styles.card}>
@@ -272,6 +275,7 @@ export default function GroupSettings() {
 function message(e: unknown, fallback: string): string {
   if (e instanceof NetworkError) return 'Pas de réseau';
   if (e instanceof KeyChangedError) return 'Les clés d’un membre ont changé : vérifie son numéro de sécurité avant.';
+  if (e instanceof CodeChangedError) return 'Le code du groupe a changé : rouvre le groupe avec le nouveau code, puis réessaie.';
   if (e instanceof GroupTamperedError) return 'Le serveur liste quelqu’un qu’aucun admin n’a accepté : action bloquée par sécurité.';
   return fallback;
 }

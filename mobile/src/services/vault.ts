@@ -404,11 +404,14 @@ export class Vault {
 
   /** Throws LockedOutError / WrongCodeError like the app code. */
   async openGroupKey(groupId: string, keyVersion: number, groupCode: string, masterKey: Uint8Array): Promise<Uint8Array> {
+    return this.withLockout(K.lockoutGroup(groupId), () => this.tryGroupKey(groupId, keyVersion, groupCode, masterKey));
+  }
+
+  /** Same without counting the attempt (CryptoError on a wrong code): only inside `checkGroupCode`. */
+  async tryGroupKey(groupId: string, keyVersion: number, groupCode: string, masterKey: Uint8Array): Promise<Uint8Array> {
     const raw = await this.store.get(K.group(groupId, keyVersion));
     if (!raw) throw new Error('no_group_key');
-    return this.withLockout(K.lockoutGroup(groupId), () =>
-      unlockGroupKey(JSON.parse(raw) as WrappedKey, groupCode, masterKey, groupId, keyVersion),
-    );
+    return unlockGroupKey(JSON.parse(raw) as WrappedKey, groupCode, masterKey, groupId, keyVersion);
   }
 
   /**

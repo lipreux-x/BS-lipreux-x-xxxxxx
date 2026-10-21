@@ -18,9 +18,11 @@ import {
   parsePublicIdentity,
   sameKeywords,
   sealHandout,
+  STORY_TTL_SECONDS,
   type GroupMeta,
   type ImageBody,
   type ReplyRef,
+  type StoryBody,
   type VoiceBody,
 } from '@/crypto';
 import { constantTimeEqual, wipe } from '@/crypto/encoding';
@@ -72,7 +74,7 @@ export interface Session extends UnlockedVault {
 
 export type GroupLockState =
   | { kind: 'pending' } // asked to join, waiting for an admin to approve
-  | { kind: 'locked' } // local key present: type the group code
+  | { kind: 'locked'; codeChanged: boolean } // local key present: type the group code (the admin changed it since: old or new)
   | { kind: 'first-unlock'; needsKeywords: boolean } // key handed over, not stored locally yet
   | { kind: 'waiting-key' }; // member, but no key for the current version reached us yet
 
@@ -93,6 +95,21 @@ export class GroupTamperedError extends Error {
     this.name = 'GroupTamperedError';
   }
 }
+
+/**
+ * The admin changed the group code since this phone stored it: keys must not
+ * be handed out (or read) under the old one. The group is locked again and
+ * the new code typed (unlockGroup takes it).
+ */
+export class CodeChangedError extends Error {
+  constructor() {
+    super('code_changed');
+    this.name = 'CodeChangedError';
+  }
+}
+
+/** Stored before the admin's last code change (0: joined, approval pending, not known yet). */
+const staleCode = (secret: StoredGroupSecret, g: GroupSummary) => secret.codeVersion !== 0 && secret.codeVersion < g.codeVersion;
 
 /** A contact's public keys differ from the ones pinned on this phone. */
 export class KeyChangedError extends Error {
@@ -164,7 +181,10 @@ export async function forgetGroup(s: Session, groupId: string, upTo: number) {
 
 async function lockState(s: Session, g: GroupSummary): Promise<GroupLockState> {
   // An older local key still proves the code after a rotation (see unlockGroup).
-  if ((await s.vault.latestGroupKeyVersion(g.id, g.currentKeyVersion)) !== null) return { kind: 'locked' };
+  if ((await s.vault.latestGroupKeyVersion(g.id, g.currentKeyVersion)) !== null) {
+    const secret = await s.vault.groupSecret(g.id, s.masterKey);
+    return { kind: 'locked', codeChanged: !!secret && staleCode(secret, g) };
+  }
   if (g.sealedKeys.some((k) => k.keyVersion === g.currentKeyVersion)) {
     return { kind: 'first-unlock', needsKeywords: (await s.vault.groupSecret(g.id, s.masterKey)) === null };
   }
@@ -321,7 +341,27 @@ export async function unlockGroup(
   const known: GroupKeys = new Map();
   let secret = await s.vault.groupSecret(groupId, s.masterKey);
 
-  if (local !== null) {
+  // Re-locked under the code typed now: it is the admin's new code.
+  let tookNewCode = false;
+  if (local !== null && secret && staleCode(secret, g) && g.sealedKeys.some((h) => h.keyVersion === v)) {
+    // The admin changed the code (maybe more than once) since this phone locked its key: the old code
+    // still opens that key, the new one our handout (re-wrapped under it, with the keywords as they are
+    // now: the ones typed, else the ones we know). Either works; one attempt is counted.
+    const stored = secret;
+    const opened = await s.vault.checkGroupCode(groupId, async () => {
+      try {
+        return { key: await s.vault.tryGroupKey(groupId, local, groupCode, s.masterKey) };
+      } catch (e) {
+        if (!(e instanceof CryptoError)) throw e;
+        return { secret: await firstUnlockSecret(s, profiles, g, groupCode, null, keywords ?? stored.keywords) };
+      }
+    });
+    if (opened.key) known.set(local, opened.key);
+    else {
+      secret = opened.secret!;
+      tookNewCode = true;
+    }
+  } else if (local !== null) {
     // The newest key locked on this phone checks the code (throws if wrong).
     known.set(local, await s.vault.openGroupKey(groupId, local, groupCode, s.masterKey));
   } else {
@@ -341,12 +381,12 @@ export async function unlockGroup(
     return { groupKey: known.get(local)!, keys: known, keyVersion: local, meta, codeChanged, adminChanged: false };
   }
   const groupKey = opened.keys.get(v)!;
-  if (local !== v) {
-    // First unlock, or a rotation: lock the current key under this code.
+  if (local !== v || tookNewCode) {
+    // First unlock, a rotation, or the new code: lock the current key under this code.
     await s.vault.saveGroupKey(groupId, v, groupKey, groupCode, s.masterKey);
-    if (local !== null) await s.vault.deleteGroupKey(groupId, local);
+    if (local !== null && local !== v) await s.vault.deleteGroupKey(groupId, local);
   }
-  if (secret.codeVersion === 0 || local === null) {
+  if (secret.codeVersion === 0 || local === null || tookNewCode) {
     await s.vault.saveGroupSecret(groupId, { ...secret, codeVersion: g.codeVersion }, s.masterKey);
     await s.vault.setCodeVersion(groupId, g.codeVersion);
   }
@@ -366,14 +406,14 @@ async function firstUnlockSecret(
   stored: StoredGroupSecret | null,
   keywords: string[] | undefined,
 ): Promise<StoredGroupSecret> {
-  const words = stored?.keywords ?? keywords;
+  // Keywords typed now win: the stored ones may predate a change by the admin.
+  const words = keywords ?? stored?.keywords;
   if (!words) throw new ApiError(400, 'keywords_required');
   const derived = await deriveGroupSecrets(groupCode, words).catch(() => {
     throw new CryptoError('DECRYPT_FAILED');
   });
   wipe(derived.joinKey);
-  if (stored && constantTimeEqual(derived.wrapKey, stored.wrapKey)) return stored;
-  // Not the code we joined with (or no stored secret): it must open our handout.
+  // Whatever it is (even the code we joined with: the admin may have changed it since), it must open our handout.
   const h = g.sealedKeys.find((x) => x.keyVersion === g.currentKeyVersion)!;
   const signer = (await profiles.trustedKeys([h.signerId])).get(h.signerId);
   if (!signer) throw new KeyChangedError(h.signerId);
@@ -383,6 +423,7 @@ async function firstUnlockSecret(
     if (e instanceof CryptoError && e.code === 'BAD_SIGNATURE') throw new GroupTamperedError('untrusted_signer');
     throw new CryptoError('DECRYPT_FAILED');
   }
+  if (stored && constantTimeEqual(derived.wrapKey, stored.wrapKey)) return { ...stored, codeVersion: g.codeVersion };
   return { wrapKey: derived.wrapKey, keywords: words, codeVersion: g.codeVersion };
 }
 
@@ -391,11 +432,12 @@ async function firstUnlockSecret(
  * verified meta) re-derives the group secret, which must open our current
  * handout; the local key is then re-locked under it.
  */
-export async function relockGroup(s: Session, profiles: ProfileCache, groupId: string, keys: GroupKeys, newCode: string) {
+export async function relockGroup(s: Session, profiles: ProfileCache, groupId: string, keys: GroupKeys, newCode: string, keywords?: string[]) {
   const g = await summary(s, groupId);
   const meta = await s.vault.meta(groupId, s.masterKey);
   if (!meta) throw new ApiError(409, 'no_meta');
-  const secret = await s.vault.checkGroupCode(groupId, () => firstUnlockSecret(s, profiles, g, newCode, null, meta.keywords));
+  // The verified meta may predate the new keywords (a key rotated under the new code could not be read): typed ones win.
+  const secret = await s.vault.checkGroupCode(groupId, () => firstUnlockSecret(s, profiles, g, newCode, null, keywords ?? meta.keywords));
   await s.vault.saveGroupSecret(groupId, secret, s.masterKey);
   const opened = await verifyGroup(s, profiles, g, secret, keys);
   const v = g.currentKeyVersion;
@@ -421,8 +463,16 @@ export async function syncGroup(
   let g = await summary(s, groupId);
   const secret = await s.vault.groupSecret(groupId, s.masterKey);
   if (!secret) throw new ApiError(409, 'no_group_secret');
-  let opened = await verifyGroup(s, profiles, g, secret, keys);
-  if (g.rotationPending && g.role === 'admin' && opened.meta.admins.includes(s.account.userId)) {
+  let opened: Awaited<ReturnType<typeof verifyGroup>>;
+  try {
+    opened = await verifyGroup(s, profiles, g, secret, keys);
+  } catch (e) {
+    // A key rotated under the admin's new code: only that code reads it.
+    if (staleCode(secret, g) && e instanceof ApiError && e.status === 409) throw new CodeChangedError();
+    throw e;
+  }
+  // Under an old code the new key would be wrapped where the others can no longer open it: rotate once relocked.
+  if (g.rotationPending && g.role === 'admin' && opened.meta.admins.includes(s.account.userId) && !staleCode(secret, g)) {
     try {
       await rotateKey(s, profiles, g, opened.meta, secret);
     } catch (e) {
@@ -469,6 +519,7 @@ export async function rotateNow(s: Session, profiles: ProfileCache, groupId: str
   const g = await summary(s, groupId);
   const secret = await s.vault.groupSecret(groupId, s.masterKey);
   if (!secret) throw new ApiError(409, 'no_group_secret');
+  if (staleCode(secret, g)) throw new CodeChangedError();
   const { keys: all, meta } = await verifyGroup(s, profiles, g, secret, keys);
   await rotateKey(s, profiles, g, meta, secret);
   return syncGroup(s, profiles, groupId, all);
@@ -512,6 +563,8 @@ export async function approveMember(s: Session, profiles: ProfileCache, groupId:
   const g = await summary(s, groupId);
   const secret = await s.vault.groupSecret(groupId, s.masterKey);
   if (!secret) throw new ApiError(409, 'no_group_secret');
+  // The newcomer's key is wrapped under our code: it must be the current one, the one they will type.
+  if (staleCode(secret, g)) throw new CodeChangedError();
   const { keys: all, meta } = await verifyGroup(s, profiles, g, secret, keys);
   const v = g.currentKeyVersion;
   const pinned = (await profiles.trustedKeys([userId])).get(userId);
@@ -680,9 +733,13 @@ export interface ChatMessage {
   text: string | null;
   image: ImageBody | null;
   voice: VoiceBody | null;
+  /** A story: shown in the story strip, not in the chat. */
+  story: StoryBody | null;
   /** The message this one answers (quoted inside the encrypted body). */
   replyTo: ReplyRef | null;
   createdAt: string;
+  /** Disappearing message or story: gone for everyone at this time. */
+  expiresAt: string | null;
   mine: boolean;
 }
 
@@ -694,6 +751,7 @@ export async function decryptMessages(s: Session, profiles: ProfileCache, keys: 
     let text: string | null = null;
     let image: ImageBody | null = null;
     let voice: VoiceBody | null = null;
+    let story: StoryBody | null = null;
     let replyTo: ReplyRef | null = null;
     if (p && groupKey) {
       try {
@@ -708,7 +766,8 @@ export async function decryptMessages(s: Session, profiles: ProfileCache, keys: 
         if (body?.kind === 'text') text = body.text;
         if (body?.kind === 'image') image = body;
         if (body?.kind === 'voice') voice = body;
-        replyTo = body?.replyTo ?? null;
+        if (body?.kind === 'story') story = body;
+        replyTo = (body?.kind === 'story' ? null : body?.replyTo) ?? null;
       } catch {
         // tampered, forged or other key version: shown as unreadable
       }
@@ -723,8 +782,10 @@ export async function decryptMessages(s: Session, profiles: ProfileCache, keys: 
       text,
       image,
       voice,
+      story,
       replyTo,
       createdAt: m.createdAt,
+      expiresAt: m.expiresAt ?? null,
       mine: m.senderId === s.account.userId,
     };
   });
@@ -813,6 +874,18 @@ export async function uploadImage(s: Session, groupId: string, image: PreparedIm
   };
 }
 
+/** Same for a story: the photo is encrypted and uploaded like an image. */
+export async function uploadStory(s: Session, groupId: string, image: PreparedImage): Promise<StoryBody> {
+  return {
+    kind: 'story',
+    ...(await uploadFile(s, groupId, image.jpeg)),
+    mime: 'image/jpeg',
+    width: image.width,
+    height: image.height,
+    ...(image.preview && { preview: image.preview }),
+  };
+}
+
 /** Same for a voice message. */
 export async function uploadVoice(s: Session, groupId: string, voice: PreparedVoice): Promise<VoiceBody> {
   return {
@@ -824,17 +897,27 @@ export async function uploadVoice(s: Session, groupId: string, voice: PreparedVo
   };
 }
 
-/** Sends the message carrying the file key of an uploaded image or voice message. */
+/**
+ * Sends the message carrying the file key of an uploaded image, voice
+ * message or story. A story also tells the server when to delete it (the
+ * server only learns that the message lives 24 h, not what it is).
+ */
 export async function sendAttachment(
   s: Session,
   groupId: string,
   groupKey: Uint8Array,
   keyVersion: number,
-  body: ImageBody | VoiceBody,
+  body: ImageBody | VoiceBody | StoryBody,
   clientId: string,
 ): Promise<WireMessage> {
   const encrypted = encryptMessage(encodeMessageBody(body), { groupId, senderId: s.account.userId, clientId, keyVersion }, groupKey, s.identity);
-  return s.api.sendMessage(groupId, { clientId, keyVersion, ...encrypted, attachmentId: body.attachmentId });
+  return s.api.sendMessage(groupId, {
+    clientId,
+    keyVersion,
+    ...encrypted,
+    attachmentId: body.attachmentId,
+    ...(body.kind === 'story' && { expiresInSeconds: STORY_TTL_SECONDS }),
+  });
 }
 
 /**
@@ -842,7 +925,7 @@ export async function sendAttachment(
  * else downloaded (and kept for offline use). Throws CryptoError if the blob
  * was tampered with or swapped.
  */
-export async function loadAttachment(s: Session, groupId: string, body: ImageBody | VoiceBody): Promise<Uint8Array> {
+export async function loadAttachment(s: Session, groupId: string, body: ImageBody | VoiceBody | StoryBody): Promise<Uint8Array> {
   const ctx = { groupId, attachmentId: body.attachmentId };
   const fileKey = b64.decode(body.fileKey);
   const kept = await s.local.blob(body.attachmentId).catch(() => null);
