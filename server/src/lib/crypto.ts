@@ -56,8 +56,13 @@ export function generateInviteCode(): string {
   return code.match(/.{4}/g)!.join('-');
 }
 
+/** I, L and O are never in a code (INVITE_ALPHABET): typed off a screen, they were a 1 or a 0. */
 export function normalizeInviteCode(code: string): string {
-  return code.toUpperCase().replace(/[^0-9A-Z]/g, '');
+  return code
+    .toUpperCase()
+    .replace(/[^0-9A-Z]/g, '')
+    .replace(/[IL]/g, '1')
+    .replace(/O/g, '0');
 }
 
 /**

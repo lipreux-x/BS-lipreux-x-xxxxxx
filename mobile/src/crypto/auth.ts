@@ -10,9 +10,13 @@ import { sodium } from './sodium';
  * - login:    Ed25519(frame('bs/v1/login', challenge))
  */
 
-/** Same normalization as the server: case-insensitive, separators ignored. */
+/** Same normalization as the server: case-insensitive, separators ignored, I and L read as 1, O as 0. */
 export function normalizeInviteCode(code: string): string {
-  return code.toUpperCase().replace(/[^0-9A-Z]/g, '');
+  return code
+    .toUpperCase()
+    .replace(/[^0-9A-Z]/g, '')
+    .replace(/[IL]/g, '1')
+    .replace(/O/g, '0');
 }
 
 export function registrationProof(identity: Identity, inviteCode: string, username: string): string {

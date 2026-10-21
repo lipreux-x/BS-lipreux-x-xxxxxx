@@ -11,6 +11,12 @@ describe('invitation code field', () => {
     expect(nextInvite('ABCD', 'ABCD-E')).toBe('ABCDE');
   });
 
+  it('reads I and L as 1, O as 0: those letters are never in a code', () => {
+    expect(nextInvite('', 'o')).toBe('0');
+    expect(nextInvite('0', '0I')).toBe('01');
+    expect(nextInvite('', 'OIL0-ABCD-EFGH-JKMN')).toBe('0110ABCDEFGHJKMN');
+  });
+
   it('stops at 16 characters when typing', () => {
     expect(nextInvite('0123456789ABCDEF', '0123456789ABCDEFG')).toBe('0123456789ABCDEF');
   });
