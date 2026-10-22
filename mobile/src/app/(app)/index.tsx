@@ -8,16 +8,16 @@ import { NetworkError } from '@/services/api';
 import { listGroups, type GroupListItem } from '@/services/groups';
 import { setNotificationNames } from '@/services/push';
 import { countdownLabel } from '@/ui/chat/timeline';
-import { InviteCodeDisplay } from '@/ui/InviteCode';
+import { LCD_ON } from '@/ui/InviteCode';
 import { colors, space, type } from '@/ui/theme';
 import { Wordmark } from '@/ui/Wordmark';
 
 // SPEC §2.2: every group shows a lock and no message preview while locked.
 // Each group is a safe: same status LED as the code display (green open, amber key received, red closed),
 // and the same word under its name: "Ouvert" in green, "Fermé" in red. The
-// groups opened last come first; a small lit screen on the right, like an
-// invitation code's, counts the messages waiting inside, locked or not (a
-// number, never a word of them).
+// groups opened last come first; lit digits on the right, like an invitation
+// code, count the messages waiting inside, locked or not (a number, never a
+// word of them).
 export default function GroupsList() {
   // groupsVersion: re-render when groups close on their own (10 min out of them).
   const { session, openGroups, groupsVersion } = useUnlocked();
@@ -149,8 +149,8 @@ export default function GroupsList() {
                 </Text>
               </View>
               {item.unread > 0 ? (
-                // Messages waiting: lit digits on a small safe screen, like an invitation code.
-                <InviteCodeDisplay code={item.unread > 99 ? '99+' : String(item.unread)} led={null} size={15} compact />
+                // Messages waiting: lit digits, like an invitation code on the safe's screen.
+                <Text style={styles.unread}>{item.unread > 99 ? '99+' : item.unread}</Text>
               ) : (
                 <Text style={styles.chevron}>›</Text>
               )}
@@ -201,6 +201,7 @@ const styles = StyleSheet.create({
   closedText: { color: colors.danger },
   ledClosed: { backgroundColor: colors.danger, boxShadow: `0 0 4px ${colors.danger}` },
   chevron: { color: colors.textDim, fontSize: 24 },
+  unread: { color: LCD_ON, fontFamily: MONO, fontSize: 18, letterSpacing: 1, textShadowColor: LCD_ON, textShadowRadius: 6 },
   expiry: { color: colors.textDim },
   section: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: space.md, paddingTop: space.md, paddingBottom: space.sm },
   sectionLabel: { color: colors.textDim, fontFamily: MONO, fontSize: 12, letterSpacing: 2, textTransform: 'uppercase' },

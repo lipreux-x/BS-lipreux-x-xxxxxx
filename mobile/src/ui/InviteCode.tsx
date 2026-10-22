@@ -104,7 +104,8 @@ export function NamePlate({ label, name }: { label?: string; name: string }) {
   );
 }
 
-const LCD_ON = '#C8D3C0';
+/** Lit characters on the safe's screen (also the unread counter of the group list). */
+export const LCD_ON = '#C8D3C0';
 const LCD_OFF = '#2C3830';
 
 const styles = StyleSheet.create({
