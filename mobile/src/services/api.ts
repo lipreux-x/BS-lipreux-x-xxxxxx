@@ -241,9 +241,14 @@ export class Api {
     return this.request<{ avatar: string | null }>('/me/avatar', { method: 'PUT', json: { avatar } });
   }
 
-  /** This phone's Expo push token (notifications carry a fixed generic line, server lib/push.ts). */
-  setPushToken(token: string) {
-    return this.request<{ ok: true }>('/me/push-token', { method: 'PUT', json: { token } });
+  /** This phone's Expo push token and platform (what the server sends it: services/push.ts). */
+  setPushToken(token: string, platform: 'ios' | 'android' | null) {
+    return this.request<{ ok: true }>('/me/push-token', { method: 'PUT', json: { token, platform: platform ?? undefined } });
+  }
+
+  /** The app is open here (renewed every 30 s): no "new message" push meanwhile. `false` withdraws it. */
+  presence(awake: boolean) {
+    return this.request<{ ok: true }>('/me/presence', { method: awake ? 'PUT' : 'DELETE' });
   }
 
   createInvite() {
@@ -258,6 +263,11 @@ export class Api {
 
   groups() {
     return this.request<(GroupSummary | PendingGroupSummary)[]>('/groups');
+  }
+
+  /** Messages waiting in each group past the given seq (group id -> count; groups without any are left out). */
+  unread(cursors: Record<string, number>) {
+    return this.request<Record<string, number>>('/groups/unread', { method: 'POST', json: { cursors } });
   }
 
   /** The creator's own handout and the signed meta go up with the group. `joinKey` comes from the code + keywords. */

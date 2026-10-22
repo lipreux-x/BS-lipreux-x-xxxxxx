@@ -94,6 +94,8 @@ const clock = () => uptimeMs() ?? Date.now();
 
 const SessionContext = createContext<SessionContextValue | null>(null);
 const vault = new Vault(secureStore, Date.now, uptimeMs, biometricStore);
+/** How often the open app tells the server it is (server: PRESENCE_SECONDS, 75 s). */
+const PRESENCE_EVERY_MS = 30_000;
 
 function applyScreenshots(blocked: boolean) {
   (blocked ? ScreenCapture.preventScreenCaptureAsync() : ScreenCapture.allowScreenCaptureAsync()).catch(() => {});
@@ -259,6 +261,34 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   // Once unlocked: this phone's push token goes to the server (permission asked the first time).
   useEffect(() => {
     if (session) void registerPush(session.api);
+  }, [session]);
+
+  // While the app is open and unlocked, the server knows it and sends no "new
+  // message" push (the open app shows them): renewed every 30 s, withdrawn
+  // when the app goes to the background or locks. A system screen opened from
+  // the app (photo picker) counts as away: a push during it is no harm.
+  useEffect(() => {
+    if (!session) return;
+    const { api } = session;
+    let timer: ReturnType<typeof setInterval> | undefined;
+    const tell = (awake: boolean) => api.presence(awake).catch(() => {});
+    const wake = () => {
+      if (timer) return;
+      void tell(true);
+      timer = setInterval(() => void tell(true), PRESENCE_EVERY_MS);
+    };
+    const sleep = () => {
+      if (!timer) return;
+      clearInterval(timer);
+      timer = undefined;
+      void tell(false);
+    };
+    if (AppState.currentState !== 'background') wake();
+    const sub = AppState.addEventListener('change', (state) => (state === 'active' ? wake() : state === 'background' ? sleep() : undefined));
+    return () => {
+      sub.remove();
+      sleep();
+    };
   }, [session]);
 
   const unlock = useCallback(

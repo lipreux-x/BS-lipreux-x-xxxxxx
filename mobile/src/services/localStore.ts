@@ -131,7 +131,7 @@ export class LocalStore {
     const key = this.k();
     const gid = blindLocalId(groupId, key);
     await this.db.runAsync('DELETE FROM messages WHERE gid = ?', [gid]);
-    for (const name of [records.group(groupId), records.chat(groupId), records.outbox(groupId), records.stories(groupId)]) {
+    for (const name of [records.group(groupId), records.chat(groupId), records.seen(groupId), records.outbox(groupId), records.stories(groupId)]) {
       await this.db.runAsync('DELETE FROM records WHERE k = ?', [blindLocalId(name, key)]);
     }
     const blobs = await this.db.getAllAsync<{ name: string }>('SELECT name FROM blobs WHERE gid = ?', [gid]);
@@ -241,6 +241,8 @@ export const records = {
   group: (id: string) => `group/${id}`,
   /** Chat state: latest erase seen ({ purgeSeq }). */
   chat: (id: string) => `chat/${id}`,
+  /** Last message shown here and when the conversation was last on screen: { seq, at } (services/groups.ts markOpened). */
+  seen: (id: string) => `seen/${id}`,
   /** Stories already watched in a group: { seen: message ids } (ui/stories). */
   stories: (id: string) => `stories/${id}`,
   /** Messages written but not sent yet (services/outbox.ts). */

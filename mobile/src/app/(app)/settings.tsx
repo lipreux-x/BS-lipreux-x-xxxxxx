@@ -1,7 +1,7 @@
 import { router, useFocusEffect } from 'expo-router';
 import { Bell, Bomb, CameraOff, FingerprintPattern, Lock, ShieldCheck, type LucideIcon, User, UserPlus } from 'lucide-react-native';
 import { useCallback, useEffect, useState } from 'react';
-import { AppState, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { AppState, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { keyFingerprint } from '@/crypto';
 import { useUnlocked } from '@/session/SessionProvider';
@@ -168,7 +168,9 @@ export default function Settings() {
         <SubTitle icon={Bell}>Notifications</SubTitle>
         <Text style={type.dim}>
           {push === 'on'
-            ? 'Activées. Elles disent seulement « uçer egassem » (« message reçu » à l’envers) ou « esiuqer noitca » (« action requise » : une demande d’accès à accepter, un nouveau code à entrer) : ni nom, ni groupe, ni texte. En touchant la notification, tu tapes tes codes, puis le groupe s’ouvre.'
+            ? Platform.OS === 'android'
+              ? 'Activées. Une notification par groupe, avec son nom (tel qu’il est sur ce téléphone) et « Nouveau message » ou ce que le groupe attend de toi : jamais le texte des messages, et jamais quand l’app est ouverte. Le serveur n’envoie que l’identifiant du groupe : le nom est ajouté par le téléphone. En la touchant, tu tapes tes codes, puis le groupe s’ouvre.'
+              : 'Activées. Elles disent « Nouveau message » ou ce que le groupe attend de toi, sans nom de groupe ni texte, et jamais quand l’app est ouverte. En touchant la notification, tu tapes tes codes, puis le groupe s’ouvre.'
             : push === 'denied' || push === 'blocked'
               ? 'Refusées. Autorise les notifications de BaseSecrète dans les réglages du téléphone.'
               : push === 'unavailable'

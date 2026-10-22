@@ -28,6 +28,7 @@ import {
   decryptMessages,
   fetchSince,
   forgetGroup,
+  markOpened,
   GroupTamperedError,
   joinRequests,
   KeyChangedError,
@@ -55,6 +56,7 @@ import { DocumentsUnavailableError, FileTooLargeError, openDocument, pickDocumen
 import { imageCache, pickImage, takePhoto } from '@/services/images';
 import { records, type LocalStore } from '@/services/localStore';
 import { loadOutbox, saveOutbox, type Pending } from '@/services/outbox';
+import { clearGroupNotification } from '@/services/push';
 import { useVoiceRecorder, voiceCache, voicePlayer } from '@/services/voice';
 import { RealtimeClient } from '@/services/realtime';
 import { LockedOutError, WrongCodeError } from '@/services/vault';
@@ -505,11 +507,14 @@ function Chat({ groupId, group, onUpdate, onLocked }: { groupId: string; group: 
     [session, profiles, sync],
   );
 
-  // On open and when coming back from the group's settings.
+  // On open and when coming back from the group's settings. The conversation
+  // is on screen: its notification goes, and the group climbs the list.
   useFocusEffect(
     useCallback(() => {
       void sync();
-    }, [sync]),
+      void markOpened(session, groupId, lastSeq.current);
+      void clearGroupNotification(groupId);
+    }, [sync, session, groupId]),
   );
 
   // A voice message that ends hands over to the next one of the conversation;
@@ -542,17 +547,22 @@ function Chat({ groupId, group, onUpdate, onLocked }: { groupId: string; group: 
   const keep = useCallback((fn: (l: LocalStore) => Promise<unknown>) => fn(session.local).catch(() => {}), [session]);
 
   /** `replace`: the whole history was fetched again (after an erase), drop what is no longer in it. */
-  const merge = useCallback((incoming: ChatMessage[], replace = false) => {
-    if (!incoming.length && !replace) return;
-    lastSeq.current = Math.max(lastSeq.current, ...incoming.map((m) => m.seq));
-    setMessages((prev) => {
-      const byId = new Map((replace ? [] : prev).map((m) => [m.id, m]));
-      for (const m of incoming) byId.set(m.id, m);
-      return [...byId.values()].sort((a, b) => a.seq - b.seq);
-    });
-    const done = new Set(incoming.map((m) => m.clientId));
-    setPending((p) => p.filter((x) => !done.has(x.clientId)));
-  }, []);
+  const merge = useCallback(
+    (incoming: ChatMessage[], replace = false) => {
+      if (!incoming.length && !replace) return;
+      lastSeq.current = Math.max(lastSeq.current, ...incoming.map((m) => m.seq));
+      // Shown here: nothing up to there waits in the list any more.
+      void markOpened(session, groupId, lastSeq.current);
+      setMessages((prev) => {
+        const byId = new Map((replace ? [] : prev).map((m) => [m.id, m]));
+        for (const m of incoming) byId.set(m.id, m);
+        return [...byId.values()].sort((a, b) => a.seq - b.seq);
+      });
+      const done = new Set(incoming.map((m) => m.clientId));
+      setPending((p) => p.filter((x) => !done.has(x.clientId)));
+    },
+    [session, groupId],
+  );
 
   // What the phone kept, loaded once before the first fetch (which then only asks for what is newer).
   const localLoaded = useRef<Promise<void> | null>(null);

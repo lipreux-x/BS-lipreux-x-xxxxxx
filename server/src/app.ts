@@ -4,7 +4,7 @@ import { Hono, type Context, type MiddlewareHandler } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { HTTPException } from 'hono/http-exception';
 import { z } from 'zod';
-import { db } from './db/client';
+import { db, pool } from './db/client';
 import {
   attachments,
   groupBans,
@@ -36,7 +36,7 @@ import {
   utf8,
   verifyEd25519,
 } from './lib/crypto';
-import { notifyAction, notifyGroup, PUSH_TOKEN } from './lib/push';
+import { notifyAction, notifyGroup, PRESENCE_SECONDS, PUSH_TOKEN } from './lib/push';
 import { deleteObjects, downloadUrl, objectKey, uploadUrl } from './lib/storage';
 import { issueAccessToken, issueChallenge, readAccessToken, verifyAccessToken, verifyChallenge } from './lib/tokens';
 import { realtime } from './realtime';
@@ -341,15 +341,33 @@ app.put('/me/avatar', async (c) => {
   return c.json({ avatar });
 });
 
-/** This phone's push token (the notification is a fixed generic line, see lib/push.ts). */
+/** This phone's push token and platform (what it gets: see lib/push.ts). */
 app.put('/me/push-token', async (c) => {
-  const { token } = await body(c, z.object({ token: z.string().regex(PUSH_TOKEN) }));
+  const { token, platform = null } = await body(c, z.object({ token: z.string().regex(PUSH_TOKEN), platform: z.enum(['ios', 'android']).optional() }));
   const userId = c.get('userId');
   // A token belongs to one phone: if it was another account's, it moves to this one.
   await db
     .insert(pushTokens)
-    .values({ token, userId })
-    .onConflictDoUpdate({ target: pushTokens.token, set: { userId, createdAt: sql`now()` } });
+    .values({ token, userId, platform })
+    .onConflictDoUpdate({ target: pushTokens.token, set: { userId, platform, createdAt: sql`now()` } });
+  return c.json({ ok: true });
+});
+
+/**
+ * The app is open and unlocked on one of this person's phones: no "new
+ * message" push until PRESENCE_SECONDS from now (the app renews it every 30 s
+ * and withdraws it when it goes to the background).
+ */
+app.put('/me/presence', async (c) => {
+  await db
+    .update(profiles)
+    .set({ awakeUntil: sql`now() + make_interval(secs => ${PRESENCE_SECONDS})` })
+    .where(eq(profiles.id, c.get('userId')));
+  return c.json({ ok: true });
+});
+
+app.delete('/me/presence', async (c) => {
+  await db.update(profiles).set({ awakeUntil: null }).where(eq(profiles.id, c.get('userId')));
   return c.json({ ok: true });
 });
 
@@ -576,7 +594,7 @@ app.post('/groups/join', async (c) => {
     .from(groupMembers)
     .where(and(eq(groupMembers.groupId, group.id), eq(groupMembers.userId, me)));
   // A new request: the admins have someone to let in (asking again does not ring twice).
-  if (filed.length) await notifyAction(group.id, 'admins', me);
+  if (filed.length) await notifyAction(group.id, 'join_request', 'admins', me);
   return c.json({ groupId: group.id, status: row!.status });
 });
 
@@ -638,7 +656,7 @@ app.post('/groups/:groupId/members/:userId/approve', async (c) => {
       .where(eq(groups.id, groupId));
   });
   realtime.nudge();
-  await notifyAction(groupId, [target]);
+  await notifyAction(groupId, 'approved', [target]);
   return c.json({ approved: true });
 });
 
@@ -718,7 +736,7 @@ app.post('/groups/:groupId/leave', async (c) => {
     throw new HTTPException(409, { message: 'handover_required' });
   }
   await removeMember(groupId, me, false);
-  await notifyAction(groupId, 'admins', me);
+  await notifyAction(groupId, 'member_left', 'admins', me);
   return c.json({ left: true });
 });
 
@@ -877,7 +895,7 @@ app.put('/groups/:groupId/code', async (c) => {
       .where(eq(groups.id, groupId));
     return g.codeVersion + 1;
   });
-  await notifyAction(groupId, 'members', me);
+  await notifyAction(groupId, 'code_changed', 'members', me);
   return c.json({ codeVersion });
 });
 
@@ -888,6 +906,34 @@ app.put('/groups/:groupId/ephemeral', async (c) => {
   await requireAdmin(groupId, c.get('userId'));
   await db.update(groups).set({ ephemeralSeconds: input.seconds }).where(eq(groups.id, groupId));
   return c.json({ ephemeralSeconds: input.seconds });
+});
+
+/**
+ * How many messages wait in each group, past the last one this phone showed
+ * (`cursors`: group id -> seq, 0 for a group never opened here). Our own
+ * messages, quiet ones (reactions) and expired ones do not count; only a
+ * number per group goes back, never a message.
+ */
+app.post('/groups/unread', async (c) => {
+  const { cursors } = await body(
+    c,
+    z.object({ cursors: z.record(z.uuid(), z.number().int().min(0)).refine((r) => Object.keys(r).length <= 200, 'too_many_groups') }),
+  );
+  const me = c.get('userId');
+  const ids = Object.keys(cursors);
+  if (!ids.length) return c.json({});
+  const { rows } = await pool.query<{ group_id: string; n: number }>(
+    `select m.group_id, count(*)::int as n
+       from unnest($2::uuid[], $3::bigint[]) as c(group_id, seq)
+       join group_members gm on gm.group_id = c.group_id and gm.user_id = $1 and gm.status = 'active'
+       join messages m on m.group_id = c.group_id and m.seq > c.seq
+      where m.sender_id <> $1
+        and not m.quiet
+        and (m.expires_at is null or m.expires_at > now())
+      group by m.group_id`,
+    [me, ids, ids.map((id) => cursors[id])],
+  );
+  return c.json(Object.fromEntries(rows.map((r) => [r.group_id, r.n])));
 });
 
 // ---- Messages ----------------------------------------------------------------
@@ -931,6 +977,7 @@ app.post('/groups/:groupId/messages', async (c) => {
         ...msg,
         groupId,
         senderId: me,
+        quiet: !!quiet,
         expiresAt,
       })
       .onConflictDoNothing({ target: [messages.senderId, messages.clientId] });

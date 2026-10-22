@@ -103,10 +103,12 @@ describe('local store (SPEC §5.2)', () => {
 
     await store.setRecord(records.group(G1), { id: G1 });
     await store.setRecord(records.chat(G1), { purgeSeq: 2 });
+    await store.setRecord(records.seen(G1), { seq: 3, at: 1 });
     await store.forgetGroup(G1);
     expect(await store.messages(G1)).toEqual([]);
     expect(await store.getRecord(records.group(G1))).toBeNull();
     expect(await store.getRecord(records.chat(G1))).toBeNull();
+    expect(await store.getRecord(records.seen(G1))).toBeNull();
     expect(await store.messages(G2)).toHaveLength(1);
   });
 

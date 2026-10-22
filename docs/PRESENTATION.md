@@ -17,7 +17,7 @@ Les détails techniques de référence sont dans [SPEC.md](SPEC.md) (§4) ; l'au
 - **Tout est chiffré de bout en bout** : messages, photos, vocaux, nom des groupes. Le serveur transporte et stocke des données qu'il ne peut pas lire.
 - **Esthétique de coffre-fort** : porte de coffre à l'ouverture, pavé numérique en métal, voyants lumineux.
 
-Fonctions : messages texte, photos, vocaux, réponses citées, messages éphémères (24 h ou 7 jours), groupes qui s'autodétruisent à une date choisie, effacement de jours entiers par un admin, notifications qui ne disent rien du contenu, fonctionnement hors ligne.
+Fonctions : messages texte, photos, vocaux, réponses citées, messages éphémères (24 h ou 7 jours), groupes qui s'autodétruisent à une date choisie, effacement de jours entiers par un admin, notifications qui ne disent rien du contenu (le nom du groupe est ajouté par le téléphone, jamais envoyé), fonctionnement hors ligne.
 
 ### Technique
 
@@ -131,7 +131,7 @@ L'app refuse un coût Argon2 plus faible que le sien, même si le serveur le dem
 
 ### 3.7 Ce que voient les notifications
 
-Une notification dit seulement « uçer egassem » (« message reçu » à l'envers) ou « esiuqer noitca » (« action requise »). Pas de nom, pas de groupe, pas de texte. La toucher ouvre l'app sur le coffre : code app, puis code du groupe.
+Le serveur n'envoie jamais le nom d'un groupe ni un mot d'un message : seulement l'identifiant du groupe et le type d'événement. Sur Android, c'est le téléphone qui écrit la notification, avec le nom du groupe tel qu'il le connaît et « Nouveau message » (une par groupe, remplacée à mesure) ; sur iOS, une ligne générique. Rien ne sonne tant que l'app est ouverte. La toucher ouvre l'app sur le coffre : code app, puis code du groupe.
 
 ---
 

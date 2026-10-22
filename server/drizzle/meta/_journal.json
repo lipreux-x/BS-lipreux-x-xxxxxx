@@ -85,6 +85,13 @@
       "when": 1792450970678,
       "tag": "0011_push_tokens",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1792681879973,
+      "tag": "0012_push_presence_unread",
+      "breakpoints": true
     }
   ]
 }

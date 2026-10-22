@@ -29,6 +29,9 @@ export const profiles = pgTable(
     backupParams: text('backup_params'), // JSON { salt, ops, mem } handed out before sign-in
     backupAuth: text('backup_auth'), // HMAC(pepper, authKey): sign-in proof, never the key itself
     backupBox: text('backup_box'), // the sealed identity, re-encrypted with a server key at rest
+    // The app is open on one of this person's phones until then (PUT /me/presence,
+    // renewed every 30 s): no "new message" push meanwhile, the open app shows it.
+    awakeUntil: timestamp('awake_until', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   // "Alice" and "alice" cannot both exist: no look-alike names in a member list.
@@ -131,6 +134,9 @@ export const messages = pgTable(
     nonce: text('nonce').notNull(),
     ciphertext: text('ciphertext').notNull(),
     signature: text('signature').notNull(),
+    // A reaction or the like: relayed like any message, but nobody is notified
+    // and it does not count as unread (the server learns only that much).
+    quiet: boolean('quiet').notNull().default(false),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     expiresAt: timestamp('expires_at', { withTimezone: true }),
   },
@@ -255,7 +261,7 @@ export const usedChallenges = pgTable('used_challenges', {
 });
 
 // Push notifications (src/lib/push.ts): one Expo push token per phone. The
-// notification itself is a fixed generic line; the token only says where to ring.
+// server only ever sends a group id and an event kind; the token says where.
 export const pushTokens = pgTable(
   'push_tokens',
   {
@@ -263,6 +269,9 @@ export const pushTokens = pgTable(
     userId: uuid('user_id')
       .notNull()
       .references(() => profiles.id, { onDelete: 'cascade' }),
+    // Android phones get a silent push and show the notification themselves
+    // (group name included); iOS and unknown get a visible generic line.
+    platform: text('platform', { enum: ['ios', 'android'] }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     // Last notification sent to this phone (throttle).
     lastPushAt: timestamp('last_push_at', { withTimezone: true }),

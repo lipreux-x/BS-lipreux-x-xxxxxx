@@ -1,8 +1,18 @@
 # BaseSecrète — Avancement
 
-État du projet au 20/10/2026 (mis à jour après le lot sécurité : empreinte, auto-destruction, captures, hors connexion) : les derniers ajouts et changements, puis le plan du projet avec ce qui est fait et ce qui reste. La spec de référence est [SPEC.md](SPEC.md).
+État du projet au 22/10/2026 (mis à jour après les notifications nommées et le compteur de messages en attente) : les derniers ajouts et changements, puis le plan du projet avec ce qui est fait et ce qui reste. La spec de référence est [SPEC.md](SPEC.md).
 
 ## Derniers ajouts et changements
+
+### Notifications : nom du groupe, regroupement, silence quand l'app est ouverte ; compteur et ordre des groupes (22/10)
+
+- **Rien ne sonne tant que l'app est ouverte** : l'app déverrouillée dit au serveur qu'elle l'est (`PUT /me/presence`, renouvelé toutes les 30 s, retiré au passage en arrière-plan ; colonne `profiles.awake_until`, valable 75 s). Le serveur n'envoie alors **aucune notification « message »** : la conversation ouverte les montre. Ce que le groupe attend de toi (demande d'accès, acceptation, nouveau code, départ d'un membre) est toujours envoyé, et s'affiche en bannière dans l'app.
+- **Le nom du groupe sur la notification** (Android) : le serveur ne connaît pas les noms, il n'envoie que l'identifiant du groupe et le type d'événement, en **silencieux**. L'app se réveille en arrière-plan (nouveau module natif `expo-task-manager` : **nouvelle build**) et affiche elle-même la notification avec le nom du groupe tel qu'il est sur ce téléphone. Les noms sont copiés dans le Keystore à chaque affichage de la liste (lisibles sans le code app, puisque l'app est verrouillée quand la notification arrive) ; un groupe dont le nom n'est pas encore connu donne « BaseSecrète · Nouveau message · groupe verrouillé ».
+- **Regroupées** : une seule notification par groupe. La suivante **remplace** la précédente (« Nouveau message » devient « Nouveaux messages ») au lieu de s'empiler, et ouvrir la conversation la retire. Sur iOS, même chose par `collapseId`, mais sans nom de groupe (l'app ne peut pas y réécrire la notification).
+- **Textes lisibles** à la place des phrases à l'envers : « Nouveau message », « Quelqu'un demande à entrer », « Demande acceptée : entre le code du groupe », « Un membre est parti : clé à renouveler », « Le code a changé : entre le nouveau ».
+- **Liste des groupes** : les **derniers ouverts en haut** (date de la dernière fois où la conversation a été à l'écran, gardée sur le téléphone), et sur chaque groupe, verrouillé ou non, un **compteur vert des messages en attente** (à la place du chevron), à partir du dernier message affiché sur ce téléphone. Le serveur ne renvoie qu'un nombre par groupe (`POST /groups/unread`) : sans les siens, sans les réactions (colonne `messages.quiet`, le serveur l'apprenait déjà), sans les expirés.
+- **À tester sur téléphone** après le nouveau build (le dev build n'a pas de Firebase) : réception avec l'app fermée (Doze, économiseur de batterie des constructeurs), remplacement de la notification, bannière des actions dans l'app, et le compteur.
+- Serveur : migration `0012_push_presence_unread` (`profiles.awake_until`, `push_tokens.platform`, `messages.quiet`), routes `PUT/DELETE /me/presence` et `POST /groups/unread` ; `PUT /me/push-token` prend la plateforme. À appliquer et redéployer.
 
 ### Mots-clés masqués dans les réglages du groupe (21/10)
 
@@ -263,7 +273,7 @@ Le changement s'applique à tous les écrans de code : verrouillage, inscription
 | | Fonction | État |
 |---|---|---|
 | ✅ | Images et vocaux chiffrés | Images : envoi depuis la galerie (recompressées en JPEG, métadonnées GPS retirées), chiffrées avec une clé par fichier, stockées dans un bucket Neon privé, affichées en mémoire seulement, et enregistrables dans la galerie depuis la vue plein écran. Vocaux : bouton micro quand le champ est vide, enregistrement AAC mono 32 kb/s (5 min max), chiffrés comme les images (clé par fichier, même bucket, aucun changement serveur), forme d'onde dans le message chiffré, lecture au toucher. Comme sur les messageries courantes : toucher la forme d'onde saute à cet endroit, la glisser fait défiler ; bouton de vitesse 1× / 1,5× / 2× (gardée d'un vocal à l'autre pendant la session) ; un vocal terminé enchaîne sur le suivant de la conversation, jusqu'à une pause, un autre vocal lancé ou la sortie de la conversation. Le fichier de l'enregistreur est lu puis supprimé aussitôt ; pour l'écoute, l'audio déchiffré passe par un fichier temporaire du cache, supprimé au vocal suivant et au verrouillage (avec tout ce que l'enregistreur aurait laissé). Quitter l'app pendant un enregistrement l'annule. À tester sur téléphone (nouvelle build : module natif expo-audio). |
-| ✅ | Notifications push génériques | Fait : « uçer egassem » (message) et « esiuqer noitca » (demande d'accès, acceptation, nouveau code, départ d'un membre) ; le toucher demande les codes puis ouvre le groupe. Il manque les identifiants Firebase pour Android. |
+| ✅ | Notifications push | Fait : une par groupe, avec le nom du groupe ajouté par le téléphone (Android, push silencieux + tâche d'arrière-plan) ou une ligne générique (iOS) ; « Nouveau message » ou ce que le groupe attend ; rien tant que l'app est ouverte ; le toucher demande les codes puis ouvre le groupe. Il manque les identifiants Firebase pour Android et un build avec `expo-task-manager`. |
 | ✅ | Messages éphémères | Fait : réglage admin dans les réglages du groupe, purge toutes les 6 h sur le serveur |
 | ✅ | Rotation de clé quand un membre part | Fait, avec « quitter » et « retirer un membre » |
 

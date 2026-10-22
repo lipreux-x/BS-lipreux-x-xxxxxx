@@ -125,8 +125,9 @@
 | Les demandes d'entrée en attente | Clés privées, clés de groupe en clair |
 
 ### 4.7 Autres règles
-- Notifications push : texte générique, aucun nom de groupe ni contenu.
-  - Fait : deux phrases seulement, sans titre, écrites à l'envers : « uçer egassem » (« message reçu », au plus une toutes les 30 s par téléphone) et « esiuqer noitca » (« action requise », jamais limitée : envoyée aux admins quand quelqu'un demande à entrer ou qu'un membre part (clé à renouveler), au nouveau quand un admin l'accepte (clé à verrouiller sous le code), aux membres quand le code change). Les données ne portent que l'id du groupe (UUID). Le toucher ouvre l'écran du coffre (code app ou empreinte), puis le code du groupe, puis la conversation ou ce qui attend. Serveur : `push_tokens`, `server/src/lib/push.ts` ; app : `mobile/src/services/push.ts`.
+- Notifications push : le serveur n'envoie jamais un nom de groupe ni un contenu ; le téléphone ajoute le nom lui-même.
+  - Fait : le serveur n'envoie que l'id du groupe (UUID) et le type d'événement (`message`, ou ce que le groupe attend : `join_request`, `approved`, `member_left`, `code_changed`). Sur **Android**, la notification est **silencieuse** : l'app se réveille en arrière-plan (tâche `expo-task-manager`, app fermée ou non) et affiche elle-même **une notification par groupe, avec le nom du groupe tel que le téléphone le connaît** (gardé dans le Keystore, lisible sans le code app) et « Nouveau message » / « Nouveaux messages » (la nouvelle remplace la précédente : jamais une ligne par message) ou ce que le groupe attend. Sur **iOS**, la notification est visible, texte en clair sans nom de groupe (« Nouveau message », « Quelqu'un demande à entrer dans un groupe »…), une par groupe et par type (`collapseId`). « Message » : au plus une toutes les 30 s par téléphone, et **aucune tant que l'app est ouverte** (`PUT /me/presence` renouvelé toutes les 30 s, retiré au passage en arrière-plan ; `profiles.awake_until`). Les autres types sont toujours envoyés (bannière dans l'app). Ouvrir la conversation retire sa notification. Le toucher ouvre l'écran du coffre (code app ou empreinte), puis le code du groupe, puis la conversation ou ce qui attend. Serveur : `push_tokens` (avec `platform`), `server/src/lib/push.ts` ; app : `mobile/src/services/push.ts`.
+- Liste des groupes : les derniers ouverts en haut ; un **compteur de messages en attente** sur chaque groupe, verrouillé ou non (`POST /groups/unread` : un nombre par groupe à partir du dernier message affiché sur ce téléphone, sans les siens, les réactions ni les expirés).
 - Images/vocaux : chiffrés côté client avant upload dans Neon Storage / R2 (URLs présignées) (clé de fichier aléatoire, elle-même chiffrée avec la clé de groupe).
   - Images (fait) : recompressées en JPEG 1600 px avant envoi, ce qui retire les métadonnées (GPS, appareil). Fichier chiffré en XChaCha20-Poly1305 avec une clé aléatoire, AD = `bs/v1/attachment` + groupe + id de la pièce jointe (`mobile/src/crypto/attachment.ts`). La clé, les dimensions et un mini-aperçu flou voyagent dans un message de groupe normal (chiffré + signé).
   - Serveur : table `attachments` + bucket privé `attachments` (clé d'objet `<groupe>/<id>`). URL d'upload valable 5 min et limitée à la taille annoncée (10 Mo max, 60 envois/h). Téléchargement réservé aux membres tant que le message existe. Le fichier est supprimé avec le message éphémère, à la fermeture du groupe, ou après 24 h s'il n'a jamais été envoyé.
@@ -293,7 +294,7 @@ Composants partagés : `PinPad`, `PinDots`, `VaultSquare` (animation), `MessageB
 
 **v0.2**
 - [x] Images et vocaux chiffrés
-- [ ] Notifications push génériques
+- [x] Notifications push (nom du groupe ajouté par le téléphone, jamais le contenu)
 - [ ] Messages éphémères
 - [ ] Rotation de clé à la sortie d'un membre
 

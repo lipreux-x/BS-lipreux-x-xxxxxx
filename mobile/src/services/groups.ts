@@ -88,6 +88,16 @@ export interface GroupListItem {
   state: GroupLockState;
   /** Self-destruct date (ISO), null for a permanent group. */
   expiresAt: string | null;
+  /** Messages from others past the last one shown here (0 offline, or for a pending group). */
+  unread: number;
+  /** When the conversation was last on screen on this phone (ms), null if never. */
+  openedAt: number | null;
+}
+
+/** What the phone keeps of a conversation's reading: the last seq shown, and when it was last on screen. */
+interface SeenRecord {
+  seq: number;
+  at: number;
 }
 
 /** The server put someone in the group no admin let in, or a key it should not have. */
@@ -124,7 +134,8 @@ export class KeyChangedError extends Error {
 const isActive = (g: GroupSummary | PendingGroupSummary): g is GroupSummary => g.status === 'active';
 
 /**
- * The groups we belong to (or asked to join). A group this phone kept
+ * The groups we belong to (or asked to join), the ones opened last first,
+ * each with the number of messages waiting in it. A group this phone kept
  * something for that the server no longer lists (self-destructed, removed,
  * request refused) is erased from the phone too: keys, name, counters,
  * messages. Without network: the last list saved on the phone (`offline`).
@@ -137,9 +148,12 @@ export async function listGroups(s: Session): Promise<{ items: GroupListItem[]; 
       if (!alive.has(id)) await forgetGroup(s, id, upTo);
     }
   }
+  const seen = new Map(await Promise.all(groups.map(async (g) => [g.id, await s.local.getRecord<SeenRecord>(records.seen(g.id)).catch(() => null)] as const)));
+  const unread = offline ? {} : await unreadCounts(s, groups.filter(isActive).map((g) => [g.id, seen.get(g.id)?.seq ?? 0]));
   const items = await Promise.all(
-    groups.map(async (g) =>
-      isActive(g)
+    groups.map(async (g): Promise<GroupListItem> => {
+      const openedAt = seen.get(g.id)?.at ?? null;
+      return isActive(g)
         ? {
             id: g.id,
             name: (await s.vault.meta(g.id, s.masterKey))?.name ?? null,
@@ -147,11 +161,39 @@ export async function listGroups(s: Session): Promise<{ items: GroupListItem[]; 
             role: g.role,
             state: await lockState(s, g),
             expiresAt: g.expiresAt ?? null,
+            unread: unread[g.id] ?? 0,
+            openedAt,
           }
-        : { id: g.id, name: null, keyVersion: 0, role: 'member' as const, state: { kind: 'pending' as const }, expiresAt: g.expiresAt ?? null },
-    ),
+        : { id: g.id, name: null, keyVersion: 0, role: 'member', state: { kind: 'pending' }, expiresAt: g.expiresAt ?? null, unread: 0, openedAt };
+    }),
   );
+  // Opened last on top; never opened after, in the server's order.
+  items.sort((a, b) => (b.openedAt ?? 0) - (a.openedAt ?? 0));
   return { items, offline };
+}
+
+/** Best effort: without an answer (old server, outage) nothing waits anywhere. */
+async function unreadCounts(s: Session, cursors: (readonly [string, number])[]): Promise<Record<string, number>> {
+  if (!cursors.length) return {};
+  try {
+    return await s.api.unread(Object.fromEntries(cursors));
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * The conversation is on screen, showing messages up to `seq`: nothing up to
+ * there waits any more, and the group moves to the top of the list. The seq
+ * never goes back (a screen that opens before its history loads passes 0).
+ */
+export async function markOpened(s: Session, groupId: string, seq = 0) {
+  try {
+    const prev = await s.local.getRecord<SeenRecord>(records.seen(groupId));
+    await s.local.setRecord(records.seen(groupId), { seq: Math.max(prev?.seq ?? 0, seq), at: Date.now() });
+  } catch {
+    // Store closed (locked meanwhile): the next opening marks it.
+  }
 }
 
 type AnyGroupSummary = GroupSummary | PendingGroupSummary;
