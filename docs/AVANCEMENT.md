@@ -12,7 +12,7 @@
 - **Textes lisibles** à la place des phrases à l'envers : « Nouveau message », « Quelqu'un demande à entrer », « Demande acceptée : entre le code du groupe », « Un membre est parti : clé à renouveler », « Le code a changé : entre le nouveau ».
 - **Liste des groupes** : les **derniers ouverts en haut** (date de la dernière fois où la conversation a été à l'écran, gardée sur le téléphone), et sur chaque groupe, verrouillé ou non, un **compteur vert des messages en attente** (à la place du chevron), à partir du dernier message affiché sur ce téléphone. Le serveur ne renvoie qu'un nombre par groupe (`POST /groups/unread`) : sans les siens, sans les réactions (colonne `messages.quiet`, le serveur l'apprenait déjà), sans les expirés.
 - **À tester sur téléphone** après le nouveau build (le dev build n'a pas de Firebase) : réception avec l'app fermée (Doze, économiseur de batterie des constructeurs), remplacement de la notification, bannière des actions dans l'app, et le compteur.
-- Serveur : migration `0012_push_presence_unread` (`profiles.awake_until`, `push_tokens.platform`, `messages.quiet`), routes `PUT/DELETE /me/presence` et `POST /groups/unread` ; `PUT /me/push-token` prend la plateforme. À appliquer et redéployer.
+- Serveur : migration `0012_push_presence_unread` (`profiles.awake_until`, `push_tokens.platform`, `messages.quiet`), routes `PUT/DELETE /me/presence` et `POST /groups/unread` ; `PUT /me/push-token` prend la plateforme. Appliquée et redéployée sur la branche dev le 22/10.
 
 ### Mots-clés masqués dans les réglages du groupe (21/10)
 
@@ -213,6 +213,7 @@ Le changement s'applique à tous les écrans de code : verrouillage, inscription
 
 ### Mise en production (branche Neon `dev`)
 
+- Notifications nommées et compteur (22/10) : migration `0012_push_presence_unread` appliquée (`drizzle-kit migrate`), API redéployée (`neon deploy --env .env --no-env-pull`). Vérifié : `/health` répond, `PUT /me/presence` et `POST /groups/unread` refusent sans connexion (401). Reste à tester sur téléphone avec un nouveau build.
 - Notifications (20/10) : migration `0011_push_tokens` appliquée, API redéployée. Vérifié : `/health` répond, `PUT /me/push-token` refuse sans connexion (401). Pas encore testé de bout en bout : il manque les identifiants Firebase et un nouveau build.
 - Se connecter (19/10) : migration `0008_account_backup` appliquée (colonnes `backup_*` dans `profiles`, table `login_attempts`), API redéployée, smoke test et test e2e de l'app passés contre l'API déployée.
 
