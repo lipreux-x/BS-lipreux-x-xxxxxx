@@ -2,7 +2,7 @@ import * as Haptics from 'expo-haptics';
 import { Mic, X } from 'lucide-react-native';
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Led } from '../Led';
-import { colors, fonts, hotKey, lcd, led, mono, steel } from '../theme';
+import { colors, fonts, hotKey, lcd, led, mono, neon, steel } from '../theme';
 import type { Quote } from './replies';
 import { durationLabel } from './waveform';
 
@@ -189,6 +189,7 @@ const styles = StyleSheet.create({
   },
   // The send key: the blade's red, lit in rose on its upper edges.
   hot: {
+    ...neon.box('rgba(255, 59, 78, 0.45)', 10),
     backgroundColor: hotKey.face,
     borderTopColor: hotKey.edgeLight,
     borderLeftColor: hotKey.edgeLight,

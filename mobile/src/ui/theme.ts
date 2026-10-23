@@ -110,6 +110,15 @@ export const dangerKey = { face: '#3A0B10', edge: blade.neon } as const;
 /** My message plates: sky steel, lit on the upper edges in a paler blue. */
 export const coldPlate = { edgeLight: '#2F6E94', edgeDark: '#071A26' } as const;
 
+/**
+ * Neon: a light's own halo around it, as on the icon's blade. `text` for a
+ * Text (its shadow, with no offset), `box` for a View (its box shadow).
+ */
+export const neon = {
+  text: (color: string, radius = 8) => ({ textShadowColor: color, textShadowRadius: radius, textShadowOffset: { width: 0, height: 0 } }),
+  box: (color: string, radius = 10) => ({ boxShadow: `0 0 ${radius}px ${color}` }),
+} as const;
+
 export const space = { xs: 4, sm: 8, md: 16, lg: 24, xl: 40 } as const;
 
 export const type = {

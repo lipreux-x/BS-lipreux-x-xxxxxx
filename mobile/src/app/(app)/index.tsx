@@ -9,7 +9,7 @@ import { listGroups, type GroupListItem } from '@/services/groups';
 import { setNotificationNames } from '@/services/push';
 import { countdownLabel } from '@/ui/chat/timeline';
 import { LCD_ON } from '@/ui/InviteCode';
-import { colors, led, space, type } from '@/ui/theme';
+import { colors, led, neon, space, type } from '@/ui/theme';
 import { Wordmark } from '@/ui/Wordmark';
 
 // SPEC §2.2: every group shows a lock and no message preview while locked.
@@ -195,8 +195,8 @@ const styles = StyleSheet.create({
   },
   ledOpen: { backgroundColor: led.ok, boxShadow: `0 0 4px ${led.ok}` },
   ledKey: { backgroundColor: led.busy, boxShadow: `0 0 4px ${led.busy}` },
-  openText: { color: led.ok },
-  closedText: { color: colors.danger },
+  openText: { color: led.ok, ...neon.text(led.ok, 6) },
+  closedText: { color: colors.danger, ...neon.text(colors.danger, 6) },
   ledClosed: { backgroundColor: colors.danger, boxShadow: `0 0 4px ${colors.danger}` },
   chevron: { color: colors.textDim, fontSize: 24 },
   unread: { color: LCD_ON, fontFamily: MONO, fontSize: 18, letterSpacing: 1, textShadowColor: LCD_ON, textShadowRadius: 6 },

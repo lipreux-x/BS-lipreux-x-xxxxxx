@@ -1,5 +1,5 @@
 import { ActivityIndicator, Pressable, StyleSheet, Text } from 'react-native';
-import { colors, fonts } from './theme';
+import { colors, fonts, neon } from './theme';
 
 export function Button({
   title,
@@ -39,7 +39,7 @@ export function Button({
 const styles = StyleSheet.create({
   base: { height: 52, borderRadius: 14, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 20 },
   // The action, in the blade's red; ghost: a cold outline.
-  primary: { backgroundColor: colors.primary, borderWidth: 1, borderColor: colors.hot },
+  primary: { backgroundColor: colors.primary, borderWidth: 1, borderColor: colors.hot, ...neon.box('rgba(255, 59, 78, 0.45)', 14) },
   ghost: { borderWidth: 1, borderColor: colors.accentFg },
   label: { fontSize: 16, fontFamily: fonts.semibold, letterSpacing: 0.3 },
 });

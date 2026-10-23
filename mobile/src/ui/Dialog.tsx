@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState, type ReactElement } from 'react';
 import { Animated, Easing, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Led } from './Led';
 import { PrivacyCover } from './PrivacyCover';
-import { colors, dangerKey, fonts, hotKey, space, steel } from './theme';
+import { colors, dangerKey, fonts, hotKey, neon, space, steel } from './theme';
 
 export interface DialogButton {
   text: string;
@@ -213,6 +213,7 @@ const styles = StyleSheet.create({
   keyInRow: { flex: 1 },
   // The action: the hot red key (as the send key); near-black red when it destroys something.
   go: {
+    ...neon.box('rgba(255, 59, 78, 0.45)', 10),
     backgroundColor: colors.primary,
     borderTopColor: hotKey.edgeLight,
     borderLeftColor: hotKey.edgeLight,
