@@ -1,13 +1,15 @@
 import { StyleSheet, View } from 'react-native';
-import { colors, led } from './theme';
+import { led } from './theme';
 
-export type LedState = 'off' | 'amber' | 'green' | 'red';
+export type LedState = 'off' | 'busy' | 'ok' | 'error';
 
-const GLOW = { amber: led.amber, green: led.green, red: colors.danger } as const;
-
-/** Status LED, same as on the safe's code display: grey off, amber busy, green ok, red error. */
+/**
+ * Status LED, same as on the safe's code display: dark off, a pale filament
+ * while something is being done, sky blue when it is right or open, neon
+ * red on an error or something shut.
+ */
 export function Led({ state, size = 8 }: { state: LedState; size?: number }) {
-  const glow = state === 'off' ? null : GLOW[state];
+  const glow = state === 'off' ? null : led[state];
   return (
     <View
       style={[
@@ -20,5 +22,5 @@ export function Led({ state, size = 8 }: { state: LedState; size?: number }) {
 }
 
 const styles = StyleSheet.create({
-  led: { backgroundColor: '#2E2E2E', borderWidth: 1, borderColor: '#000000' },
+  led: { backgroundColor: led.off, borderWidth: 1, borderColor: '#000000' },
 });

@@ -3,14 +3,14 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Avatar, isAvatarId } from '../avatars';
 import { Led, type LedState } from '../Led';
 import type { ReactionId } from '@/crypto';
-import { colors, fonts, led, mono, space } from '../theme';
+import { coldPlate, colors, fonts, led, mono, space, steel } from '../theme';
 import { ReactionChips } from './ReactionKeys';
 import type { ReactionCount } from './reactions';
 import type { Quote } from './replies';
 
 export type DeliveryStatus = 'sending' | 'sent' | 'failed';
 
-const STATUS_LED: Record<DeliveryStatus, LedState> = { sending: 'amber', sent: 'green', failed: 'red' };
+const STATUS_LED: Record<DeliveryStatus, LedState> = { sending: 'busy', sent: 'ok', failed: 'error' };
 const STATUS_LABEL: Record<DeliveryStatus, string> = { sending: 'Envoi en cours', sent: 'Envoyé', failed: 'Échec de l’envoi' };
 
 /**
@@ -23,10 +23,10 @@ const DOUBLE_TAP_MS = 300;
 
 /**
  * A message as a small plate of the safe: bevelled edges like the keypad
- * keys, anthracite for mine, darker metal for others. The corner on the
+ * keys, sky steel for mine, darker metal for others. The corner on the
  * sender's side is squared off on the last message of a run. Footer: time
- * on the LCD font and, for mine, the delivery LED (amber sending, green
- * stored on the server, red failed).
+ * on the LCD font and, for mine, the delivery LED (pale while sending,
+ * blue once stored on the server, red failed).
  *
  * Others' messages have a column on the left with the sender's avatar, and
  * their name above the bubble, on every message.
@@ -178,10 +178,8 @@ export function DaySeparator({ label, onLongPress }: { label: string; onLongPres
 }
 
 const AVATAR = 34;
-const ANTHRACITE_LIGHT = '#565D63';
-const ANTHRACITE_DARK = '#16191B';
-const METAL_LIGHT = '#3A3F44';
-const METAL_DARK = '#050505';
+const METAL_LIGHT = steel.screw;
+const METAL_DARK = steel.bezelDark;
 
 const styles = StyleSheet.create({
   rowMine: { alignSelf: 'flex-end', maxWidth: '82%' },
@@ -194,13 +192,13 @@ const styles = StyleSheet.create({
   plate: { borderRadius: 10, paddingHorizontal: 12, paddingTop: 8, paddingBottom: 6, borderWidth: 1 },
   mine: {
     backgroundColor: colors.accent,
-    borderTopColor: ANTHRACITE_LIGHT,
-    borderLeftColor: ANTHRACITE_LIGHT,
-    borderBottomColor: ANTHRACITE_DARK,
-    borderRightColor: ANTHRACITE_DARK,
+    borderTopColor: coldPlate.edgeLight,
+    borderLeftColor: coldPlate.edgeLight,
+    borderBottomColor: coldPlate.edgeDark,
+    borderRightColor: coldPlate.edgeDark,
   },
   theirs: {
-    backgroundColor: '#1D2023',
+    backgroundColor: steel.plate,
     borderTopColor: METAL_LIGHT,
     borderLeftColor: METAL_LIGHT,
     borderBottomColor: METAL_DARK,
@@ -223,10 +221,10 @@ const styles = StyleSheet.create({
   timeMine: { color: 'rgba(255,255,255,0.65)' },
   failure: { color: colors.danger, fontSize: 11 },
   highlighted: {
-    borderTopColor: led.amber,
-    borderLeftColor: led.amber,
-    borderBottomColor: led.amber,
-    borderRightColor: led.amber,
+    borderTopColor: led.busy,
+    borderLeftColor: led.busy,
+    borderBottomColor: led.busy,
+    borderRightColor: led.busy,
   },
   // Recessed like the code display, with the edge lit in the accent.
   quote: {

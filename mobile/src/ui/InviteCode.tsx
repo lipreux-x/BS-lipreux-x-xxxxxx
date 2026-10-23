@@ -2,13 +2,13 @@ import { Fragment, useState } from 'react';
 import { Platform, StyleSheet, Text, TextInput, View } from 'react-native';
 import { INVITE_LENGTH, nextInvite } from './invite';
 import { Led, type LedState } from './Led';
-import { colors, mono, space, type } from './theme';
+import { colors, lcd, mono, space, steel, type } from './theme';
 
 /**
  * Invitation code typed on the safe's backlit screen, same as the app code
  * display: 16 slots in groups of 4, the dashes printed on the screen (never
  * typed: a typed dash is ignored), the next slot lit while the field has
- * focus. Status LED off while it is incomplete, green once the 16 characters
+ * focus. Status LED off while it is incomplete, blue once the 16 characters
  * are there, red when the server refused it.
  *
  * The real text field (letters and digits only, so the cursor always stays
@@ -54,19 +54,19 @@ export function InviteCodeInput({ value, onChange, error }: { value: string; onC
           style={styles.input}
         />
       </View>
-      <Led state={error ? 'red' : complete ? 'green' : 'off'} size={10} />
+      <Led state={error ? 'error' : complete ? 'ok' : 'off'} size={10} />
     </View>
   );
 }
 
 /**
- * A created invitation, shown on the same screen; green LED: ready to give.
+ * A created invitation, shown on the same screen; blue LED: ready to give.
  * `led` null: no LED (a name plate, see below, must not read as a second code
  * display). `size`: the text size, 18 by default.
  */
 export function InviteCodeDisplay({
   code,
-  led = 'green',
+  led = 'ok',
   size,
   compact = false,
 }: {
@@ -105,8 +105,8 @@ export function NamePlate({ label, name }: { label?: string; name: string }) {
 }
 
 /** Lit characters on the safe's screen (also the unread counter of the group list). */
-export const LCD_ON = '#C8D3C0';
-const LCD_OFF = '#2C3830';
+export const LCD_ON = lcd.on;
+const LCD_OFF = lcd.off;
 
 const styles = StyleSheet.create({
   bezel: {
@@ -118,10 +118,10 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     backgroundColor: colors.surface2,
     borderWidth: 1,
-    borderTopColor: '#3A3A3A',
-    borderLeftColor: '#3A3A3A',
-    borderBottomColor: '#050505',
-    borderRightColor: '#050505',
+    borderTopColor: steel.bezelLight,
+    borderLeftColor: steel.bezelLight,
+    borderBottomColor: steel.bezelDark,
+    borderRightColor: steel.bezelDark,
   },
   bezelPlain: { paddingRight: 8 },
   bezelCompact: { padding: 4, paddingRight: 4, alignSelf: 'center', maxWidth: '100%' },
@@ -134,7 +134,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 12,
     borderRadius: 4,
-    backgroundColor: '#0B100C',
+    backgroundColor: lcd.glass,
     borderWidth: 2,
     borderTopColor: '#000000',
     borderLeftColor: '#000000',

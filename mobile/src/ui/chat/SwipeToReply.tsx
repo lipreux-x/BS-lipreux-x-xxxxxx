@@ -2,7 +2,7 @@ import * as Haptics from 'expo-haptics';
 import { Reply } from 'lucide-react-native';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Animated, PanResponder, StyleSheet, View } from 'react-native';
-import { colors } from '../theme';
+import { colors, steel } from '../theme';
 
 const TRIGGER = 56; // drag distance that answers the message
 const MAX = 84;
@@ -77,11 +77,11 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#24282B',
+    backgroundColor: steel.key,
     borderWidth: 1,
-    borderTopColor: '#4A5056',
-    borderLeftColor: '#4A5056',
-    borderBottomColor: '#0A0B0C',
-    borderRightColor: '#0A0B0C',
+    borderTopColor: steel.edgeLight,
+    borderLeftColor: steel.edgeLight,
+    borderBottomColor: steel.edgeDark,
+    borderRightColor: steel.edgeDark,
   },
 });

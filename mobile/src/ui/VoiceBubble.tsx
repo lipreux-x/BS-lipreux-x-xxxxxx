@@ -6,7 +6,7 @@ import { loadAttachment, type Session } from '@/services/groups';
 import { usePlayback, useRecordingVoice, voicePlayer, type VoiceTrack } from '@/services/voice';
 import { LONG_PRESS_MS } from './chat/MessageBubble';
 import { durationLabel, stretch } from './chat/waveform';
-import { colors, led, mono } from './theme';
+import { colors, hotKey, led, mono } from './theme';
 
 // A finger that moves less than this before the long press is still holding, not scrubbing.
 const HOLD_SLOP = 10;
@@ -168,14 +168,14 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.forest,
+    backgroundColor: colors.primary,
     borderWidth: 1,
-    borderTopColor: '#2E8A48',
-    borderLeftColor: '#2E8A48',
-    borderBottomColor: '#0F3D1D',
-    borderRightColor: '#0F3D1D',
+    borderTopColor: hotKey.edgeLight,
+    borderLeftColor: hotKey.edgeLight,
+    borderBottomColor: hotKey.edgeDark,
+    borderRightColor: hotKey.edgeDark,
   },
-  keyPressed: { transform: [{ translateY: 1 }], backgroundColor: '#185A2B' },
+  keyPressed: { transform: [{ translateY: 1 }], backgroundColor: hotKey.facePressed },
   // Off while a voice message is being recorded.
   keyOff: { opacity: 0.35 },
   // Taller than the bars: an easier target for the finger. Wide enough that
@@ -183,7 +183,7 @@ const styles = StyleSheet.create({
   // the bars (40 bars and their gaps).
   wave: { flex: 1, minWidth: 150, height: 34, flexDirection: 'row', alignItems: 'center', gap: 2 },
   bar: { flex: 1, borderRadius: 1, backgroundColor: 'rgba(255,255,255,0.3)' },
-  barLit: { backgroundColor: led.green },
+  barLit: { backgroundColor: led.ok },
   thumb: {
     position: 'absolute',
     top: (34 - THUMB) / 2,
@@ -191,9 +191,9 @@ const styles = StyleSheet.create({
     height: THUMB,
     marginLeft: -THUMB / 2,
     borderRadius: THUMB / 2,
-    backgroundColor: led.green,
+    backgroundColor: led.ok,
     borderWidth: 1,
-    borderColor: '#0F3D1D',
+    borderColor: colors.accent,
   },
   // Shown while the message is loaded in the player, as on the usual messaging apps.
   // Same width for 1×, 1,5× and 2×: the waveform doesn't shift when it changes.

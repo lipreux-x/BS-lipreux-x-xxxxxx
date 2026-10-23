@@ -259,22 +259,34 @@ Composants partagés : `PinPad`, `PinDots`, `VaultSquare` (animation), `MessageB
 
 ## 8. Direction artistique
 
-- **Fond : noir (style Sephora)** `#000000`, surfaces `#0D0D0D` / `#1A1A1A`, bordures `#2A2A2A`.
-- Texte : blanc `#FFFFFF`, secondaire `#8A8A8A`.
-- ✅ **Accent principal : gris anthracite** — `#383E42` (RAL 7016) pour les aplats (boutons, face du coffre, texte blanc dessus : 11:1) et `#9AA1A7` pour les traits et textes sur le noir (points du code, bordures, liens : 7,8:1). Remplace l’Or Coffre initialement choisi.
-- ✅ **Seconde couleur : Vert forêt `#1E6B34`** — touche d'envoi, statuts « ouvert / envoyé ». (Texte blanc dessus : contraste 6,6:1.) Mes messages sont en anthracite `#383E42` (texte blanc : 11:1), ceux des autres en métal plus sombre.
-- Typo : une sans-serif géométrique (ex. *Inter* ou *Space Grotesk*), chiffres du pavé en grand.
-- Ambiance : coffre-fort / club privé. Peu d'éléments, beaucoup de noir, animations courtes et nettes.
-- Rayures fines noir/blanc possibles en clin d'œil Sephora (écran d'onboarding uniquement).
+Charte « la lame » (octobre 2026) : un coffre noir dont l’acier reste sombre et neutre, éclairé par deux lumières. La froide (bleu ciel) est la lumière de l’information ; la chaude (rouge néon) celle de l’action. Des filets pâles font les reflets.
 
-### Palettes d'accent proposées
+| Rôle | Couleur | Usage |
+|---|---|---|
+| Fond | `#000000` | Partout. Surfaces `#0A0D10` / `#161B20`, bordures `#262D34`, acier des touches et plaques (voir `steel` dans `theme.ts`). |
+| Texte | `#FFFFFF`, secondaire `#8A95A0` | |
+| Bleu ciel clair (pointe du haut) | `#7FE6FF` | Caractères allumés des écrans LCD (code, invitation, compteur de non-lus). 14,7:1 sur noir. |
+| Bleu ciel (haut de la lame) | `#4FC3FF` | Traits, liens, icônes, teinte du header ; LED « ok / ouvert » ; rétroéclairage du lecteur d’empreinte. 10,6:1 sur noir. Aplats froids (mes messages, option choisie) en acier bleu `#0E2E42` (texte blanc 14:1). |
+| Rouge-rose (transition) | `#FF5A78` | « Secrète » du wordmark, arêtes éclairées des touches d’action, lumière du portail. 7:1 sur noir. |
+| Rouge néon (bas de la lame et pointe) | `#FF3B4E` | LED « erreur / fermé », alertes, ce qui ne se défait pas ; couleur de l’icône de notification. Touches d’action (envoi, ouvrir, confirmer) : aplat `#8E1B2A` (texte blanc 9:1), arête rose, dessous `#4A0E14`. Touche destructrice : `#3A0B10` à l’arête néon. |
+| Filets lumineux | `#EAFCFF` à ~55 % | LED « en cours », glints, écran du code qui flashe quand il est accepté, bulles du portail. |
+
+- Écrans LCD du coffre : verre `#060B10`, caractères éteints `#17303D`.
+- LED d’état (écran du code, liste des groupes, messages, invitations) : éteinte `#1A2026`, **en cours** filament, **ok / ouvert** bleu ciel, **erreur / fermé** rouge néon.
+- Portail du coffre : bord bleu ciel clair, corps du bleu (bord) au rouge néon (cœur), courants rose et filaments pâles ; sa lumière sur le cadre et le mur est rose.
+- Logo : l’œil blanc, la serrure en dégradé vertical bleu ciel clair → rouge néon.
+- Réactions : bleu ciel, filament, rose clair `#FF8DA1`, rouge néon, bleu ciel clair.
+- Typo : Space Grotesk (wordmark, titres, chiffres du pavé, boutons) ; corps en police système ; monospace sur les écrans LCD.
+- Ambiance : coffre-fort / club privé. Peu d’éléments, beaucoup de noir, animations courtes et nettes.
+
+Tout ce qui nomme une teinte vit dans `mobile/src/ui/theme.ts` (`blade`, `colors`, `led`, `lcd`, `steel`, `hotKey`, `dangerKey`, `coldPlate`, `calm`) ; les couleurs des réactions dans `chat/reactions.ts`. Essayer l’autre piste (vert terminal à la place du rouge) se fait là, sans toucher aux écrans.
+
+### Pistes écartées
 | Nom | Accent | Ambiance |
 |---|---|---|
-| Or Coffre ⭐ | `#D4AF37` | Luxe, coffre-fort, très bien avec le noir |
-| Rouge Code | `#E50035` | Alerte, passion, énergie |
-| Vert Terminal | `#00FF9C` | Hacker, « base secrète » |
+| Or Coffre | `#D4AF37` | Luxe, coffre-fort (première DA, remplacée par l’anthracite `#383E42` + vert forêt `#1E6B34`, puis par la lame) |
+| Vert Terminal | `#00FF9C` | Hacker, « base secrète » — l’alternative encore à l’étude |
 | Violet Néon | `#9B5CFF` | Moderne, nocturne, fun entre potes |
-| Bleu Glace | `#5CE1FF` | Froid, tech, sécurisé |
 
 ---
 

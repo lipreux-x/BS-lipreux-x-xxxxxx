@@ -1,7 +1,7 @@
 import { ArrowLeftRight } from 'lucide-react-native';
 import { useState } from 'react';
 import { Platform, Pressable, StyleSheet, Text, TextInput, View, type StyleProp, type TextStyle } from 'react-native';
-import { colors, space } from './theme';
+import { colors, space, steel } from './theme';
 
 /** Characters in reverse order (code points, so an emoji stays whole). */
 export const reversed = (text: string) => Array.from(text).reverse().join('');
@@ -72,9 +72,9 @@ export function PasswordField({
 }
 
 const KEY = 38;
-const METAL = '#24282B';
-const LIGHT_EDGE = '#4A5056';
-const DARK_EDGE = '#0A0B0C';
+const METAL = steel.key;
+const LIGHT_EDGE = steel.edgeLight;
+const DARK_EDGE = steel.edgeDark;
 
 const styles = StyleSheet.create({
   wrap: { justifyContent: 'center' },
@@ -101,7 +101,7 @@ const styles = StyleSheet.create({
   keyOn: { backgroundColor: colors.accent },
   // Pressed: the bevel inverts, the key looks pushed in.
   pressed: {
-    backgroundColor: '#1B1E20',
+    backgroundColor: steel.keyPressed,
     borderTopColor: DARK_EDGE,
     borderLeftColor: DARK_EDGE,
     borderBottomColor: LIGHT_EDGE,

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Button } from './Button';
 import { countdownLabel, dateTimeLabel } from './chat/timeline';
-import { colors, fonts, space, type } from './theme';
+import { colors, fonts, space, steel, type } from './theme';
 
 export const MAX_LIFETIME_DAYS = 365;
 
@@ -103,13 +103,13 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#24282B',
+    backgroundColor: steel.key,
     borderWidth: 1.5,
-    borderTopColor: '#4A5056',
-    borderLeftColor: '#4A5056',
-    borderBottomColor: '#0A0B0C',
-    borderRightColor: '#0A0B0C',
+    borderTopColor: steel.edgeLight,
+    borderLeftColor: steel.edgeLight,
+    borderBottomColor: steel.edgeDark,
+    borderRightColor: steel.edgeDark,
   },
-  keyPressed: { backgroundColor: '#1B1E20', borderTopColor: '#0A0B0C', borderLeftColor: '#0A0B0C', borderBottomColor: '#4A5056', borderRightColor: '#4A5056' },
+  keyPressed: { backgroundColor: steel.keyPressed, borderTopColor: steel.edgeDark, borderLeftColor: steel.edgeDark, borderBottomColor: steel.edgeLight, borderRightColor: steel.edgeLight },
   keyLabel: { color: colors.text, fontSize: 22, fontFamily: fonts.medium },
 });

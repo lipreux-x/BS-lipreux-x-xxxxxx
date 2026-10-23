@@ -4,7 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import type { ReactionId } from '@/crypto';
 import { copySensitive } from '@/services/clipboard';
 import { PrivacyCover } from '../PrivacyCover';
-import { colors, fonts, space } from '../theme';
+import { colors, fonts, space, steel } from '../theme';
 import { QuoteBlock } from './MessageBubble';
 import { ReactionKeys } from './ReactionKeys';
 import type { Quote } from './replies';
@@ -146,8 +146,8 @@ export function ActionKey({ label, onPress, dim, danger }: { label: string; onPr
   );
 }
 
-const LIGHT_EDGE = '#4A5056';
-const DARK_EDGE = '#0A0B0C';
+const LIGHT_EDGE = steel.edgeLight;
+const DARK_EDGE = steel.edgeDark;
 
 const styles = StyleSheet.create({
   backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' },
@@ -156,7 +156,7 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
     borderTopWidth: 1,
-    borderTopColor: '#2E2E2E',
+    borderTopColor: steel.panelEdge,
     padding: space.md,
     gap: space.sm,
   },
@@ -166,7 +166,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#24282B',
+    backgroundColor: steel.key,
     borderWidth: 1.5,
     borderTopColor: LIGHT_EDGE,
     borderLeftColor: LIGHT_EDGE,
@@ -174,7 +174,7 @@ const styles = StyleSheet.create({
     borderRightColor: DARK_EDGE,
   },
   pressed: {
-    backgroundColor: '#1B1E20',
+    backgroundColor: steel.keyPressed,
     borderTopColor: DARK_EDGE,
     borderLeftColor: DARK_EDGE,
     borderBottomColor: LIGHT_EDGE,

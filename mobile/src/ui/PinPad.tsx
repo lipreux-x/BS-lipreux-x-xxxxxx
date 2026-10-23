@@ -1,7 +1,7 @@
 import * as Haptics from 'expo-haptics';
 import { useMemo } from 'react';
 import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
-import { colors, fonts } from './theme';
+import { colors, fonts, steel } from './theme';
 
 const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '⌫'] as const;
 const GAP = 12;
@@ -78,9 +78,9 @@ export function PinPad({
   );
 }
 
-const METAL = '#24282B';
-const LIGHT_EDGE = '#4A5056';
-const DARK_EDGE = '#0A0B0C';
+const METAL = steel.key;
+const LIGHT_EDGE = steel.edgeLight;
+const DARK_EDGE = steel.edgeDark;
 
 const styles = StyleSheet.create({
   plate: {
@@ -88,8 +88,8 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     backgroundColor: colors.surface,
     borderWidth: 1,
-    borderTopColor: '#2E2E2E',
-    borderLeftColor: '#2E2E2E',
+    borderTopColor: steel.panelEdge,
+    borderLeftColor: steel.panelEdge,
     borderBottomColor: '#000000',
     borderRightColor: '#000000',
   },
@@ -98,7 +98,7 @@ const styles = StyleSheet.create({
     width: 9,
     height: 9,
     borderRadius: 4.5,
-    backgroundColor: '#3A3F44',
+    backgroundColor: steel.screw,
     borderWidth: 1,
     borderColor: DARK_EDGE,
     alignItems: 'center',
@@ -123,7 +123,7 @@ const styles = StyleSheet.create({
   },
   // Pressed: the bevel inverts, the key looks pushed in.
   pressed: {
-    backgroundColor: '#1B1E20',
+    backgroundColor: steel.keyPressed,
     borderTopColor: DARK_EDGE,
     borderLeftColor: DARK_EDGE,
     borderBottomColor: LIGHT_EDGE,

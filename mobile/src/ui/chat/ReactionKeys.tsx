@@ -3,7 +3,7 @@ import { Coins, Crown, Flame, LockKeyhole, ThumbsUp, type LucideIcon } from 'luc
 import { useEffect, useRef, useState } from 'react';
 import { Animated, PanResponder, Pressable, StyleSheet, Text, View } from 'react-native';
 import { REACTIONS, type ReactionId } from '@/crypto';
-import { colors, mono } from '../theme';
+import { colors, mono, steel } from '../theme';
 import { moveKey, REACTION_COLORS, REACTION_LABELS, withAlpha, type ReactionCount } from './reactions';
 
 /*
@@ -208,12 +208,12 @@ export function ReactionKeys({ order, current, onPick, onReorder }: { order: Rea
 
 // Bevelled metal, as the keypad keys: lit on the upper-left edges, dark below.
 const PLATE = {
-  backgroundColor: '#1D2023',
+  backgroundColor: steel.plate,
   borderWidth: 1,
-  borderTopColor: '#4A5056',
-  borderLeftColor: '#4A5056',
-  borderBottomColor: '#0A0B0C',
-  borderRightColor: '#0A0B0C',
+  borderTopColor: steel.edgeLight,
+  borderLeftColor: steel.edgeLight,
+  borderBottomColor: steel.edgeDark,
+  borderRightColor: steel.edgeDark,
 } as const;
 
 const styles = StyleSheet.create({

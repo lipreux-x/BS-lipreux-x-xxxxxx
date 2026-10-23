@@ -2,9 +2,10 @@ import { memo, useEffect, useState } from 'react';
 import { Animated, Easing, StyleSheet, View } from 'react-native';
 import Svg, { Circle, Defs, Path, RadialGradient, Stop } from 'react-native-svg';
 import { blob, BUBBLES, CORE_STROKES, DARK_STROKES, LIGHT_STROKES, MID_STROKES } from './portalShapes';
+import { blade } from './theme';
 
-/** Portal light, also spilled onto the frame and the wall as the door opens. */
-export const PORTAL_GLOW = '#7CFF5B';
+/** Portal light, also spilled onto the frame and the wall as the door opens: the blade's rose. */
+export const PORTAL_GLOW = blade.rose;
 
 /** One turn of the currents; the centre turns twice as fast. */
 const SWIRL_MS = 2600;
@@ -16,31 +17,31 @@ const HOLE = 0.44;
 const Shapes = ({ paths, fill, opacity = 1 }: { paths: string[]; fill: string; opacity?: number }) =>
   paths.map((d) => <Path key={d} d={d} fill={fill} fillOpacity={opacity} />);
 
-/** Liquid edge: bright lime rim with a soft halo, around the green body. */
+/** Liquid edge: a pale sky-blue rim with a soft halo, around a body that goes from sky at its edge to neon red at its heart. */
 const Rim = memo(function Rim({ size }: { size: number }) {
   return (
     <Svg width={size} height={size} viewBox="0 0 100 100">
       <Defs>
         <RadialGradient id="ptBody" cx="0.5" cy="0.5" r="0.5">
-          <Stop offset="0" stopColor="#1E6A15" />
-          <Stop offset="0.55" stopColor="#3E9F27" />
-          <Stop offset="1" stopColor="#5CC530" />
+          <Stop offset="0" stopColor={blade.neon} />
+          <Stop offset="0.55" stopColor={blade.rose} />
+          <Stop offset="1" stopColor={blade.sky} />
         </RadialGradient>
       </Defs>
-      <Path d={blob(48.5, 1.6)} fill="#A6F24E" fillOpacity={0.35} />
-      <Path d={blob(46.5, 2.2, 1)} fill="#8CE639" />
+      <Path d={blob(48.5, 1.6)} fill={blade.skyLight} fillOpacity={0.35} />
+      <Path d={blob(46.5, 2.2, 1)} fill={blade.skyLight} />
       <Path d={blob(42.5, 1.6, 2)} fill="url(#ptBody)" />
     </Svg>
   );
 });
 
-/** The swirl's currents: wide dark ones, mid-green ones, thin bright streaks. */
+/** The swirl's currents: wide dark blue ones, rose ones, thin pale filaments. */
 const Currents = memo(function Currents({ size }: { size: number }) {
   return (
     <Svg width={size} height={size} viewBox="0 0 100 100">
-      <Shapes paths={DARK_STROKES} fill="#1F7316" />
-      <Shapes paths={MID_STROKES} fill="#74D63C" opacity={0.9} />
-      <Shapes paths={LIGHT_STROKES} fill="#C2FF73" opacity={0.85} />
+      <Shapes paths={DARK_STROKES} fill="#0E2E42" />
+      <Shapes paths={MID_STROKES} fill={blade.rose} opacity={0.9} />
+      <Shapes paths={LIGHT_STROKES} fill={blade.filament} opacity={0.85} />
     </Svg>
   );
 });
@@ -48,7 +49,7 @@ const Currents = memo(function Currents({ size }: { size: number }) {
 const Core = memo(function Core({ size }: { size: number }) {
   return (
     <Svg width={size} height={size} viewBox="0 0 100 100">
-      <Shapes paths={CORE_STROKES} fill="#4DB22D" opacity={0.8} />
+      <Shapes paths={CORE_STROKES} fill={blade.skyLight} opacity={0.8} />
     </Svg>
   );
 });
@@ -74,15 +75,16 @@ const Bubbles = memo(function Bubbles({ size }: { size: number }) {
   return (
     <Svg width={size} height={size} viewBox="0 0 100 100">
       {BUBBLES.map((b, i) => (
-        <Circle key={i} cx={b.cx} cy={b.cy} r={b.r} fill="#F5FFEC" />
+        <Circle key={i} cx={b.cx} cy={b.cy} r={b.r} fill={blade.filament} />
       ))}
     </Svg>
   );
 });
 
 /**
- * Green liquid portal inside the vault: a wobbly lime rim, currents of
- * green swirling into a black hole, white bubbles drifting round. Each layer
+ * Liquid portal inside the vault, lit like the blade: a wobbly sky-blue rim,
+ * a body going from sky at the edge to neon red at the heart, rose currents
+ * and pale filaments swirling into a black hole, pale bubbles drifting round. Each layer
  * turns at its own pace (the currents flow inwards, the centre faster, the
  * bubbles slower, the rim the other way so its edge ripples) and the whole
  * thing breathes. For the moment it pulls you in, `spin` adds a turn on top

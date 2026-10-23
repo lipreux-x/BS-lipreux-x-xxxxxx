@@ -8,14 +8,14 @@ import { colors, space, type } from './theme';
 /**
  * Title (or a free `header`, e.g. a name on the safe's screen) + safe display + safe keypad. `onComplete` returns an error message to
  * show (the display shakes, its LED goes red), null to move on, or an `open`
- * callback: the LED goes green for a beat, then `open` runs. While it runs, the
- * pad is disabled and the LED turns amber: Argon2id takes a moment on the phone.
- * `fadeOut`: after the green beat, the entry fades out before `open` runs, for
- * screens that `open` swaps in place (no transition would keep the green on).
+ * callback: the LED goes blue for a beat, then `open` runs. While it runs, the
+ * pad is disabled and the LED turns pale: Argon2id takes a moment on the phone.
+ * `fadeOut`: after the blue beat, the entry fades out before `open` runs, for
+ * screens that `open` swaps in place (no transition would keep the blue on).
  */
 export type CodeResult = string | null | (() => void);
 
-const GREEN_BEAT_MS = 550;
+const OK_BEAT_MS = 550;
 const FADE_OUT_MS = 320;
 
 export function CodeEntry({
@@ -86,7 +86,7 @@ export function CodeEntry({
     if (typeof result === 'function') {
       setSuccess(true);
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      await new Promise((r) => setTimeout(r, GREEN_BEAT_MS));
+      await new Promise((r) => setTimeout(r, OK_BEAT_MS));
       if (fadeOut) {
         await new Promise<void>((r) =>
           Animated.timing(opacity, { toValue: 0, duration: FADE_OUT_MS, easing: Easing.in(Easing.cubic), useNativeDriver: true }).start(() => r()),

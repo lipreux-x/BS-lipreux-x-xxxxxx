@@ -974,7 +974,7 @@ function Chat({ groupId, group, onUpdate, onLocked }: { groupId: string; group: 
     () => ({
       headerTitle: () => (
         <View style={styles.title}>
-          <Led state="green" size={7} />
+          <Led state="ok" size={7} />
           <Text style={styles.titleText} numberOfLines={1}>
             {group.name}
           </Text>
@@ -1012,13 +1012,13 @@ function Chat({ groupId, group, onUpdate, onLocked }: { groupId: string; group: 
       {dialogView}
       {!online ? (
         <View style={styles.banner}>
-          <Led state="amber" size={7} />
+          <Led state="busy" size={7} />
           <Text style={styles.bannerText}>HORS LIGNE — ENVOI AU RETOUR DU RÉSEAU</Text>
         </View>
       ) : null}
       {expiresAt ? (
         <View style={styles.banner}>
-          <Led state="red" size={7} />
+          <Led state="error" size={7} />
           <Text style={styles.bannerText} numberOfLines={1}>
             AUTODESTRUCTION {countdownLabel(expiresAt, now).toUpperCase()} — {dateTimeLabel(expiresAt, now).toUpperCase()}
           </Text>
@@ -1026,19 +1026,19 @@ function Chat({ groupId, group, onUpdate, onLocked }: { groupId: string; group: 
       ) : null}
       {alert ? (
         <View style={[styles.banner, styles.alertBanner]}>
-          <Led state="red" size={7} />
+          <Led state="error" size={7} />
           <Text style={styles.bannerText}>{alert.toUpperCase()}</Text>
         </View>
       ) : null}
       {newAdmin ? (
         <Pressable style={styles.banner} onPress={() => setNewAdmin(false)} accessibilityRole="button">
-          <Led state="amber" size={7} />
+          <Led state="busy" size={7} />
           <Text style={styles.bannerText}>LES ADMINS DU GROUPE ONT CHANGÉ — VOIR LES RÉGLAGES</Text>
         </Pressable>
       ) : null}
       {requests.length ? (
         <Pressable style={styles.banner} onPress={() => setReviewing(true)} accessibilityRole="button">
-          <Led state="amber" size={7} />
+          <Led state="busy" size={7} />
           <Text style={styles.bannerText}>
             {requests.length === 1 ? '1 DEMANDE D’ACCÈS — APPUIE POUR VOIR' : `${requests.length} DEMANDES D’ACCÈS — APPUIE POUR VOIR`}
           </Text>
@@ -1551,7 +1551,7 @@ const styles = StyleSheet.create({
   safety: { fontFamily: mono, fontSize: 15, letterSpacing: 1, color: colors.text, lineHeight: 22 },
   requestButtons: { flexDirection: 'row', gap: space.sm },
   requestButton: { flex: 1, paddingVertical: 12, borderRadius: 8, alignItems: 'center' },
-  accept: { backgroundColor: colors.forest },
+  accept: { backgroundColor: colors.primary },
   reject: { backgroundColor: colors.surface2, borderWidth: 1, borderColor: colors.border },
   requestButtonText: { color: colors.text, fontFamily: fonts.semibold },
   timeline: { paddingHorizontal: space.md, paddingVertical: space.sm, gap: 3, flexGrow: 1 },

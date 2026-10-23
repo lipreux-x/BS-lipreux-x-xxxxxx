@@ -15,13 +15,13 @@ export const REACTION_LABELS: Record<ReactionId, string> = {
   secret: 'Secret',
 };
 
-/** Each reaction's colour, in the safe's palette: LED green, keyhole gold, amber, ember, ice. */
+/** Each reaction's colour, along the blade: sky blue, pale filament, rose, neon red, the blade's upper tip. */
 export const REACTION_COLORS: Record<ReactionId, string> = {
-  like: '#3DD68C',
-  crown: '#D3B03A',
-  money: '#E8A33D',
-  fire: '#F06A3A',
-  secret: '#8FB8E8',
+  like: '#4FC3FF',
+  crown: '#EAFCFF',
+  money: '#FF8DA1',
+  fire: '#FF3B4E',
+  secret: '#7FE6FF',
 };
 
 /** "#RRGGBB" with an alpha, as rgba(). */

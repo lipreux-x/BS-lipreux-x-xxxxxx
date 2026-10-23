@@ -11,7 +11,7 @@ import { safeToDisplay } from '@/services/jpeg';
 import { Avatar, isAvatarId } from '../avatars';
 import { Led } from '../Led';
 import { Logo } from '../Logo';
-import { colors, fonts, mono } from '../theme';
+import { colors, fonts, hotKey, mono, steel } from '../theme';
 import { agoLabel } from '../chat/timeline';
 import { fitStory, isNew, openingIndex, storyExpiry, storyTap, type StoryMessage } from './stories';
 
@@ -308,7 +308,7 @@ export function StoriesBand({
             onPress={() => settle(!open)}
             style={styles.edgeMain}
           >
-            <Led state={failed ? 'red' : fresh ? 'green' : 'off'} size={6} />
+            <Led state={failed ? 'error' : fresh ? 'ok' : 'off'} size={6} />
             <Text style={styles.label}>
               STORIES · 24 H
               {failed
@@ -524,7 +524,7 @@ const styles = StyleSheet.create({
     paddingLeft: 16,
     paddingRight: 12,
     paddingBottom: 4,
-    backgroundColor: '#24282B',
+    backgroundColor: steel.key,
     borderTopWidth: 1,
     borderTopColor: 'rgba(255,255,255,0.12)',
   },
@@ -553,11 +553,11 @@ const styles = StyleSheet.create({
     width: 26,
     height: 26,
     borderRadius: 13,
-    backgroundColor: colors.forest,
+    backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  plusPressed: { backgroundColor: '#185A2B' },
+  plusPressed: { backgroundColor: hotKey.facePressed },
   pressed: { transform: [{ scale: 0.97 }] },
   // The photo's box, centred on its page over the blurred backdrop.
   page: {

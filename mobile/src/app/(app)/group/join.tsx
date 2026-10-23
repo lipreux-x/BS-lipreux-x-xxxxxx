@@ -16,7 +16,7 @@ import { colors, space } from '@/ui/theme';
  * which hands us the group key wrapped under the code.
  *
  * Keywords first, code last: the code is checked as it is typed, so the safe
- * display shows green (joined) or red (wrong code or keywords) right away.
+ * display shows blue (joined) or red (wrong code or keywords) right away.
  */
 type Step = { kind: 'keywords'; words?: string[] } | { kind: 'code'; words: string[] };
 

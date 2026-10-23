@@ -15,7 +15,7 @@ import { VaultDoor } from '@/ui/VaultDoor';
 // portal pulling you in and the `calm` backdrop filling the screen, so the calm background shows
 // at once and only the keypad fades in, as if it were waiting on the other side.
 // With the fingerprint on (Settings), the door opens on the safe's fingerprint reader instead of
-// the keypad, under the same name plate: tap the green print, it scans, the safe opens. "Taper le code" switches to the
+// the keypad, under the same name plate: tap the blue print, it scans, the safe opens. "Taper le code" switches to the
 // keypad; it is shown by itself when the code is due (every 48 h) or the fingerprint was dropped.
 export default function LockScreen() {
   const { status, vault, unlock, unlockWithBiometrics } = useSession();
@@ -29,8 +29,8 @@ export default function LockScreen() {
     void vault.canUseBiometrics().then(setBio);
   }, [vault]);
 
-  // The screen has no exit fade (see _layout), so it fades out here, the green LED still lit,
-  // before the app takes over; otherwise the green beat is cut off dry.
+  // The screen has no exit fade (see _layout), so it fades out here, the blue LED still lit,
+  // before the app takes over; otherwise the blue beat is cut off dry.
   const leave = (enter: () => void) => () =>
     Animated.timing(reveal, { toValue: 0, duration: 320, easing: Easing.in(Easing.cubic), useNativeDriver: true }).start(() => enter());
 

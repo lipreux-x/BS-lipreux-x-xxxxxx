@@ -15,7 +15,7 @@ export function StoryPreview({ image, onPublish, onCancel }: { image: PreparedIm
     <Modal visible={image !== null} animationType="slide" onRequestClose={onCancel} statusBarTranslucent>
       <SafeAreaView style={styles.screen}>
         <View style={styles.top}>
-          <Led state="green" size={7} />
+          <Led state="ok" size={7} />
           <Text style={styles.label}>NOUVELLE STORY · 24 H</Text>
           <Pressable accessibilityRole="button" accessibilityLabel="Annuler" hitSlop={12} onPress={onCancel}>
             <Text style={styles.close}>✕</Text>

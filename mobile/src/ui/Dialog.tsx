@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState, type ReactElement } from 'react';
 import { Animated, Easing, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Led } from './Led';
 import { PrivacyCover } from './PrivacyCover';
-import { colors, fonts, space } from './theme';
+import { colors, dangerKey, fonts, hotKey, space, steel } from './theme';
 
 export interface DialogButton {
   text: string;
@@ -19,8 +19,8 @@ interface Shown {
 
 /**
  * The app's own Alert.alert: a panel of the safe, its keys as metal keys
- * (cancel grey, the action green, or red when it cannot be undone, with a
- * red LED by the title). Same arguments as Alert.alert; no buttons: one "OK".
+ * (cancel steel, the action in the blade's red; what cannot be undone on a
+ * near-black red key with the neon edge and a red LED by the title). Same arguments as Alert.alert; no buttons: one "OK".
  *
  * Returns the function and the element to render in the screen: the dialog
  * is a `<Modal>` of that screen, so it also shows over modal screens on iOS.
@@ -102,7 +102,7 @@ function DialogModal({ shown, visible, onPick }: { shown: Shown | null; visible:
             </View>
           ))}
           <View style={styles.titleRow}>
-            {destructive ? <Led state="red" size={9} /> : null}
+            {destructive ? <Led state="error" size={9} /> : null}
             <Text style={styles.title} accessibilityRole="header">
               {shown.title}
             </Text>
@@ -124,7 +124,7 @@ function DialogModal({ shown, visible, onPick }: { shown: Shown | null; visible:
                   pressed && styles.pressed,
                 ]}
               >
-                <Text style={[styles.label, b.style === 'cancel' && styles.cancelLabel]} numberOfLines={1} adjustsFontSizeToFit>
+                <Text style={[styles.label, b.style === 'cancel' && styles.cancelLabel, b.style === 'destructive' && styles.dangerLabel]} numberOfLines={1} adjustsFontSizeToFit>
                   {b.text}
                 </Text>
               </Pressable>
@@ -138,9 +138,9 @@ function DialogModal({ shown, visible, onPick }: { shown: Shown | null; visible:
   );
 }
 
-const METAL = '#24282B';
-const LIGHT_EDGE = '#4A5056';
-const DARK_EDGE = '#0A0B0C';
+const METAL = steel.key;
+const LIGHT_EDGE = steel.edgeLight;
+const DARK_EDGE = steel.edgeDark;
 
 const styles = StyleSheet.create({
   backdrop: {
@@ -159,8 +159,8 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     backgroundColor: colors.surface,
     borderWidth: 1,
-    borderTopColor: '#2E2E2E',
-    borderLeftColor: '#2E2E2E',
+    borderTopColor: steel.panelEdge,
+    borderLeftColor: steel.panelEdge,
     borderBottomColor: '#000000',
     borderRightColor: '#000000',
     boxShadow: '0 12px 32px rgba(0,0,0,0.8)',
@@ -170,7 +170,7 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#3A3F44',
+    backgroundColor: steel.screw,
     borderWidth: 1,
     borderColor: DARK_EDGE,
     alignItems: 'center',
@@ -211,16 +211,16 @@ const styles = StyleSheet.create({
     borderRightColor: DARK_EDGE,
   },
   keyInRow: { flex: 1 },
-  // The action: forest green (as "open"), or red when it destroys something.
+  // The action: the hot red key (as the send key); near-black red when it destroys something.
   go: {
-    backgroundColor: colors.forest,
-    borderTopColor: '#3E9A58',
-    borderLeftColor: '#3E9A58',
+    backgroundColor: colors.primary,
+    borderTopColor: hotKey.edgeLight,
+    borderLeftColor: hotKey.edgeLight,
   },
   danger: {
-    backgroundColor: '#7A1F22',
-    borderTopColor: '#B0393D',
-    borderLeftColor: '#B0393D',
+    backgroundColor: dangerKey.face,
+    borderTopColor: dangerKey.edge,
+    borderLeftColor: dangerKey.edge,
   },
   // Pressed: the bevel inverts, the key looks pushed in.
   pressed: {
@@ -233,4 +233,5 @@ const styles = StyleSheet.create({
   },
   label: { color: colors.text, fontSize: 16, fontFamily: fonts.semibold },
   cancelLabel: { color: colors.accentFg, fontFamily: fonts.medium },
+  dangerLabel: { color: colors.hot },
 });

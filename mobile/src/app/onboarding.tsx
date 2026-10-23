@@ -124,7 +124,7 @@ export default function Onboarding() {
               return null;
             }
             try {
-              // Green LED and a success buzz on the code just typed, then straight to the home:
+              // Blue LED and a success buzz on the code just typed, then straight to the home:
               // the code was typed twice already, no need to type it a third time.
               return login && recovered ? await restore(recovered, code) : await register({ inviteCode: invite, username, password, appCode: code });
             } catch (e) {
@@ -142,11 +142,11 @@ export default function Onboarding() {
   const passwordState: LedState = !password
     ? 'off'
     : passwordProblem(password)
-      ? 'amber'
+      ? 'busy'
       : password2 && password !== password2
-        ? 'red'
+        ? 'error'
         : password === password2
-          ? 'green'
+          ? 'ok'
           : 'off';
 
   return (
