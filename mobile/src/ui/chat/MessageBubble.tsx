@@ -1,6 +1,7 @@
 import { Camera, Mic, Paperclip } from 'lucide-react-native';
 import { useRef, type ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, View, type StyleProp, type TextStyle } from 'react-native';
+import { accountTones } from '../accountColors';
 import { Avatar, isAvatarId } from '../avatars';
 import { Led, type LedState } from '../Led';
 import type { ReactionId } from '@/crypto';
@@ -32,7 +33,8 @@ const PROMPT = '❯';
  * right, lit in the hot green of the terminal; the others' on the left, in
  * the cold sky blue, each on a faint wash of its own light (green, blue).
  * The text of every entry is the same white, indented under its prompt.
- * No plates, no avatars.
+ * No plates, no avatars. An author who picked a color (Settings) has their
+ * prompt and name lit in it, and their entries washed with it.
  *
  * Footer in the prompt line: the time, and for mine the delivery LED (pale
  * while sending, blue once stored on the server, red failed).
@@ -42,7 +44,8 @@ const PROMPT = '❯';
  * dark metal for the others'. Theirs have the sender's avatar in a column on
  * the left and their name above the plate, on every message; the time and
  * the LED sit in the plate's footer. The corner on the sender's side is
- * squared off on the last message of a run.
+ * squared off on the last message of a run. An author's color, when picked,
+ * lights their name and tints their plates (a dark shade of it).
  *
  * A reply opens with the quoted message in a small recessed screen; tapping
  * it jumps to the original. A long press opens the message's actions.
@@ -52,6 +55,7 @@ export function MessageBubble({
   mine,
   author,
   avatar,
+  color,
   time,
   status,
   error,
@@ -73,6 +77,8 @@ export function MessageBubble({
   author?: string;
   /** Their avatar icon id (drawn on the plates only). */
   avatar?: string | null;
+  /** Their account color id (null: the default of the side). */
+  color?: string | null;
   time: string;
   status?: DeliveryStatus;
   /** Why the send failed, when known (e.g. "Image trop lourde"). */
@@ -98,6 +104,8 @@ export function MessageBubble({
   children: ReactNode;
 }) {
   const failed = status === 'failed';
+  const tones = accountTones(color);
+  const litText = tones ? { color: tones.lit } : null;
   const lastTap = useRef(0);
   const tap = () => {
     const now = Date.now();
@@ -125,7 +133,7 @@ export function MessageBubble({
     const column = (
       <View style={[plates.column, mine ? plates.columnMine : plates.columnTheirs]}>
         {!mine ? (
-          <Text style={plates.author} numberOfLines={1}>
+          <Text style={[plates.author, litText]} numberOfLines={1}>
             {author || '?'}
           </Text>
         ) : null}
@@ -134,6 +142,7 @@ export function MessageBubble({
           style={[
             plates.plate,
             mine ? plates.mine : plates.theirs,
+            tones && { backgroundColor: tones.face, ...bevel(tones.edgeLight, tones.edgeDark) },
             media && plates.media,
             last && (mine ? plates.tailMine : plates.tailTheirs),
             failed && plates.failed,
@@ -164,11 +173,11 @@ export function MessageBubble({
     <View style={[styles.entry, mine ? styles.entryMine : styles.entryTheirs]}>
       <Pressable
         {...press}
-        style={[styles.line, mine ? styles.lineMine : styles.lineTheirs, highlighted && styles.highlighted, failed && styles.failed]}
+        style={[styles.line, mine ? styles.lineMine : styles.lineTheirs, tones && { backgroundColor: tones.wash }, highlighted && styles.highlighted, failed && styles.failed]}
       >
         <View style={[styles.prompt, mine && styles.promptMine]}>
-          <Text style={[styles.promptChar, mine ? styles.hotText : styles.coldText]}>{PROMPT}</Text>
-          <Text style={[styles.author, mine ? styles.hotText : styles.coldText]} numberOfLines={1}>
+          <Text style={[styles.promptChar, mine ? styles.hotText : styles.coldText, litText]}>{PROMPT}</Text>
+          <Text style={[styles.author, mine ? styles.hotText : styles.coldText, litText]} numberOfLines={1}>
             {author || (mine ? 'moi' : '?')}
           </Text>
           <Text style={styles.time}>[{time}]</Text>

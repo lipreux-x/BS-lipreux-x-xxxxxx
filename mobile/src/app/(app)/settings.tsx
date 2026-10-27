@@ -12,6 +12,7 @@ import { registerPush, type PushStatus } from '@/services/push';
 import { WIPE_AFTER_CHOICES } from '@/services/vault';
 import { Avatar, isAvatarId, type AvatarId } from '@/ui/avatars';
 import { AvatarPicker } from '@/ui/AvatarPicker';
+import { AccountColorPicker, accountColor, isAccountColorId, type AccountColorId } from '@/ui/accountColors';
 import { Button } from '@/ui/Button';
 import { timeLabel } from '@/ui/chat/timeline';
 import { useDialog } from '@/ui/Dialog';
@@ -71,13 +72,37 @@ export default function Settings() {
   // undefined: not loaded yet (the server holds the choice, shared with group mates).
   const [avatar, setAvatar] = useState<AvatarId | null | undefined>(undefined);
   const [avatarError, setAvatarError] = useState<string | null>(null);
+  // Same for the color of my name and messages in the chats.
+  const [color, setColor] = useState<AccountColorId | null | undefined>(undefined);
+  const [colorError, setColorError] = useState<string | null>(null);
 
   useEffect(() => {
     session.api
       .me()
-      .then((me) => setAvatar(isAvatarId(me.avatar) ? me.avatar : null))
-      .catch(() => setAvatarError('Avatar indisponible hors ligne.'));
+      .then((me) => {
+        setAvatar(isAvatarId(me.avatar) ? me.avatar : null);
+        setColor(isAccountColorId(me.color) ? me.color : null);
+      })
+      .catch(() => {
+        setAvatarError('Avatar indisponible hors ligne.');
+        setColorError('Couleur indisponible hors ligne.');
+      });
   }, [session]);
+
+  const myLit = accountColor(color);
+
+  async function chooseColor(next: AccountColorId | null) {
+    const previous = color ?? null;
+    setColor(next); // shown at once, put back if the server refuses
+    setColorError(null);
+    try {
+      await session.api.setColor(next);
+      profiles.setColor(session.account.userId, next);
+    } catch (e) {
+      setColor(previous);
+      setColorError(e instanceof NetworkError ? 'Pas de réseau.' : 'Impossible de changer la couleur.');
+    }
+  }
 
   async function chooseAvatar(next: AvatarId | null) {
     const previous = avatar ?? null;
@@ -115,13 +140,17 @@ export default function Settings() {
         <View style={styles.profile}>
           <Avatar id={avatar ?? null} size={64} />
           <View style={{ flex: 1, gap: 2 }}>
-            <Text style={type.heading}>{session.account.username}</Text>
+            <Text style={[type.heading, myLit && { color: myLit }]}>{session.account.username}</Text>
             <Text style={type.dim}>Visible par les membres de tes groupes.</Text>
           </View>
         </View>
         <Text style={[styles.subTitle, styles.subTitleRow]}>Photo de profil</Text>
         <AvatarPicker value={avatar ?? null} onChange={(id) => void chooseAvatar(id)} disabled={avatar === undefined} />
         {avatarError ? <Text style={styles.error}>{avatarError}</Text> : null}
+        <Text style={[styles.subTitle, styles.subTitleRow]}>Couleur dans les discussions</Text>
+        <Text style={type.dim}>Ton nom et tes messages prennent cette couleur, pour tous les membres.</Text>
+        <AccountColorPicker value={color ?? null} onChange={(id) => void chooseColor(id)} disabled={color === undefined} />
+        {colorError ? <Text style={styles.error}>{colorError}</Text> : null}
       </Section>
 
       <Section title="Inviter un pote" icon={UserPlus}>

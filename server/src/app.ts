@@ -79,6 +79,8 @@ const b64Bytes = (len?: { exact?: number; max?: number }) =>
 const username = z.string().regex(/^[A-Za-z0-9_.-]{3,24}$/);
 // Avatar icons only (mobile src/ui/avatars.tsx): no uploaded picture ever reaches the server.
 export const AVATARS = ['mask', 'spy', 'bank', 'vault', 'gem', 'gold', 'loot', 'piggy', 'key', 'drill', 'lookout'] as const;
+// Account colors (mobile src/ui/accountColors.tsx): a name, never a free value.
+export const COLORS = ['sky', 'phosphor', 'cyan', 'violet', 'rose', 'amber', 'orange', 'gold'] as const;
 // Password-sealed identity (mobile src/crypto/backup.ts). Same bounds as the phone checks.
 const keyBackup = z.object({
   salt: b64Bytes({ exact: 16 }),
@@ -335,7 +337,7 @@ app.use('/groups/*', requireAuth);
 app.get('/me', async (c) => {
   const [p] = await db.select().from(profiles).where(eq(profiles.id, c.get('userId')));
   if (!p) throw new HTTPException(404, { message: 'not_found' });
-  return c.json({ id: p.id, username: p.username, publicKeyBox: p.publicKeyBox, publicKeySign: p.publicKeySign, avatar: p.avatar });
+  return c.json({ id: p.id, username: p.username, publicKeyBox: p.publicKeyBox, publicKeySign: p.publicKeySign, avatar: p.avatar, color: p.color });
 });
 
 /** Picks one of the avatar icons, or null for the default silhouette. */
@@ -343,6 +345,13 @@ app.put('/me/avatar', async (c) => {
   const { avatar } = await body(c, z.object({ avatar: z.enum(AVATARS).nullable() }));
   await db.update(profiles).set({ avatar }).where(eq(profiles.id, c.get('userId')));
   return c.json({ avatar });
+});
+
+/** Picks one of the account colors, or null for the default. */
+app.put('/me/color', async (c) => {
+  const { color } = await body(c, z.object({ color: z.enum(COLORS).nullable() }));
+  await db.update(profiles).set({ color }).where(eq(profiles.id, c.get('userId')));
+  return c.json({ color });
 });
 
 /** This phone's push token and platform (what it gets: see lib/push.ts). */
@@ -412,6 +421,7 @@ app.get('/profiles', async (c) => {
       publicKeyBox: profiles.publicKeyBox,
       publicKeySign: profiles.publicKeySign,
       avatar: profiles.avatar,
+      color: profiles.color,
     })
     .from(profiles)
     .where(

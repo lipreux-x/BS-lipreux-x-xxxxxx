@@ -37,6 +37,8 @@ export interface Profile extends PublicIdentity {
   username: string;
   /** Drawn avatar id (ui/avatars.tsx); null or absent: the default silhouette. */
   avatar?: string | null;
+  /** Account color id (ui/accountColors.tsx); null or absent: the default. */
+  color?: string | null;
 }
 
 /** A key handout: the group key for one version, wrapped, sealed to us and signed by an admin. */
@@ -250,6 +252,11 @@ export class Api {
   /** One of the drawn avatars, or null for the default silhouette. */
   setAvatar(avatar: string | null) {
     return this.request<{ avatar: string | null }>('/me/avatar', { method: 'PUT', json: { avatar } });
+  }
+
+  /** One of the account colors, or null for the default. */
+  setColor(color: string | null) {
+    return this.request<{ color: string | null }>('/me/color', { method: 'PUT', json: { color } });
   }
 
   /** This phone's Expo push token and platform (what the server sends it: services/push.ts). */

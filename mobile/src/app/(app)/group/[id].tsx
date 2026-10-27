@@ -1436,6 +1436,8 @@ interface Line {
   mine: boolean;
   author: string;
   avatar?: string | null;
+  /** The author's account color id. */
+  color?: string | null;
   text: string | null;
   image?: ImageBody;
   local?: PreparedImage;
@@ -1496,9 +1498,17 @@ const Timeline = memo(function Timeline({
   /** Two quick taps on a delivered message: the first reaction of this phone's order. */
   onDoubleTap(m: ChatMessage): void;
 }) {
-  const { session } = useUnlocked();
+  const { session, profiles } = useUnlocked();
   const me = session.account.userId;
   const myName = session.account.username;
+  // My color, for my messages still on their way (the sent ones carry it from my profile).
+  const [myColor, setMyColor] = useState<string | null>(null);
+  useEffect(() => {
+    profiles
+      .get([me])
+      .then((known) => setMyColor(known.get(me)?.color ?? null))
+      .catch(() => {});
+  }, [profiles, me]);
   // Original lit for a moment after tapping a quote.
   const [highlight, setHighlight] = useState<string | null>(null);
   const highlightTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -1515,6 +1525,7 @@ const Timeline = memo(function Timeline({
         mine: m.mine,
         author: m.senderName,
         avatar: m.senderAvatar,
+        color: m.senderColor,
         text: m.text,
         image: m.image ?? undefined,
         voice: m.voice ?? undefined,
@@ -1532,6 +1543,7 @@ const Timeline = memo(function Timeline({
         at: new Date(p.at),
         mine: true,
         author: myName,
+        color: myColor,
         text: p.kind === 'text' ? p.text : null,
         local: p.kind === 'image' ? p.image : undefined,
         localVoice: p.kind === 'voice' ? p.voice : undefined,
@@ -1543,7 +1555,7 @@ const Timeline = memo(function Timeline({
       })),
     ];
     return buildTimeline(lines, new Date()).reverse();
-  }, [messages, pending, me, myName, reactions]);
+  }, [messages, pending, me, myName, myColor, reactions]);
 
   const jumpTo = useCallback(
     (messageId: string) => {
@@ -1671,6 +1683,7 @@ const TimelineRow = memo(function TimelineRow({
           mine={line.mine}
           author={line.author}
           avatar={line.avatar}
+          color={line.color}
           time={timeLabel(line.at)}
           status={line.status}
           error={pending?.error}

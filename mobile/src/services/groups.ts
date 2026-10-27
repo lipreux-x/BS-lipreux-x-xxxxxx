@@ -964,6 +964,12 @@ export class ProfileCache {
     const p = this.byId.get(id);
     if (p) this.byId.set(id, { ...p, avatar });
   }
+
+  /** After changing our own color: the same. */
+  setColor(id: string, color: string | null) {
+    const p = this.byId.get(id);
+    if (p) this.byId.set(id, { ...p, color });
+  }
 }
 
 /** A contact's key fingerprint, from the keys pinned on this phone (compare with the one on their phone). */
@@ -982,6 +988,8 @@ export interface ChatMessage {
   senderId: string;
   senderName: string;
   senderAvatar: string | null;
+  /** The sender's account color id (null: the default). */
+  senderColor: string | null;
   // All null: could not be verified/decrypted (or a malformed attachment body).
   text: string | null;
   image: ImageBody | null;
@@ -1040,6 +1048,7 @@ export async function decryptMessages(s: Session, profiles: ProfileCache, keys: 
       senderId: m.senderId,
       senderName: p?.username ?? '?',
       senderAvatar: p?.avatar ?? null,
+      senderColor: p?.color ?? null,
       text,
       image,
       voice,

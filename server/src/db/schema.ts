@@ -24,6 +24,9 @@ export const profiles = pgTable(
     // One of the avatar icons (AVATARS in app.ts), never an uploaded image.
     // Null: the default empty silhouette. Visible to group mates, like the username.
     avatar: text('avatar'),
+    // One of the account colors (COLORS in app.ts): their name and the edge of their
+    // messages in the chats. Null: the default (green for mine, sky blue for the others').
+    color: text('color'),
     // Password-sealed copy of the identity secret keys, to sign in again on a
     // phone that lost its data (mobile src/crypto/backup.ts). Null: no backup.
     backupParams: text('backup_params'), // JSON { salt, ops, mem } handed out before sign-in

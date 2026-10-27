@@ -4,6 +4,12 @@
 
 ## Derniers ajouts et changements
 
+### Une couleur par compte dans les discussions (27/10)
+
+- **Réglages → Profil → « Couleur dans les discussions »** : chacun choisit sa couleur parmi 8 (Ciel, Phosphore, Turquoise, Violet, Rose, Ambre, Orange, Or ; pas de rouge, gardé pour les erreurs) ou « Par défaut » (vert pour soi, bleu ciel pour les autres, comme avant).
+- Tous les membres la voient : **la bulle de ses messages est teintée de sa couleur** (une version foncée, pour que le texte blanc reste lisible), et son nom est dans la couleur vive (en **Terminal**, le `❯` et le nom ; **avec avatars**, le nom au-dessus de la plaque).
+- Comme l'avatar, c'est un simple nom de couleur stocké sur le serveur (`profiles.color`, route `PUT /me/color`, renvoyé par `/me` et `/profiles`) : migration `0016_profile_color`, appliquée sur dev et déployée ; pas en prod. La couleur d'un autre membre se met à jour à la prochaine ouverture de l'app (comme son avatar).
+
 ### Gestes : coffre qui s'ouvre seul, glisser entre Groupes et Tête-à-tête, glisser pour revenir (27/10)
 
 - **La porte du coffre s'ouvre toute seule** au lancement : elle se met en place, ses verrous claquent, puis la molette tourne et le portail aspire, sans toucher. Un toucher l'ouvre sans attendre. La plaque dit « Ouverture du coffre ».
