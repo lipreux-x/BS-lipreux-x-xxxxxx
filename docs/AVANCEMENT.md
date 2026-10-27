@@ -4,10 +4,11 @@
 
 ## Derniers ajouts et changements
 
-### Gestes : coffre qui s'ouvre seul, glisser entre Groupes et Privé, glisser pour revenir (27/10)
+### Gestes : coffre qui s'ouvre seul, glisser entre Groupes et Tête-à-tête, glisser pour revenir (27/10)
 
 - **La porte du coffre s'ouvre toute seule** au lancement : elle se met en place, ses verrous claquent, puis la molette tourne et le portail aspire, sans toucher. Un toucher l'ouvre sans attendre. La plaque dit « Ouverture du coffre ».
-- **Groupes / Privé côte à côte** : on passe de l'un à l'autre en glissant la liste vers la gauche ou la droite. Le pavé bleu de la touche choisie passe d'une touche à l'autre en suivant le doigt (l'espace entre les deux reste vide), et toucher une touche fait glisser la page.
+- **« Privé » devient « Tête-à-tête »** (touche, titre de la liste, fiche, notification) : « Privé » laissait croire que les groupes ne l'étaient pas.
+- **Groupes / Tête-à-tête côte à côte** : on passe de l'un à l'autre en glissant la liste vers la gauche ou la droite. Le pavé bleu de la touche choisie passe d'une touche à l'autre en suivant le doigt (l'espace entre les deux reste vide), et toucher une touche fait glisser la page.
 - **Dans une conversation, glisser vers la droite = retour** à la liste, n'importe où sur l'écran (pas seulement depuis le bord). L'écran suit le doigt et une flèche apparaît à gauche ; un geste rapide suffit.
 - **Répondre à un message se fait maintenant en le glissant vers la gauche** (avant : vers la droite), comme sur Telegram, pour laisser la droite au retour.
 

@@ -272,7 +272,7 @@ export default function GroupSettings() {
         </>
       )}
 
-      <Label style={styles.section}>{direct ? 'Discussion privée' : `Membres · ${info.members.length}`}</Label>
+      <Label style={styles.section}>{direct ? 'Tête-à-tête' : `Membres · ${info.members.length}`}</Label>
       <View style={styles.card}>
         {shown.map((m, i) => (
           <View key={m.userId} style={[styles.row, i > 0 && styles.divider]}>
@@ -296,7 +296,7 @@ export default function GroupSettings() {
                 hitSlop={8}
                 disabled={busy}
                 accessibilityRole="button"
-                accessibilityLabel={`Écrire en privé à ${m.username}`}
+                accessibilityLabel={`Écrire à ${m.username} en tête-à-tête`}
                 // The settings sheet gives way to the new conversation.
                 onPress={() => router.replace({ pathname: '/group/direct', params: { peer: m.userId } })}
                 style={styles.directBtn}

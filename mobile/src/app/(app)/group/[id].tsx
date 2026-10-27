@@ -402,7 +402,7 @@ function GroupUnlock({ groupId, onOpen }: { groupId: string; onOpen(g: OpenGroup
             title={codeTitle}
             subtitle={
               direct
-                ? 'Discussion privée, chiffrée pour vous deux. Choisis un code pour la verrouiller sur ce téléphone.'
+                ? 'Tête-à-tête, chiffré pour vous deux. Choisis un code pour la verrouiller sur ce téléphone.'
                 : 'La clé est arrivée. Entre le code du groupe pour la protéger sur ce téléphone.'
             }
             onComplete={async (code) => {

@@ -125,7 +125,7 @@ export default function GroupsList() {
             ListHeaderComponent={
               shown?.length ? (
                 <View style={styles.section}>
-                  <Label icon={direct ? MessageSquareLock : LockKeyhole}>{direct ? 'Discussions privées' : 'Groupes'}</Label>
+                  <Label icon={direct ? MessageSquareLock : LockKeyhole}>{direct ? 'Tête-à-tête' : 'Groupes'}</Label>
                   <Text style={labelText}>{openCount > 0 ? `${openCount} ouvert · ${shown.length}` : `${shown.length}`}</Text>
                 </View>
               ) : undefined
@@ -151,10 +151,10 @@ export default function GroupsList() {
                   <View style={styles.emptyScreen}>
                     <MessageSquareLock size={34} color={lcd.off} strokeWidth={1.75} />
                   </View>
-                  <Text style={type.heading}>Aucune discussion privée</Text>
+                  <Text style={type.heading}>Aucun tête-à-tête</Text>
                   <Text style={[type.dim, styles.centerText]}>
                     Pour écrire à une seule personne : ouvre un groupe où vous êtes tous les deux, puis sa fiche (la roue dentée), et touche la bulle à
-                    cadenas à côté de son nom. La discussion est chiffrée pour vous deux, et chacun la verrouille avec son propre code.
+                    cadenas à côté de son nom. Le tête-à-tête est chiffré pour vous deux, et chacun la verrouille avec son propre code.
                   </Text>
                 </View>
               ) : groups ? (
@@ -209,7 +209,7 @@ export default function GroupsList() {
         <Segment
           options={[
             { label: keyLabel('Groupes', false), value: 'groups' as const },
-            { label: keyLabel('Privé', true), value: 'direct' as const },
+            { label: keyLabel('Tête-à-tête', true), value: 'direct' as const },
           ]}
           value={shownSpace}
           onChange={choose}
