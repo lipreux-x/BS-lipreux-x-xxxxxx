@@ -8,9 +8,10 @@ const TRIGGER = 56; // drag distance that answers the message
 const MAX = 84;
 
 /**
- * Drag a message to the right to answer it. The reply arrow fades in on the
- * left; past the trigger point the phone ticks once, and letting go answers.
- * Only clearly horizontal drags are taken, so the list still scrolls.
+ * Drag a message to the left to answer it. The reply arrow fades in on the
+ * right; past the trigger point the phone ticks once, and letting go answers.
+ * Only clearly horizontal drags are taken, so the list still scrolls; to the
+ * right, the drag goes back to the list (SwipeBack around the screen).
  */
 export function SwipeToReply({ onReply, children }: { onReply?(): void; children: ReactNode }) {
   const [x] = useState(() => new Animated.Value(0));
@@ -25,12 +26,12 @@ export function SwipeToReply({ onReply, children }: { onReply?(): void; children
   // eslint-disable-next-line react-hooks/refs
   const [pan] = useState(() =>
     PanResponder.create({
-      onMoveShouldSetPanResponder: (_e, g) => !!reply.current && g.dx > 12 && Math.abs(g.dx) > Math.abs(g.dy) * 2,
+      onMoveShouldSetPanResponder: (_e, g) => !!reply.current && g.dx < -12 && Math.abs(g.dx) > Math.abs(g.dy) * 2,
       onPanResponderTerminationRequest: () => false,
       onPanResponderMove: (_e, g) => {
         // Follows the finger, then resists past the trigger point.
-        const dx = Math.max(0, g.dx);
-        x.setValue(dx <= TRIGGER ? dx : Math.min(MAX, TRIGGER + (dx - TRIGGER) * 0.3));
+        const dx = Math.max(0, -g.dx);
+        x.setValue(-(dx <= TRIGGER ? dx : Math.min(MAX, TRIGGER + (dx - TRIGGER) * 0.3)));
         if (dx >= TRIGGER && !armed.current) {
           armed.current = true;
           void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -51,8 +52,8 @@ export function SwipeToReply({ onReply, children }: { onReply?(): void; children
   );
 
   if (!onReply) return <>{children}</>;
-  const iconOpacity = x.interpolate({ inputRange: [0, TRIGGER * 0.4, TRIGGER], outputRange: [0, 0.4, 1], extrapolate: 'clamp' });
-  const iconScale = x.interpolate({ inputRange: [0, TRIGGER], outputRange: [0.6, 1], extrapolate: 'clamp' });
+  const iconOpacity = x.interpolate({ inputRange: [-TRIGGER, -TRIGGER * 0.4, 0], outputRange: [1, 0.4, 0], extrapolate: 'clamp' });
+  const iconScale = x.interpolate({ inputRange: [-TRIGGER, 0], outputRange: [1, 0.6], extrapolate: 'clamp' });
   return (
     <View>
       <Animated.View pointerEvents="none" style={[styles.icon, { opacity: iconOpacity, transform: [{ scale: iconScale }] }]}>
@@ -66,10 +67,10 @@ export function SwipeToReply({ onReply, children }: { onReply?(): void; children
 }
 
 const styles = StyleSheet.create({
-  // A small metal disc on the left, behind the message.
+  // A small metal disc on the right, behind the message.
   icon: {
     position: 'absolute',
-    left: 4,
+    right: 4,
     top: '50%',
     marginTop: -16,
     width: 32,

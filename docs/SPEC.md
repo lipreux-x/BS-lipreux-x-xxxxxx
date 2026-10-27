@@ -18,7 +18,7 @@
 
 ### 2.1 Écran d'ouverture (verrou)
 1. L'utilisateur ouvre l'app → écran noir avec **un gros carré centré** (logo/icône BaseSecrète, légère animation de « respiration »).
-2. **Tap sur le carré** → le carré s'ouvre (animation) et laisse place à un **pavé numérique** + 6 points.
+2. Le carré **s'ouvre tout seul** (animation ; un tap l'ouvre sans attendre) et laisse place à un **pavé numérique** + 6 points.
 3. L'utilisateur saisit son **code à 6 chiffres**.
    - Correct → animation de déverrouillage → page Messagerie.
    - Incorrect → vibration + shake des points. Compteur d'essais (voir §4.4).

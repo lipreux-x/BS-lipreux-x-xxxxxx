@@ -1,7 +1,19 @@
 import { Stack, useFocusEffect, useRouter } from 'expo-router';
 import { Bomb, LockKeyhole, LockKeyholeOpen, MessageSquareLock, Plus, Settings, type LucideIcon } from 'lucide-react-native';
-import { useCallback, useState } from 'react';
-import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Animated,
+  FlatList,
+  Pressable,
+  RefreshControl,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+  type ScrollViewInstance,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { wipe } from '@/crypto/encoding';
 import { useUnlocked } from '@/session/SessionProvider';
@@ -27,9 +39,9 @@ import { Working } from '@/ui/Working';
 // first; lit digits on the right, like an invitation code, count the messages
 // waiting inside, locked or not (a number, never a word of them).
 //
-// Two spaces, switched by the keys at the top: the groups, and the private
-// conversations (two people, opened from a group's sheet). Each key counts
-// what waits in its space.
+// Two spaces, side by side: the groups, and the private conversations (two
+// people, opened from a group's sheet). Switched by the keys at the top, or by
+// sliding the list sideways; each key counts what waits in its space.
 type Space = 'groups' | 'direct';
 
 /** The space last shown, kept while the app is unlocked (back on this screen, it is the same). */
@@ -46,9 +58,30 @@ export default function GroupsList() {
   // Why the last refresh failed: no network, or the server answered an error.
   const [problem, setProblem] = useState<'offline' | 'error' | null>(null);
   const [shownSpace, setSpace] = useState<Space>(lastSpace);
+  const { width } = useWindowDimensions();
+  const pager = useRef<ScrollViewInstance>(null);
+  // How far the pages have slid (0 = groups, `width` = private): the keys' blue plate glides along with it.
+  const [slid] = useState(() => new Animated.Value(lastSpace === 'direct' ? width : 0));
+  const slide = useMemo(() => Animated.divide(slid, width), [slid, width]);
+  // A key pressed: the space it asked for, while the pages slide over to it (the one passed on the way is not chosen).
+  const target = useRef<Space | null>(null);
+  const show = setSpace;
+  useEffect(() => {
+    lastSpace = shownSpace;
+  }, [shownSpace]);
   const choose = (s: Space) => {
-    lastSpace = s;
-    setSpace(s);
+    show(s);
+    target.current = s;
+    pager.current?.scrollTo({ x: s === 'direct' ? width : 0, animated: true });
+  };
+  // Slid by the finger: the key follows as soon as the other page is more than half in.
+  const onSlide = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const s: Space = Math.round(e.nativeEvent.contentOffset.x / width) === 1 ? 'direct' : 'groups';
+    if (target.current) {
+      if (s === target.current) target.current = null;
+      return;
+    }
+    if (s !== shownSpace) show(s);
   };
 
   const load = useCallback(async () => {
@@ -76,11 +109,80 @@ export default function GroupsList() {
     }, [load]),
   );
 
-  const direct = shownSpace === 'direct';
-  const shown = groups?.filter((g) => g.direct === direct) ?? null;
-  const openCount = shown?.filter((g) => openGroups.has(g.id)).length ?? 0;
   const waiting = (d: boolean) => groups?.filter((g) => g.direct === d).reduce((n, g) => n + g.unread, 0) ?? 0;
   const keyLabel = (label: string, d: boolean) => (waiting(d) > 0 ? `${label} · ${waiting(d) > 99 ? '99+' : waiting(d)}` : label);
+
+  // A space's page: its list, side by side with the other one in the pager.
+  const page = (direct: boolean) => {
+    const shown = groups?.filter((g) => g.direct === direct) ?? null;
+    const openCount = shown?.filter((g) => openGroups.has(g.id)).length ?? 0;
+    return (
+          <FlatList
+            style={{ width }}
+            data={shown ?? []}
+            keyExtractor={(g) => g.id}
+            extraData={groupsVersion}
+            ListHeaderComponent={
+              shown?.length ? (
+                <View style={styles.section}>
+                  <Label icon={direct ? MessageSquareLock : LockKeyhole}>{direct ? 'Discussions privées' : 'Groupes'}</Label>
+                  <Text style={labelText}>{openCount > 0 ? `${openCount} ouvert · ${shown.length}` : `${shown.length}`}</Text>
+                </View>
+              ) : undefined
+            }
+            // Edge to edge: "Rejoindre un groupe" stays above the navigation bar / home indicator.
+            contentContainerStyle={{ paddingBottom: insets.bottom + space.md }}
+            refreshControl={
+              <RefreshControl
+                tintColor={colors.accentFg}
+                colors={[colors.accentFg]}
+                progressBackgroundColor={colors.surface2}
+                refreshing={refreshing}
+                onRefresh={async () => {
+                  setRefreshing(true);
+                  await load();
+                  setRefreshing(false);
+                }}
+              />
+            }
+            ListEmptyComponent={
+              groups && direct ? (
+                <View style={styles.empty}>
+                  <View style={styles.emptyScreen}>
+                    <MessageSquareLock size={34} color={lcd.off} strokeWidth={1.75} />
+                  </View>
+                  <Text style={type.heading}>Aucune discussion privée</Text>
+                  <Text style={[type.dim, styles.centerText]}>
+                    Pour écrire à une seule personne : ouvre un groupe où vous êtes tous les deux, puis sa fiche (la roue dentée), et touche la bulle à
+                    cadenas à côté de son nom. La discussion est chiffrée pour vous deux, et chacun la verrouille avec son propre code.
+                  </Text>
+                </View>
+              ) : groups ? (
+                <View style={styles.empty}>
+                  <View style={styles.emptyScreen}>
+                    <LockKeyhole size={34} color={lcd.off} strokeWidth={1.75} />
+                  </View>
+                  <Text style={type.heading}>Aucun groupe</Text>
+                  <Text style={[type.dim, styles.centerText]}>Crée un groupe, ou rejoins celui d’un pote avec son code et ses mots-clés.</Text>
+                  <View style={styles.emptyKeys}>
+                    <Button title="Créer un groupe" onPress={() => router.push('/group/new')} />
+                    <Button title="Rejoindre un groupe" variant="ghost" onPress={() => router.push('/group/join')} />
+                  </View>
+                </View>
+              ) : undefined
+            }
+            ListFooterComponent={
+              shown?.length ? (
+                <View style={styles.footer}>
+                  {direct ? null : <Button title="Rejoindre un groupe" variant="ghost" onPress={() => router.push('/group/join')} />}
+                  <Text style={styles.engraving}>CHIFFRÉ DE BOUT EN BOUT · XCHACHA20-POLY1305</Text>
+                </View>
+              ) : undefined
+            }
+            renderItem={({ item }) => <GroupPlate item={item} open={openGroups.has(item.id)} onPress={() => router.push({ pathname: '/group/[id]', params: { id: item.id } })} />}
+          />
+    );
+  };
 
   return (
     <View style={styles.screen}>
@@ -90,7 +192,7 @@ export default function GroupsList() {
           headerRight: () => (
             <View style={styles.headerButtons}>
               <HeaderButton icon={Settings} label="Réglages" onPress={() => router.push('/settings')} />
-              {direct ? null : <HeaderButton icon={Plus} label="Nouveau groupe" onPress={() => router.push('/group/new')} />}
+              {shownSpace === 'direct' ? null : <HeaderButton icon={Plus} label="Nouveau groupe" onPress={() => router.push('/group/new')} />}
             </View>
           ),
         }}
@@ -111,71 +213,25 @@ export default function GroupsList() {
           ]}
           value={shownSpace}
           onChange={choose}
+          slide={slide}
         />
       </View>
-      <FlatList
-        data={shown ?? []}
-        keyExtractor={(g) => g.id}
-        extraData={groupsVersion}
-        ListHeaderComponent={
-          shown?.length ? (
-            <View style={styles.section}>
-              <Label icon={direct ? MessageSquareLock : LockKeyhole}>{direct ? 'Discussions privées' : 'Groupes'}</Label>
-              <Text style={labelText}>{openCount > 0 ? `${openCount} ouvert · ${shown.length}` : `${shown.length}`}</Text>
-            </View>
-          ) : undefined
-        }
-        // Edge to edge: "Rejoindre un groupe" stays above the navigation bar / home indicator.
-        contentContainerStyle={{ paddingBottom: insets.bottom + space.md }}
-        refreshControl={
-          <RefreshControl
-            tintColor={colors.accentFg}
-            colors={[colors.accentFg]}
-            progressBackgroundColor={colors.surface2}
-            refreshing={refreshing}
-            onRefresh={async () => {
-              setRefreshing(true);
-              await load();
-              setRefreshing(false);
-            }}
-          />
-        }
-        ListEmptyComponent={
-          groups && direct ? (
-            <View style={styles.empty}>
-              <View style={styles.emptyScreen}>
-                <MessageSquareLock size={34} color={lcd.off} strokeWidth={1.75} />
-              </View>
-              <Text style={type.heading}>Aucune discussion privée</Text>
-              <Text style={[type.dim, styles.centerText]}>
-                Pour écrire à une seule personne : ouvre un groupe où vous êtes tous les deux, puis sa fiche (la roue dentée), et touche la bulle à
-                cadenas à côté de son nom. La discussion est chiffrée pour vous deux, et chacun la verrouille avec son propre code.
-              </Text>
-            </View>
-          ) : groups ? (
-            <View style={styles.empty}>
-              <View style={styles.emptyScreen}>
-                <LockKeyhole size={34} color={lcd.off} strokeWidth={1.75} />
-              </View>
-              <Text style={type.heading}>Aucun groupe</Text>
-              <Text style={[type.dim, styles.centerText]}>Crée un groupe, ou rejoins celui d’un pote avec son code et ses mots-clés.</Text>
-              <View style={styles.emptyKeys}>
-                <Button title="Créer un groupe" onPress={() => router.push('/group/new')} />
-                <Button title="Rejoindre un groupe" variant="ghost" onPress={() => router.push('/group/join')} />
-              </View>
-            </View>
-          ) : undefined
-        }
-        ListFooterComponent={
-          shown?.length ? (
-            <View style={styles.footer}>
-              {direct ? null : <Button title="Rejoindre un groupe" variant="ghost" onPress={() => router.push('/group/join')} />}
-              <Text style={styles.engraving}>CHIFFRÉ DE BOUT EN BOUT · XCHACHA20-POLY1305</Text>
-            </View>
-          ) : undefined
-        }
-        renderItem={({ item }) => <GroupPlate item={item} open={openGroups.has(item.id)} onPress={() => router.push({ pathname: '/group/[id]', params: { id: item.id } })} />}
-      />
+      <Animated.ScrollView
+        ref={pager}
+        horizontal
+        pagingEnabled
+        showsHorizontalScrollIndicator={false}
+        scrollEventThrottle={16}
+        // The listener reads `target` only while the pages slide, never during render.
+        // eslint-disable-next-line react-hooks/refs
+        onScroll={Animated.event([{ nativeEvent: { contentOffset: { x: slid } } }], { useNativeDriver: true, listener: onSlide })}
+        onScrollBeginDrag={() => (target.current = null)}
+        // On the space last shown (back on this screen), and still on it after a rotation.
+        onLayout={() => pager.current?.scrollTo({ x: shownSpace === 'direct' ? width : 0, animated: false })}
+      >
+        {page(false)}
+        {page(true)}
+      </Animated.ScrollView>
       {/* First list since the app opened: the blade turning until it is there, not an empty screen. */}
       {!groups && !problem ? <Working style={styles.loading} /> : null}
     </View>

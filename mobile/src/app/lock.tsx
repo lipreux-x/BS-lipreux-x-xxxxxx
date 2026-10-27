@@ -12,7 +12,7 @@ import { Logo } from '@/ui/Logo';
 import { calm, colors, fonts, space } from '@/ui/theme';
 import { VaultDoor } from '@/ui/VaultDoor';
 
-// SPEC §2.1: vault door; tap -> it unlocks and opens -> a calm keypad for the 6-digit app code.
+// SPEC §2.1: vault door; it unlocks and opens by itself (a tap skips the wait) -> a calm keypad for the 6-digit app code.
 // The vault look is only for the opening; the code screen stays quiet. The door ends with its
 // portal pulling you in and the `calm` backdrop filling the screen, so the calm background shows
 // at once and only the keypad fades in, as if it were waiting on the other side.
@@ -133,7 +133,7 @@ export default function LockScreen() {
           )}
         </Animated.View>
       ) : (
-        <VaultDoor hint="Touche le coffre" onOpen={() => setOpened(true)} />
+        <VaultDoor hint="Ouverture du coffre" onOpen={() => setOpened(true)} />
       )}
     </SafeAreaView>
   );

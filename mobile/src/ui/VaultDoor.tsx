@@ -14,6 +14,8 @@ const VOID = '#02080E';
 /** How long the portal takes to pull you in, and how far the scene twists meanwhile. */
 const SUCK_MS = 1250;
 const TWIST_DEG = 140;
+/** Once the bolts have slammed shut, how long the door stays locked before opening by itself. */
+const SETTLE_MS = 450;
 
 /**
  * Being pulled in is a camera moving forward by TRAVEL: something at depth z then
@@ -46,8 +48,9 @@ const deg = (v: Animated.Value) => v.interpolate({ inputRange: [0, 360], outputR
 
 /**
  * Lock screen vault door. On mount it rises into place and its bolts slam shut
- * one after the other; while it waits, a glint sweeps across it and the red LED
- * pulses. Tap: the combination dial clicks through three numbers, the handwheel
+ * one after the other; a glint sweeps across it and the red LED pulses. Then it
+ * opens by itself (a tap opens it at once, without waiting): the combination
+ * dial clicks through three numbers, the handwheel
  * turns and draws the bolts in one by one, the LED goes blue, the door unseats
  * with a thud and swings open on a swirling portal, cold at its rim and red at
  * its heart, whose light spills
@@ -101,6 +104,8 @@ export function VaultDoor({ onOpen, hint }: { onOpen(): void; hint?: string }) {
       if (!alive) return;
       void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
       thud(2).start();
+      // Locked: a beat for the thud to settle, then it opens by itself.
+      setTimeout(() => alive && void open(), SETTLE_MS);
       idle.current = Animated.parallel([
         Animated.loop(Animated.sequence([t(pulse, 1, 900), t(pulse, 0, 900)])),
         Animated.loop(

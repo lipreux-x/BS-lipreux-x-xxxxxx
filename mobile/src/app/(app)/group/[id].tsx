@@ -72,6 +72,7 @@ import { chatLook, type ChatLook } from '@/ui/chat/look';
 import { DaySeparator, MessageBubble, type DeliveryStatus } from '@/ui/chat/MessageBubble';
 import { quoteResolver, replyRefFor, resolveQuote, type Quote } from '@/ui/chat/replies';
 import { SwipeToReply } from '@/ui/chat/SwipeToReply';
+import { SwipeBack } from '@/ui/SwipeBack';
 import { buildTimeline, countdownLabel, dateTimeLabel, dayLabel, dayRange, timeLabel } from '@/ui/chat/timeline';
 import { CodeEntry, type CodeResult } from '@/ui/CodeEntry';
 import { NamePlate } from '@/ui/InviteCode';
@@ -147,19 +148,20 @@ export default function GroupScreen() {
     );
   }, [coverOpacity]);
 
+  // Dragged to the right anywhere on it, the conversation goes back to the list.
+  const back = useCallback(() => (router.canGoBack() ? router.back() : router.replace('/')), []);
+
   return (
-    <View style={styles.screen}>
-      {open ? <Chat groupId={id} group={open} onUpdate={update} onLocked={relock} onReady={covered ? reveal : undefined} titled={!covered} /> : null}
-      {covered ? (
-        <Animated.View
-          key={locks}
-          style={[StyleSheet.absoluteFill, styles.cover, { opacity: coverOpacity }]}
-          pointerEvents={open ? 'none' : 'auto'}
-        >
-          <GroupUnlock groupId={id} onOpen={update} />
-        </Animated.View>
-      ) : null}
-    </View>
+    <SwipeBack onBack={back}>
+      <View style={styles.screen}>
+        {open ? <Chat groupId={id} group={open} onUpdate={update} onLocked={relock} onReady={covered ? reveal : undefined} titled={!covered} /> : null}
+        {covered ? (
+          <Animated.View key={locks} style={[StyleSheet.absoluteFill, styles.cover, { opacity: coverOpacity }]} pointerEvents={open ? 'none' : 'auto'}>
+            <GroupUnlock groupId={id} onOpen={update} />
+          </Animated.View>
+        ) : null}
+      </View>
+    </SwipeBack>
   );
 }
 
