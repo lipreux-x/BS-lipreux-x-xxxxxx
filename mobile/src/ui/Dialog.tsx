@@ -1,9 +1,11 @@
 import * as Haptics from 'expo-haptics';
 import { useCallback, useEffect, useState, type ReactElement } from 'react';
 import { Animated, Easing, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Key } from './Key';
 import { Led } from './Led';
+import { panelStyle, Screws } from './Panel';
 import { PrivacyCover } from './PrivacyCover';
-import { colors, dangerKey, fonts, hotKey, neon, space, steel } from './theme';
+import { colors, fonts, space } from './theme';
 
 export interface DialogButton {
   text: string;
@@ -18,9 +20,10 @@ interface Shown {
 }
 
 /**
- * The app's own Alert.alert: a panel of the safe, its keys as metal keys
- * (cancel steel, the action in the blade's red; what cannot be undone on a
- * near-black red key with the neon edge and a red LED by the title). Same arguments as Alert.alert; no buttons: one "OK".
+ * The app's own Alert.alert: a screwed panel of the safe, its keys as metal
+ * keys (cancel steel, the action the hot green key; what cannot be undone on
+ * the near-black red key, with a red LED by the title). Same arguments as
+ * Alert.alert; no buttons: one "OK".
  *
  * Returns the function and the element to render in the screen: the dialog
  * is a `<Modal>` of that screen, so it also shows over modal screens on iOS.
@@ -96,11 +99,7 @@ function DialogModal({ shown, visible, onPick }: { shown: Shown | null; visible:
           onStartShouldSetResponder={() => true}
           accessibilityViewIsModal
         >
-          {(['tl', 'tr', 'bl', 'br'] as const).map((c) => (
-            <View key={c} style={[styles.screw, styles[c]]}>
-              <View style={styles.slot} />
-            </View>
-          ))}
+          <Screws />
           <View style={styles.titleRow}>
             {destructive ? <Led state="error" size={9} /> : null}
             <Text style={styles.title} accessibilityRole="header">
@@ -110,24 +109,16 @@ function DialogModal({ shown, visible, onPick }: { shown: Shown | null; visible:
           {shown.message ? <Text style={styles.message}>{shown.message}</Text> : null}
           <View style={[styles.keys, row ? styles.keysRow : styles.keysColumn]}>
             {ordered.map((b) => (
-              <Pressable
+              <Key
                 key={b.text}
-                accessibilityRole="button"
-                onPress={() => {
-                  void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  onPick(b);
-                }}
-                style={({ pressed }) => [
-                  styles.key,
-                  row && styles.keyInRow,
-                  b.style === 'destructive' ? styles.danger : b.style !== 'cancel' && shown.buttons.length > 1 ? styles.go : null,
-                  pressed && styles.pressed,
-                ]}
-              >
-                <Text style={[styles.label, b.style === 'cancel' && styles.cancelLabel, b.style === 'destructive' && styles.dangerLabel]} numberOfLines={1} adjustsFontSizeToFit>
-                  {b.text}
-                </Text>
-              </Pressable>
+                size="lg"
+                grow={row}
+                label={b.text}
+                haptic="light"
+                variant={b.style === 'destructive' ? 'danger' : b.style !== 'cancel' && shown.buttons.length > 1 ? 'hot' : 'steel'}
+                tone={b.style === 'cancel' ? 'cold' : 'text'}
+                onPress={() => onPick(b)}
+              />
             ))}
           </View>
         </Animated.View>
@@ -138,10 +129,6 @@ function DialogModal({ shown, visible, onPick }: { shown: Shown | null; visible:
   );
 }
 
-const METAL = steel.key;
-const LIGHT_EDGE = steel.edgeLight;
-const DARK_EDGE = steel.edgeDark;
-
 const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
@@ -151,41 +138,14 @@ const styles = StyleSheet.create({
     padding: space.lg,
   },
   panel: {
+    ...panelStyle,
     width: '100%',
     maxWidth: 360,
     padding: space.lg,
     paddingTop: space.lg + 4,
     gap: space.md,
-    borderRadius: 14,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderTopColor: steel.panelEdge,
-    borderLeftColor: steel.panelEdge,
-    borderBottomColor: '#000000',
-    borderRightColor: '#000000',
     boxShadow: '0 12px 32px rgba(0,0,0,0.8)',
   },
-  screw: {
-    position: 'absolute',
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: steel.screw,
-    borderWidth: 1,
-    borderColor: DARK_EDGE,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  slot: {
-    width: 4,
-    height: 1.5,
-    backgroundColor: DARK_EDGE,
-    transform: [{ rotate: '45deg' }],
-  },
-  tl: { top: 7, left: 7 },
-  tr: { top: 7, right: 7 },
-  bl: { bottom: 7, left: 7 },
-  br: { bottom: 7, right: 7 },
   titleRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   title: {
     flexShrink: 1,
@@ -197,42 +157,4 @@ const styles = StyleSheet.create({
   keys: { marginTop: space.xs, gap: space.sm },
   keysRow: { flexDirection: 'row' },
   keysColumn: { flexDirection: 'column' },
-  key: {
-    height: 50,
-    paddingHorizontal: space.md,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: METAL,
-    borderWidth: 1.5,
-    borderTopColor: LIGHT_EDGE,
-    borderLeftColor: LIGHT_EDGE,
-    borderBottomColor: DARK_EDGE,
-    borderRightColor: DARK_EDGE,
-  },
-  keyInRow: { flex: 1 },
-  // The action: the hot red key (as the send key); near-black red when it destroys something.
-  go: {
-    ...neon.box('rgba(255, 59, 78, 0.45)', 10),
-    backgroundColor: colors.primary,
-    borderTopColor: hotKey.edgeLight,
-    borderLeftColor: hotKey.edgeLight,
-  },
-  danger: {
-    backgroundColor: dangerKey.face,
-    borderTopColor: dangerKey.edge,
-    borderLeftColor: dangerKey.edge,
-  },
-  // Pressed: the bevel inverts, the key looks pushed in.
-  pressed: {
-    opacity: 0.85,
-    borderTopColor: DARK_EDGE,
-    borderLeftColor: DARK_EDGE,
-    borderBottomColor: LIGHT_EDGE,
-    borderRightColor: LIGHT_EDGE,
-    transform: [{ translateY: 1 }],
-  },
-  label: { color: colors.text, fontSize: 16, fontFamily: fonts.semibold },
-  cancelLabel: { color: colors.accentFg, fontFamily: fonts.medium },
-  dangerLabel: { color: colors.hot },
 });

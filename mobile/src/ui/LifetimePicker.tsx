@@ -1,17 +1,21 @@
+import { Minus, Plus } from 'lucide-react-native';
 import { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import { Button } from './Button';
 import { countdownLabel, dateTimeLabel } from './chat/timeline';
-import { colors, fonts, space, steel, type } from './theme';
+import { Key } from './Key';
+import { Panel } from './Panel';
+import { Segment } from './Segment';
+import { colors, fonts, space, type } from './theme';
 
 export const MAX_LIFETIME_DAYS = 365;
 
-const PRESETS: { label: string; days: number | null }[] = [
-  { label: 'Permanent', days: null },
-  { label: '24 h', days: 1 },
-  { label: '3 jours', days: 3 },
-  { label: '1 semaine', days: 7 },
-  { label: '1 mois', days: 30 },
+const PRESETS: { label: string; value: number | null }[] = [
+  { label: 'Permanent', value: null },
+  { label: '24 h', value: 1 },
+  { label: '3 jours', value: 3 },
+  { label: '1 semaine', value: 7 },
+  { label: '1 mois', value: 30 },
 ];
 
 /**
@@ -29,41 +33,29 @@ export function LifetimePicker({ initial, onSubmit }: { initial: number | null; 
       <Text style={type.dim}>
         Un groupe éphémère s’autodétruit à la date choisie : le groupe, ses messages et ses photos sont effacés de partout, pour tous les membres.
       </Text>
-      <View style={styles.presets}>
-        {PRESETS.map((p) => {
-          const on = days === p.days;
-          return (
-            <Pressable
-              key={p.label}
-              accessibilityRole="button"
-              accessibilityState={{ selected: on }}
-              onPress={() => setDays(p.days)}
-              style={[styles.option, on && styles.optionOn]}
-            >
-              <Text style={[styles.optionText, on && styles.optionTextOn]}>{p.label}</Text>
-            </Pressable>
-          );
-        })}
-      </View>
+      <Segment wrap options={PRESETS} value={days} onChange={setDays} />
 
       {end ? (
-        <View style={styles.card}>
-          <Text style={styles.caption}>AUTODESTRUCTION</Text>
+        <Panel title="Autodestruction">
           <View style={styles.stepper}>
-            <StepKey label="−" disabled={days! <= 1} onPress={() => setDays(days! - 1)} accessibilityLabel="Un jour plus tôt" />
+            <Key square accessibilityLabel="Un jour plus tôt" disabled={days! <= 1} hitSlop={6} onPress={() => setDays(days! - 1)}>
+              <Minus size={20} color={colors.text} />
+            </Key>
             <View style={{ flex: 1, alignItems: 'center' }}>
               <Text style={styles.date}>{dateTimeLabel(end, now)}</Text>
               <Text style={type.dim}>
                 {countdownLabel(end, now)} · {days} jour{days! > 1 ? 's' : ''}
               </Text>
             </View>
-            <StepKey label="+" disabled={days! >= MAX_LIFETIME_DAYS} onPress={() => setDays(days! + 1)} accessibilityLabel="Un jour plus tard" />
+            <Key square accessibilityLabel="Un jour plus tard" disabled={days! >= MAX_LIFETIME_DAYS} hitSlop={6} onPress={() => setDays(days! + 1)}>
+              <Plus size={20} color={colors.text} />
+            </Key>
           </View>
-        </View>
+        </Panel>
       ) : (
-        <View style={styles.card}>
+        <Panel>
           <Text style={type.dim}>Le groupe reste jusqu’à ce que le dernier membre le quitte.</Text>
-        </View>
+        </Panel>
       )}
 
       <Button title="Continuer" onPress={() => onSubmit(days)} />
@@ -71,45 +63,8 @@ export function LifetimePicker({ initial, onSubmit }: { initial: number | null; 
   );
 }
 
-function StepKey({ label, disabled, onPress, accessibilityLabel }: { label: string; disabled: boolean; onPress(): void; accessibilityLabel: string }) {
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={accessibilityLabel}
-      disabled={disabled}
-      onPress={onPress}
-      hitSlop={6}
-      style={({ pressed }) => [styles.key, pressed && styles.keyPressed, disabled && { opacity: 0.35 }]}
-    >
-      <Text style={styles.keyLabel}>{label}</Text>
-    </Pressable>
-  );
-}
-
 const styles = StyleSheet.create({
   form: { flex: 1, backgroundColor: colors.bg, padding: space.lg, gap: space.md },
-  presets: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
-  option: { paddingVertical: 10, paddingHorizontal: 14, borderRadius: 8, borderWidth: 1, borderColor: colors.border },
-  optionOn: { backgroundColor: colors.accent, borderColor: colors.accentFg },
-  optionText: { color: colors.textDim, fontSize: 14 },
-  optionTextOn: { color: colors.text, fontWeight: '600' },
-  card: { backgroundColor: colors.surface, borderRadius: 12, borderWidth: 1, borderColor: colors.border, padding: space.md, gap: space.sm },
-  caption: { color: colors.textDim, fontSize: 12, letterSpacing: 2, fontFamily: fonts.medium },
   stepper: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   date: { color: colors.text, fontSize: 17, fontFamily: fonts.semibold },
-  key: {
-    width: 44,
-    height: 44,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: steel.key,
-    borderWidth: 1.5,
-    borderTopColor: steel.edgeLight,
-    borderLeftColor: steel.edgeLight,
-    borderBottomColor: steel.edgeDark,
-    borderRightColor: steel.edgeDark,
-  },
-  keyPressed: { backgroundColor: steel.keyPressed, borderTopColor: steel.edgeDark, borderLeftColor: steel.edgeDark, borderBottomColor: steel.edgeLight, borderRightColor: steel.edgeLight },
-  keyLabel: { color: colors.text, fontSize: 22, fontFamily: fonts.medium },
 });

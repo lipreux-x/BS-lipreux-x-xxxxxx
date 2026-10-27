@@ -3,21 +3,25 @@ import { Platform } from 'react-native';
 /*
  * SPEC §8, "la lame": a black vault whose steel stays dark and neutral, lit by
  * two lights. The cold one, sky blue, is the light of information: the LCD
- * screens' backlight, strokes and links, "open" and "ok". The hot one, neon
- * red, is the light of action: the send key, "open the safe", the portal,
- * alerts and what is waiting for you. Pale filaments (#EAFCFF) are the
- * glints: a working LED, the sheen on the door.
+ * screens' backlight, strokes and links, "open" and "ok". The hot one, the
+ * green of a terminal's phosphor, is the light of action: the send key, "open
+ * the safe", the portal, the prompt of the chat. Pale filaments (#EAFCFF) are
+ * the glints: a working LED, the sheen on the door. A third light, neon red,
+ * is kept for what went wrong or is shut: errors, a failed send, a closed
+ * safe, what cannot be undone.
  *
- * To try the other direction (terminal green instead of red), only `blade`
- * and the derived tokens below change: nothing else in the app names a hue.
+ * The red direction (red as the hot light too) is the git history of this
+ * file: only `blade` and the derived tokens below change, nothing else in the
+ * app names a hue.
  */
 
 /** The charte's six colours, as given. */
 export const blade = {
   skyLight: '#7FE6FF', // the blade's upper tip
   sky: '#4FC3FF', // upper blade
-  rose: '#FF5A78', // transition
-  neon: '#FF3B4E', // lower blade and point
+  rose: '#8CFF8C', // transition: pale phosphor
+  neon: '#33FF33', // lower blade and point: the terminal's green
+  alert: '#FF3B4E', // the red kept for errors and what is shut
   filament: '#EAFCFF', // light threads, at ~55 % opacity
   black: '#000000',
 } as const;
@@ -33,14 +37,35 @@ export const colors = {
   accent: '#0E2E42',
   /** Cold strokes and text on black (links, header tint, icons): 10.6:1. */
   accentFg: blade.sky,
-  /** Hot fills: the action keys (send, open, confirm). White text on it: 9:1. */
-  primary: '#8E1B2A',
-  /** The hot light itself, on black: 6:1. Also what cannot be undone. */
-  danger: blade.neon,
-  /** The hot light, softer: edges of the action keys, "Secrète" in the wordmark (7:1). */
+  /** Hot fills: the action keys (send, open, confirm). White text on it: 7.5:1. */
+  primary: '#0F5A28',
+  /** The red light, on black: 6:1. Errors, what is shut, what cannot be undone. */
+  danger: blade.alert,
+  /** The hot light, softer: edges of the action keys, "Secrète" in the wordmark (16:1). */
   hot: blade.rose,
+  /** The hot light's halo around an action key (also `glow.hot`). */
+  hotGlow: 'rgba(51, 255, 51, 0.35)',
   /** Filament light at its ~55 %: hairlines, glints. */
   filament: 'rgba(234, 252, 255, 0.55)',
+} as const;
+
+/** The halos: a light's glow around a key, a word, a lit plate. */
+export const glow = {
+  hot: colors.hotGlow,
+  /** Behind "Secrète" in the wordmark: tighter, brighter. */
+  hotText: 'rgba(51, 255, 51, 0.6)',
+  cold: 'rgba(79, 195, 255, 0.35)',
+  alert: 'rgba(255, 59, 78, 0.45)',
+} as const;
+
+/** A light's faint wash behind something: an entry of the chat, the grid of a reader. */
+export const wash = {
+  hot: 'rgba(51, 255, 51, 0.09)',
+  cold: 'rgba(79, 195, 255, 0.09)',
+  /** The fingerprint reader's grid and the trail of its scan bar. */
+  coldGrid: 'rgba(79, 195, 255, 0.10)',
+  coldTrail: 'rgba(79, 195, 255, 0.18)',
+  filament: 'rgba(234, 252, 255, 0.06)',
 } as const;
 
 /**
@@ -63,7 +88,7 @@ export const mono = Platform.select({ ios: 'Menlo', default: 'monospace' });
  * while something is being done, sky blue when it is right or open, neon red
  * on an error or something shut.
  */
-export const led = { off: '#1A2026', busy: blade.filament, ok: blade.sky, error: blade.neon } as const;
+export const led = { off: '#1A2026', busy: blade.filament, ok: blade.sky, error: blade.alert } as const;
 
 /** The safe's backlit LCD screens: dark blue glass, sky-blue characters, and the unlit ones barely there. */
 export const lcd = {
@@ -96,19 +121,33 @@ export const steel = {
   engraving: '#5B6670',
 } as const;
 
-/** The hot action keys: the blade's red, lit on its upper edges in rose, dark crimson below. */
+/** The hot action keys: the blade's green, lit on its upper edges in pale phosphor, dark moss below. */
 export const hotKey = {
   face: colors.primary,
-  facePressed: '#6A1420',
+  facePressed: '#0B4320',
   edgeLight: blade.rose,
-  edgeDark: '#4A0E14',
+  edgeDark: '#073018',
 } as const;
 
-/** A destructive key: near-black red with the neon edge; the hot light, held back. */
-export const dangerKey = { face: '#3A0B10', edge: blade.neon } as const;
+/** A destructive key: near-black red with the red edge; the alert light, held back. */
+export const dangerKey = { face: '#3A0B10', edge: blade.alert } as const;
 
-/** My message plates: sky steel, lit on the upper edges in a paler blue. */
+/** Cold plates (a chosen option, a lit tool key): sky steel, lit on the upper edges in a paler blue. */
 export const coldPlate = { edgeLight: '#2F6E94', edgeDark: '#071A26' } as const;
+
+/** Hot plates (my messages, in the chat drawn with avatars): green-tinted steel, lit on the upper edges in moss. White text on it: 16:1. */
+export const hotPlate = { face: '#0A2413', edgeLight: '#22683A', edgeDark: '#03110A' } as const;
+
+/**
+ * The bevel of a key or a panel: light from the top left, so the upper-left
+ * edges are lit and the lower-right ones dark. `pressed` (or a recessed
+ * screen) inverts it. Spread into a style that sets `borderWidth`.
+ */
+export function bevel(light: string, dark: string, pressed = false) {
+  return pressed
+    ? { borderTopColor: dark, borderLeftColor: dark, borderBottomColor: light, borderRightColor: light }
+    : { borderTopColor: light, borderLeftColor: light, borderBottomColor: dark, borderRightColor: dark };
+}
 
 /**
  * Neon: a light's own halo around it, as on the icon's blade. `text` for a
@@ -131,10 +170,10 @@ export const type = {
 /**
  * Calm backdrop behind the app code keypad, once through the vault's portal:
  * black, with a faint sky-blue glow left at the top (the blade's upper tip)
- * and the red of its point barely rising from the bottom.
+ * and the green of its point barely rising from the bottom.
  */
 export const calm = {
   backgroundColor: '#05080C',
   backgroundImage:
-    'radial-gradient(ellipse 120% 60% at 50% 0%, rgba(79, 195, 255, 0.10) 0%, rgba(5, 8, 12, 0) 70%), radial-gradient(ellipse 100% 40% at 50% 100%, rgba(255, 59, 78, 0.07) 0%, rgba(5, 8, 12, 0) 70%)',
+    'radial-gradient(ellipse 120% 60% at 50% 0%, rgba(79, 195, 255, 0.10) 0%, rgba(5, 8, 12, 0) 70%), radial-gradient(ellipse 100% 40% at 50% 100%, rgba(51, 255, 51, 0.07) 0%, rgba(5, 8, 12, 0) 70%)',
 } as const;

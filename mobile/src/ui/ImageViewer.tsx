@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Image, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { jpegUri, saveToGallery } from '@/services/images';
 import { Button } from './Button';
 import { PrivacyCover } from './PrivacyCover';
@@ -18,6 +18,8 @@ const SAVE_MESSAGES: Partial<Record<SaveState, string>> = {
 export function ImageViewer({ jpeg, onClose }: { jpeg: Uint8Array | null; onClose(): void }) {
   const [save, setSave] = useState<SaveState>('idle');
   const uri = useMemo(() => (jpeg ? jpegUri(jpeg) : null), [jpeg]);
+  // The screen's insets, not a SafeAreaView of the modal's own (see StoryPreview).
+  const insets = useSafeAreaInsets();
 
   function close() {
     setSave('idle');
@@ -26,7 +28,7 @@ export function ImageViewer({ jpeg, onClose }: { jpeg: Uint8Array | null; onClos
 
   return (
     <Modal visible={jpeg !== null} animationType="fade" onRequestClose={close} statusBarTranslucent>
-      <SafeAreaView style={styles.screen}>
+      <View style={[styles.screen, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
         <View style={styles.top}>
           <Pressable accessibilityRole="button" accessibilityLabel="Fermer" hitSlop={12} onPress={close}>
             <Text style={styles.close}>Fermer</Text>
@@ -50,7 +52,7 @@ export function ImageViewer({ jpeg, onClose }: { jpeg: Uint8Array | null; onClos
           />
           <Text style={[type.dim, styles.message, { fontSize: 12 }]}>Une fois dans la galerie, l’image n’est plus chiffrée.</Text>
         </View>
-      </SafeAreaView>
+      </View>
       {/* A modal is drawn above the app's own cover: it needs its own for the app switcher. */}
       <PrivacyCover />
     </Modal>

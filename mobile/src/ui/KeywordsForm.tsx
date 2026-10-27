@@ -1,7 +1,8 @@
 import { useRef, useState, type ComponentRef } from 'react';
-import { Platform, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Platform, StyleSheet, Text, type TextInput, View } from 'react-native';
 import { KEYWORD_COUNT, KEYWORD_MAX_LENGTH, keywordsProblem } from '@/services/keywords';
 import { Button } from './Button';
+import { Field } from './Screen';
 import { colors, space, type } from './theme';
 
 /** 3 keyword fields + submit. `onSubmit` returns null on success or an error message to show. */
@@ -36,7 +37,7 @@ export function KeywordsForm({
     <View style={styles.form}>
       <Text style={type.dim}>{hint}</Text>
       {words.map((w, i) => (
-        <TextInput
+        <Field
           key={i}
           ref={(r) => {
             inputs.current[i] = r;
@@ -47,7 +48,6 @@ export function KeywordsForm({
             setWords((ws) => ws.map((x, j) => (j === i ? t : x)));
           }}
           placeholder={`Mot-clé ${i + 1}`}
-          placeholderTextColor={colors.textDim}
           maxLength={KEYWORD_MAX_LENGTH}
           autoCapitalize="none"
           autoCorrect={false}
@@ -57,7 +57,6 @@ export function KeywordsForm({
           returnKeyType={i < KEYWORD_COUNT - 1 ? 'next' : 'done'}
           submitBehavior={i < KEYWORD_COUNT - 1 ? 'submit' : 'blurAndSubmit'}
           onSubmitEditing={() => (i < KEYWORD_COUNT - 1 ? inputs.current[i + 1]?.focus() : void submit())}
-          style={styles.input}
         />
       ))}
       {error ? <Text style={styles.error}>{error}</Text> : null}
@@ -68,6 +67,5 @@ export function KeywordsForm({
 
 const styles = StyleSheet.create({
   form: { flex: 1, backgroundColor: colors.bg, padding: space.lg, gap: space.md },
-  input: { height: 52, borderRadius: 12, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, color: colors.text, paddingHorizontal: space.md, fontSize: 16 },
   error: { color: colors.danger },
 });

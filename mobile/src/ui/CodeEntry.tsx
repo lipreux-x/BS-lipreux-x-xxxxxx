@@ -4,6 +4,7 @@ import { Animated, AppState, Easing, StyleSheet, Text, View } from 'react-native
 import { PinPad } from './PinPad';
 import { SafeDisplay, type SafeDisplayHandle } from './SafeDisplay';
 import { colors, space, type } from './theme';
+import { Working } from './Working';
 
 /**
  * Title (or a free `header`, e.g. a name on the safe's screen) + safe display + safe keypad. `onComplete` returns an error message to
@@ -12,6 +13,11 @@ import { colors, space, type } from './theme';
  * pad is disabled and the LED turns pale: Argon2id takes a moment on the phone.
  * `fadeOut`: after the blue beat, the entry fades out before `open` runs, for
  * screens that `open` swaps in place (no transition would keep the blue on).
+ * `busyLabel`: while it runs, the keypad gives way to this line and the
+ * blade of the logo turning in the middle (for the codes that open a vault).
+ * `holdOnSuccess`: `open` runs at once, with no beat, and the entry stays as it
+ * is (blue LED, the blade turning), for a parent that keeps it on top until
+ * what it opened is ready to show, then takes it away.
  */
 export type CodeResult = string | null | (() => void);
 
@@ -27,6 +33,8 @@ export function CodeEntry({
   lockedForMs = 0,
   initialError,
   fadeOut = false,
+  busyLabel,
+  holdOnSuccess = false,
 }: {
   title?: string;
   /** Shown in place of the title, stretched to the keypad's width. */
@@ -38,6 +46,8 @@ export function CodeEntry({
   /** Shown until the first key press, e.g. "codes do not match" from the previous step. */
   initialError?: string;
   fadeOut?: boolean;
+  busyLabel?: string;
+  holdOnSuccess?: boolean;
 }) {
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
@@ -86,6 +96,10 @@ export function CodeEntry({
     if (typeof result === 'function') {
       setSuccess(true);
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      if (holdOnSuccess) {
+        result();
+        return;
+      }
       await new Promise((r) => setTimeout(r, OK_BEAT_MS));
       if (fadeOut) {
         await new Promise<void>((r) =>
@@ -132,12 +146,18 @@ export function CodeEntry({
       <Text style={[styles.error, styles.center]}>
         {locked ? `Trop d'essais. Réessaie dans ${Math.ceil(wait / 1000)} s` : (error ?? ' ')}
       </Text>
-      <PinPad
-        onDigit={digit}
-        onDelete={() => setCode((c) => c.slice(0, -1))}
-        onClear={() => setCode('')}
-        disabled={busy || locked}
-      />
+      <View>
+        {/* Hidden, not removed: the screen keeps its layout while the vault opens. */}
+        <View style={busy && busyLabel ? styles.hidden : undefined}>
+          <PinPad
+            onDigit={digit}
+            onDelete={() => setCode((c) => c.slice(0, -1))}
+            onClear={() => setCode('')}
+            disabled={busy || locked}
+          />
+        </View>
+        {busy && busyLabel ? <Working label={busyLabel} /> : null}
+      </View>
     </Animated.View>
   );
 }
@@ -148,4 +168,5 @@ const styles = StyleSheet.create({
   display: { marginTop: space.md },
   error: { color: colors.danger, minHeight: 20, fontSize: 14 },
   center: { textAlign: 'center', paddingHorizontal: space.lg },
+  hidden: { opacity: 0 },
 });

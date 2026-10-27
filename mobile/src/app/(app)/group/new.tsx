@@ -1,6 +1,6 @@
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
-import { StyleSheet, Text, TextInput, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import { useUnlocked } from '@/session/SessionProvider';
 import { ApiError, NetworkError } from '@/services/api';
 import { createGroup } from '@/services/groups';
@@ -8,6 +8,7 @@ import { Button } from '@/ui/Button';
 import { CodeEntry } from '@/ui/CodeEntry';
 import { KeywordsForm } from '@/ui/KeywordsForm';
 import { LifetimePicker } from '@/ui/LifetimePicker';
+import { Field } from '@/ui/Screen';
 import { colors, space, type } from '@/ui/theme';
 
 /*
@@ -113,15 +114,7 @@ export default function NewGroup() {
   return (
     <View style={styles.form}>
       <Text style={type.dim}>Le nom est chiffré : le serveur ne le voit jamais.</Text>
-      <TextInput
-        value={name}
-        onChangeText={setName}
-        placeholder="Nom du groupe"
-        placeholderTextColor={colors.textDim}
-        maxLength={60}
-        autoFocus
-        style={styles.input}
-      />
+      <Field value={name} onChangeText={setName} placeholder="Nom du groupe" maxLength={60} autoFocus />
       {error ? <Text style={styles.error}>{error}</Text> : null}
       <Button title="Continuer" disabled={!name.trim()} onPress={() => setStep({ kind: 'keywords' })} />
     </View>
@@ -131,6 +124,5 @@ export default function NewGroup() {
 const styles = StyleSheet.create({
   center: { flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center' },
   form: { flex: 1, backgroundColor: colors.bg, padding: space.lg, gap: space.md },
-  input: { height: 52, borderRadius: 12, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, color: colors.text, paddingHorizontal: space.md, fontSize: 16 },
   error: { color: colors.danger },
 });

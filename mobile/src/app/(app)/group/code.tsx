@@ -1,12 +1,13 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { useUnlocked } from '@/session/SessionProvider';
 import { useInsideGroup } from '@/session/useInsideGroup';
 import { ApiError, NetworkError } from '@/services/api';
 import { changeGroupCode } from '@/services/groups';
 import { CodeEntry } from '@/ui/CodeEntry';
 import { KeywordsForm } from '@/ui/KeywordsForm';
+import { Working } from '@/ui/Working';
 import { colors } from '@/ui/theme';
 
 /*
@@ -41,7 +42,7 @@ export default function ChangeGroupCode() {
   if (current === undefined) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator color={colors.accentFg} />
+        <Working />
       </View>
     );
   }
