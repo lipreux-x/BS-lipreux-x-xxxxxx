@@ -1,10 +1,11 @@
 import { useEffect, useRef, type ReactNode } from 'react';
-import { AppState, Modal, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { AppState, Modal, Platform, Pressable, StyleSheet, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { ReactionId } from '@/crypto';
 import { copySensitive } from '@/services/clipboard';
 import { PrivacyCover } from '../PrivacyCover';
-import { colors, fonts, space } from '../theme';
+import { Key } from '../Key';
+import { colors, space, steel } from '../theme';
 import { QuoteBlock } from './MessageBubble';
 import { ReactionKeys } from './ReactionKeys';
 import type { Quote } from './replies';
@@ -96,6 +97,7 @@ export function ActionSheet({
   children: ReactNode;
 }) {
   const hidden = useRef(onHidden);
+  const insets = useSafeAreaInsets();
   useEffect(() => {
     hidden.current = onHidden;
   }, [onHidden]);
@@ -128,26 +130,21 @@ export function ActionSheet({
       statusBarTranslucent
     >
       <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="Fermer" />
-      <SafeAreaView edges={['bottom']} style={styles.sheet}>
+      {/* The screen's bottom inset, not a SafeAreaView of the modal's own (iOS can measure none in a modal). */}
+      <View style={[styles.sheet, { paddingBottom: space.md + insets.bottom }]}>
         <View style={styles.grip} />
         {children}
-      </SafeAreaView>
+      </View>
       {/* A modal is drawn above the app's own cover: it needs its own for the app switcher. */}
       <PrivacyCover />
     </Modal>
   );
 }
 
+/** One action of the panel: a full-width steel key. `dim` for the lesser choice (cancel), `danger` for what cannot be undone. */
 export function ActionKey({ label, onPress, dim, danger }: { label: string; onPress(): void; dim?: boolean; danger?: boolean }) {
-  return (
-    <Pressable accessibilityRole="button" onPress={onPress} style={({ pressed }) => [styles.key, pressed && styles.pressed]}>
-      <Text style={[styles.label, dim && { color: colors.textDim }, danger && { color: colors.danger }]}>{label}</Text>
-    </Pressable>
-  );
+  return <Key size="lg" label={label} tone={danger ? 'alert' : dim ? 'dim' : 'text'} onPress={onPress} />;
 }
-
-const LIGHT_EDGE = '#4A5056';
-const DARK_EDGE = '#0A0B0C';
 
 const styles = StyleSheet.create({
   backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' },
@@ -156,29 +153,9 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
     borderTopWidth: 1,
-    borderTopColor: '#2E2E2E',
+    borderTopColor: steel.panelEdge,
     padding: space.md,
     gap: space.sm,
   },
   grip: { alignSelf: 'center', width: 36, height: 4, borderRadius: 2, backgroundColor: colors.border, marginBottom: space.xs },
-  key: {
-    height: 50,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#24282B',
-    borderWidth: 1.5,
-    borderTopColor: LIGHT_EDGE,
-    borderLeftColor: LIGHT_EDGE,
-    borderBottomColor: DARK_EDGE,
-    borderRightColor: DARK_EDGE,
-  },
-  pressed: {
-    backgroundColor: '#1B1E20',
-    borderTopColor: DARK_EDGE,
-    borderLeftColor: DARK_EDGE,
-    borderBottomColor: LIGHT_EDGE,
-    borderRightColor: LIGHT_EDGE,
-  },
-  label: { color: colors.text, fontSize: 16, fontFamily: fonts.medium },
 });

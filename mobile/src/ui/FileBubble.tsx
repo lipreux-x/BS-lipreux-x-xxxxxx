@@ -6,7 +6,7 @@ import { ApiError } from '@/services/api';
 import { loadAttachment, type PreparedFile, type Session } from '@/services/groups';
 import { fileExt, fileSizeLabel } from './chat/files';
 import { LONG_PRESS_MS } from './chat/MessageBubble';
-import { colors, fonts, mono } from './theme';
+import { colors, fonts, mono, steel } from './theme';
 
 /**
  * An encrypted document in the chat: its name, type and size on a metal
@@ -96,12 +96,12 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 10,
     borderRadius: 8,
-    backgroundColor: '#1D2023',
+    backgroundColor: steel.plate,
     borderWidth: 1,
-    borderTopColor: '#4A5056',
-    borderLeftColor: '#4A5056',
-    borderBottomColor: '#0A0B0C',
-    borderRightColor: '#0A0B0C',
+    borderTopColor: steel.edgeLight,
+    borderLeftColor: steel.edgeLight,
+    borderBottomColor: steel.edgeDark,
+    borderRightColor: steel.edgeDark,
   },
   pressed: { opacity: 0.8 },
   badge: { width: 44, height: 52, borderRadius: 6, backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center', gap: 2 },

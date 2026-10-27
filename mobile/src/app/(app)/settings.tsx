@@ -1,21 +1,26 @@
 import { router, useFocusEffect } from 'expo-router';
-import { Bell, Bomb, CameraOff, FingerprintPattern, Lock, ShieldCheck, type LucideIcon, User, UserPlus } from 'lucide-react-native';
+import { Bell, Bomb, CameraOff, FingerprintPattern, Lock, ScanFace, ShieldCheck, type LucideIcon, User, UserPlus } from 'lucide-react-native';
 import { useCallback, useEffect, useState } from 'react';
-import { AppState, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { AppState, Linking, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { keyFingerprint } from '@/crypto';
 import { useUnlocked } from '@/session/SessionProvider';
 import { copySensitive } from '@/services/clipboard';
 import { ApiError, NetworkError } from '@/services/api';
+import { biometricKind, biometricName, biometricWord, type BiometricKind } from '@/services/biometrics';
 import { registerPush, type PushStatus } from '@/services/push';
 import { WIPE_AFTER_CHOICES } from '@/services/vault';
 import { Avatar, isAvatarId, type AvatarId } from '@/ui/avatars';
 import { AvatarPicker } from '@/ui/AvatarPicker';
+import { AccountColorPicker, accountColor, isAccountColorId, type AccountColorId } from '@/ui/accountColors';
 import { Button } from '@/ui/Button';
 import { timeLabel } from '@/ui/chat/timeline';
 import { useDialog } from '@/ui/Dialog';
 import { InviteCodeDisplay } from '@/ui/InviteCode';
-import { colors, mono, space, type } from '@/ui/theme';
+import { Panel } from '@/ui/Panel';
+import { Screen } from '@/ui/Screen';
+import { Segment } from '@/ui/Segment';
+import { colors, fonts, lcd, mono, neon, space, type } from '@/ui/theme';
 
 export default function Settings() {
   const { session, profiles, vault, lock, setScreenshotsBlocked } = useUnlocked();
@@ -26,6 +31,7 @@ export default function Settings() {
   const [noScreenshots, setNoScreenshots] = useState<boolean | undefined>(undefined);
   const [bioOn, setBioOn] = useState<boolean | undefined>(undefined);
   const [bioAvailable, setBioAvailable] = useState(false);
+  const [bioKind, setBioKind] = useState<BiometricKind | null>(null);
   const [push, setPush] = useState<PushStatus | undefined>(undefined);
 
   // Read again when coming back from the phone's settings.
@@ -42,6 +48,7 @@ export default function Settings() {
     void vault.wipeAfter().then(setWipeAfter);
     void vault.screenshotsBlocked().then(setNoScreenshots);
     void vault.biometricsAvailable().then(setBioAvailable);
+    void biometricKind().then(setBioKind);
   }, [vault]);
   // Read again when coming back from the screen that turns biometrics on.
   useFocusEffect(
@@ -65,13 +72,37 @@ export default function Settings() {
   // undefined: not loaded yet (the server holds the choice, shared with group mates).
   const [avatar, setAvatar] = useState<AvatarId | null | undefined>(undefined);
   const [avatarError, setAvatarError] = useState<string | null>(null);
+  // Same for the color of my name and messages in the chats.
+  const [color, setColor] = useState<AccountColorId | null | undefined>(undefined);
+  const [colorError, setColorError] = useState<string | null>(null);
 
   useEffect(() => {
     session.api
       .me()
-      .then((me) => setAvatar(isAvatarId(me.avatar) ? me.avatar : null))
-      .catch(() => setAvatarError('Avatar indisponible hors ligne.'));
+      .then((me) => {
+        setAvatar(isAvatarId(me.avatar) ? me.avatar : null);
+        setColor(isAccountColorId(me.color) ? me.color : null);
+      })
+      .catch(() => {
+        setAvatarError('Avatar indisponible hors ligne.');
+        setColorError('Couleur indisponible hors ligne.');
+      });
   }, [session]);
+
+  const myLit = accountColor(color);
+
+  async function chooseColor(next: AccountColorId | null) {
+    const previous = color ?? null;
+    setColor(next); // shown at once, put back if the server refuses
+    setColorError(null);
+    try {
+      await session.api.setColor(next);
+      profiles.setColor(session.account.userId, next);
+    } catch (e) {
+      setColor(previous);
+      setColorError(e instanceof NetworkError ? 'Pas de réseau.' : 'Impossible de changer la couleur.');
+    }
+  }
 
   async function chooseAvatar(next: AvatarId | null) {
     const previous = avatar ?? null;
@@ -109,13 +140,17 @@ export default function Settings() {
         <View style={styles.profile}>
           <Avatar id={avatar ?? null} size={64} />
           <View style={{ flex: 1, gap: 2 }}>
-            <Text style={type.heading}>{session.account.username}</Text>
+            <Text style={[type.heading, myLit && { color: myLit }]}>{session.account.username}</Text>
             <Text style={type.dim}>Visible par les membres de tes groupes.</Text>
           </View>
         </View>
         <Text style={[styles.subTitle, styles.subTitleRow]}>Photo de profil</Text>
         <AvatarPicker value={avatar ?? null} onChange={(id) => void chooseAvatar(id)} disabled={avatar === undefined} />
         {avatarError ? <Text style={styles.error}>{avatarError}</Text> : null}
+        <Text style={[styles.subTitle, styles.subTitleRow]}>Couleur dans les discussions</Text>
+        <Text style={type.dim}>Ton nom et tes messages prennent cette couleur, pour tous les membres.</Text>
+        <AccountColorPicker value={color ?? null} onChange={(id) => void chooseColor(id)} disabled={color === undefined} />
+        {colorError ? <Text style={styles.error}>{colorError}</Text> : null}
       </Section>
 
       <Section title="Inviter un pote" icon={UserPlus}>
@@ -132,9 +167,11 @@ export default function Settings() {
       </Section>
 
       <Section title="Mon numéro de sécurité" icon={ShieldCheck}>
-        <Text style={styles.fingerprint} selectable>
-          {keyFingerprint(session.identity)}
-        </Text>
+        <Screen style={styles.fingerprintScreen}>
+          <Text style={styles.fingerprint} selectable>
+            {keyFingerprint(session.identity)}
+          </Text>
+        </Screen>
         <Text style={type.dim}>
           Ta carte d’identité dans l’app. Quand tu demandes à entrer dans un groupe, l’admin voit ces chiffres sur son téléphone : montre-lui les
           tiens en vrai. Identiques : c’est bien toi, personne ne s’est fait passer pour toi.
@@ -147,12 +184,15 @@ export default function Settings() {
         </Text>
         <Button title="Verrouiller maintenant" variant="ghost" onPress={lock} />
 
-        <SubTitle icon={FingerprintPattern}>Empreinte digitale</SubTitle>
+        <SubTitle icon={bioKind === 'face' ? ScanFace : FingerprintPattern}>{biometricName(bioKind)}</SubTitle>
         {bioAvailable || bioOn ? (
           <>
             <Text style={type.dim}>
-              Ouvre l’app avec ton doigt au lieu du code. Le code reste demandé toutes les 48 h, et pour ouvrir chaque groupe. Si un doigt est
-              ajouté au téléphone, l’empreinte se désactive.
+              Ouvre l’app avec {biometricWord(bioKind)} au lieu du code. Le code reste demandé toutes les 48 h, et pour ouvrir chaque groupe. Si une
+              empreinte ou un visage est ajouté au téléphone, l’option se désactive.
+              {Platform.OS === 'android' && bioKind === 'both'
+                ? ' Android n’accepte que ses biométries fortes : l’empreinte toujours, le visage seulement sur les téléphones où il l’est.'
+                : ''}
             </Text>
             <Button
               title={bioOn ? 'Désactiver' : 'Activer'}
@@ -162,7 +202,7 @@ export default function Settings() {
             />
           </>
         ) : (
-          <Text style={type.dim}>Pas de capteur d’empreinte, ou aucun doigt enregistré sur ce téléphone.</Text>
+          <Text style={type.dim}>Aucune empreinte ni visage enregistré sur ce téléphone, ou pas de capteur.</Text>
         )}
 
         <SubTitle icon={Bell}>Notifications</SubTitle>
@@ -214,37 +254,11 @@ function inviteError(e: unknown): string {
   return e instanceof ApiError ? `Erreur (${e.code})` : 'Erreur';
 }
 
-function Segment<T>({ options, value, onChange }: { options: { label: string; value: T }[]; value: T | undefined; onChange(v: T): void }) {
+function Section({ title, icon, children }: { title: string; icon: LucideIcon; children: React.ReactNode }) {
   return (
-    <View style={styles.segment}>
-      {options.map((o) => {
-        const on = value === o.value;
-        return (
-          <Pressable
-            key={o.label}
-            disabled={value === undefined || on}
-            accessibilityRole="button"
-            accessibilityState={{ selected: on }}
-            onPress={() => onChange(o.value)}
-            style={[styles.option, on && styles.optionOn]}
-          >
-            <Text style={[styles.optionText, on && styles.optionTextOn]}>{o.label}</Text>
-          </Pressable>
-        );
-      })}
-    </View>
-  );
-}
-
-function Section({ title, icon: Icon, children }: { title: string; icon: LucideIcon; children: React.ReactNode }) {
-  return (
-    <View style={styles.section}>
-      <View style={styles.titleRow}>
-        <Icon size={16} color={colors.accentFg} />
-        <Text style={styles.sectionTitle}>{title}</Text>
-      </View>
+    <Panel title={title} icon={icon}>
       {children}
-    </View>
+    </Panel>
   );
 }
 
@@ -259,19 +273,14 @@ function SubTitle({ icon: Icon, children }: { icon: LucideIcon; children: string
 
 const styles = StyleSheet.create({
   screen: { padding: space.md, gap: space.lg, backgroundColor: colors.bg },
-  section: { gap: space.sm, padding: space.md, borderRadius: 14, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
-  sectionTitle: { color: colors.accentFg, fontSize: 13, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 1 },
   profile: { flexDirection: 'row', alignItems: 'center', gap: space.md, marginBottom: space.sm },
   titleRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   subTitleRow: { marginTop: space.sm },
-  subTitle: { color: colors.accentFg, fontSize: 15, fontWeight: '600' },
+  subTitle: { color: colors.accentFg, fontSize: 15, fontFamily: fonts.semibold },
   inviteBox: { gap: space.sm, paddingVertical: space.sm },
   inviteExpiry: { ...type.dim, fontSize: 13, textAlign: 'center' },
   error: { color: colors.danger },
-  segment: { flexDirection: 'row', gap: space.sm },
-  option: { flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: colors.border },
-  optionOn: { backgroundColor: colors.accent, borderColor: colors.accentFg },
-  optionText: { color: colors.textDim, fontSize: 14 },
-  optionTextOn: { color: colors.text, fontWeight: '600' },
-  fingerprint: { color: colors.text, fontSize: 18, fontFamily: mono, letterSpacing: 1, textAlign: 'center', lineHeight: 28 },
+  // The safety number on the safe's screen: lit characters, as a code.
+  fingerprintScreen: { paddingVertical: space.sm, paddingHorizontal: space.md },
+  fingerprint: { color: lcd.on, fontSize: 18, fontFamily: mono, letterSpacing: 1, textAlign: 'center', lineHeight: 28, ...neon.text(lcd.on, 6) },
 });

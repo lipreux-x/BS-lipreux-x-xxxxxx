@@ -37,6 +37,8 @@ export interface Profile extends PublicIdentity {
   username: string;
   /** Drawn avatar id (ui/avatars.tsx); null or absent: the default silhouette. */
   avatar?: string | null;
+  /** Account color id (ui/accountColors.tsx); null or absent: the default. */
+  color?: string | null;
 }
 
 /** A key handout: the group key for one version, wrapped, sealed to us and signed by an admin. */
@@ -45,6 +47,11 @@ export interface WireHandout {
   sealedKey: string;
   signerId: string;
   signature: string;
+  /** The group's name sealed to us beside the key (crypto/group.ts), on handouts that carry one. */
+  sealedLabel?: string;
+  labelSignature?: string;
+  /** Who signed the label when another admin filled it in later; the handout's signer otherwise. */
+  labelSignerId?: string;
 }
 
 /** A group we asked to join, waiting for an admin: nothing of it is visible yet. */
@@ -71,6 +78,10 @@ export interface GroupSummary {
   expiresAt: string | null;
   role: 'admin' | 'member';
   sealedKeys: WireHandout[];
+  /** 'direct': a private conversation between two people (absent from an older server: a group). */
+  kind?: 'group' | 'direct';
+  /** Private conversation: the other person, as the server says (a hint; the signed meta decides). */
+  peerId?: string;
 }
 
 export interface Member {
@@ -78,6 +89,8 @@ export interface Member {
   role: 'admin' | 'member';
   /** Key versions the server holds a handout of for this member. */
   keyVersions: number[];
+  /** Among them, the handouts without the group's name sealed beside the key (absent on an older server). */
+  unlabelledKeyVersions?: number[];
 }
 
 /** Someone who typed the right code + keywords and waits for an admin (admins only see these). */
@@ -241,6 +254,11 @@ export class Api {
     return this.request<{ avatar: string | null }>('/me/avatar', { method: 'PUT', json: { avatar } });
   }
 
+  /** One of the account colors, or null for the default. */
+  setColor(color: string | null) {
+    return this.request<{ color: string | null }>('/me/color', { method: 'PUT', json: { color } });
+  }
+
   /** This phone's Expo push token and platform (what the server sends it: services/push.ts). */
   setPushToken(token: string, platform: 'ios' | 'android' | null) {
     return this.request<{ ok: true }>('/me/push-token', { method: 'PUT', json: { token, platform: platform ?? undefined } });
@@ -278,10 +296,27 @@ export class Api {
     joinKey: string;
     sealedKey: string;
     keySignature: string;
+    sealedLabel?: string;
+    labelSignature?: string;
     ephemeralSeconds?: number | null;
     expiresAt?: string | null;
   }) {
     return this.request<{ id: string; currentKeyVersion: number }>('/groups', { method: 'POST', json: input });
+  }
+
+  /**
+   * Opens a private conversation with someone we share a group with: both
+   * handouts and the signed meta go up together. 409 direct_exists: there is
+   * already one between us.
+   */
+  createDirect(input: {
+    id: string;
+    peerId: string;
+    encryptedMeta: string;
+    metaSignature: string;
+    keys: { userId: string; sealedKey: string; signature: string; sealedLabel?: string; labelSignature?: string }[];
+  }) {
+    return this.request<{ id: string; currentKeyVersion: number }>('/groups/direct', { method: 'POST', json: input });
   }
 
   /** Asks to join: pending until an admin approves. The code and keywords never leave the phone, only `joinKey`. */
@@ -294,8 +329,17 @@ export class Api {
     return this.request<{ currentKeyVersion: number; members: Member[]; pending: JoinRequest[] }>(`/groups/${id(groupId)}/members`);
   }
 
+  /** Admin: the group's name sealed beside handouts that had none (filled in, never replaced). */
+  labelKeys(groupId: string, input: { keys: { userId: string; keyVersion: number; sealedLabel: string; labelSignature: string }[] }) {
+    return this.request<{ labelled: number }>(`/groups/${id(groupId)}/keys/labels`, { method: 'POST', json: input });
+  }
+
   /** Admin: lets a newcomer in with their handout of the current key and the meta that now lists them. */
-  approveMember(groupId: string, userId: string, input: { keyVersion: number; sealedKey: string; keySignature: string; encryptedMeta: string; metaSignature: string }) {
+  approveMember(
+    groupId: string,
+    userId: string,
+    input: { keyVersion: number; sealedKey: string; keySignature: string; sealedLabel?: string; labelSignature?: string; encryptedMeta: string; metaSignature: string },
+  ) {
     return this.request<{ approved: true }>(`/groups/${id(groupId)}/members/${id(userId)}/approve`, { method: 'POST', json: input });
   }
 
@@ -306,7 +350,13 @@ export class Api {
   /** Admin: new key, handed to exactly the active members, with the meta (and admin list) written under it. */
   rotateKey(
     groupId: string,
-    input: { fromKeyVersion: number; encryptedMeta: string; metaSignature: string; admins: string[]; keys: { userId: string; sealedKey: string; signature: string }[] },
+    input: {
+      fromKeyVersion: number;
+      encryptedMeta: string;
+      metaSignature: string;
+      admins: string[];
+      keys: { userId: string; sealedKey: string; signature: string; sealedLabel?: string; labelSignature?: string }[];
+    },
   ) {
     return this.request<{ currentKeyVersion: number }>(`/groups/${id(groupId)}/rotate`, { method: 'POST', json: input });
   }
@@ -316,7 +366,7 @@ export class Api {
     return this.request<{ admins: string[] }>(`/groups/${id(groupId)}/admins`, { method: 'PUT', json: input });
   }
 
-  /** 409 handover_required: the last admin must name another one first. */
+  /** 409 handover_required: the last admin must name another one first. A private conversation is deleted, for both. */
   leaveGroup(groupId: string) {
     return this.request<{ left: true }>(`/groups/${id(groupId)}/leave`, { method: 'POST' });
   }
@@ -333,7 +383,7 @@ export class Api {
       keyVersion: number;
       encryptedMeta: string;
       metaSignature: string;
-      keys: { userId: string; keyVersion: number; sealedKey: string; signature: string }[];
+      keys: { userId: string; keyVersion: number; sealedKey: string; signature: string; sealedLabel?: string; labelSignature?: string }[];
     },
   ) {
     return this.request<{ codeVersion: number }>(`/groups/${id(groupId)}/code`, { method: 'PUT', json: input });

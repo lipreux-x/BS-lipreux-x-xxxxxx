@@ -18,7 +18,7 @@
 
 ### 2.1 Écran d'ouverture (verrou)
 1. L'utilisateur ouvre l'app → écran noir avec **un gros carré centré** (logo/icône BaseSecrète, légère animation de « respiration »).
-2. **Tap sur le carré** → le carré s'ouvre (animation) et laisse place à un **pavé numérique** + 6 points.
+2. Le carré **s'ouvre tout seul** (animation ; un tap l'ouvre sans attendre) et laisse place à un **pavé numérique** + 6 points.
 3. L'utilisateur saisit son **code à 6 chiffres**.
    - Correct → animation de déverrouillage → page Messagerie.
    - Incorrect → vibration + shake des points. Compteur d'essais (voir §4.4).
@@ -65,7 +65,7 @@
 | ORM | **Drizzle** + driver `@neondatabase/serverless` | Typé, léger, migrations simples |
 | Crypto | Algorithmes libsodium en JS audité (@noble, tweetnacl), octet pour octet ; **module natif** `mobile/modules/bs-native` pour Argon2id (implémentation de référence) et la clé matérielle | Primitives éprouvées, pas de crypto maison |
 | Stockage secret local | `expo-secure-store` (Keychain / Keystore) | Clés protégées par le matériel |
-| Biométrie | `expo-local-authentication` + `expo-secure-store` | Option : ouvrir l'app avec l'empreinte (pas de reconnaissance faciale) |
+| Biométrie | `expo-local-authentication` + `expo-secure-store` | Option : ouvrir l'app avec la biométrie du téléphone (Face ID ou Touch ID sur iOS ; empreinte, ou visage « fort », sur Android) |
 | Base locale | `expo-sqlite` (chiffrée, ex. SQLCipher via op-sqlite) | Cache des messages déchiffrés, hors-ligne |
 | Notifications | Expo Notifications | **Contenu générique uniquement** (« Nouveau message ») |
 | UI | NativeWind (Tailwind) + Reanimated | Animations du carré / pavé |
@@ -93,12 +93,13 @@
 
 ### 4.3 Groupes
 - Chaque groupe a une **clé de groupe** aléatoire 256 bits, générée par le créateur.
-- Chaque membre reçoit la clé en **remise** (table `group_keys`, une ligne par membre et par version) : chiffrée sous la clé dérivée du code + mots-clés (`wrapKey`, §4.4), scellée à sa clé publique (`crypto_box_seal`), et **signée par l'admin** qui la remet. Le serveur ne peut ni lire une remise, ni en fabriquer une, ni en donner une à quelqu'un.
+- Chaque membre reçoit la clé en **remise** (table `group_keys`, une ligne par membre et par version) : chiffrée sous la clé dérivée du code + mots-clés (`wrapKey`, §4.4), scellée à sa clé publique (`crypto_box_seal`), et **signée par l'admin** qui la remet. Le serveur ne peut ni lire une remise, ni en fabriquer une, ni en donner une à quelqu'un. À côté de la clé, la remise porte aussi le **nom du groupe scellé au membre seul** (`sealed_label`, `crypto_box_seal` à sa clé publique, signé par le même admin, l'id du groupe dedans) : lisible avec le code app seulement, avant le code du groupe, pour que la liste nomme un coffre jamais ouvert sur ce téléphone (reconnexion, nouvelle adhésion) et qu'on sache quel code taper. Les remises d'avant n'en ont pas (« Groupe verrouillé ») jusqu'à ce qu'un admin ouvre le groupe : son téléphone scelle alors le nom sur chaque remise qui n'en a pas (`POST /groups/:id/keys/labels`, rempli une fois, signé par lui : `label_signer_id`).
 - La **meta** du groupe (nom, avatar, mots-clés, admins, membres, numéro de révision) est chiffrée avec la clé de groupe et **signée par un admin**. Les téléphones suivent ses listes, jamais celles du serveur, et refusent une révision plus ancienne que celle déjà vue.
 - **Entrer dans un groupe** : le code + mots-clés ne font qu'une **demande**. Un admin l'accepte depuis son téléphone (après avoir comparé l'empreinte du nouveau, §4.7) : c'est ce qui lui remet la clé et l'ajoute à la meta. Le serveur ne peut pas ajouter de membre fantôme.
 - Messages chiffrés avec **XChaCha20-Poly1305** (`crypto_aead_xchacha20poly1305_ietf`) + nonce aléatoire, et **signés** par l'expéditeur (Ed25519), vérifiés avec sa clé **épinglée** sur le téléphone.
 - Quand un membre quitte / est retiré → **rotation de clé** par un admin : nouvelle clé remise aux seuls membres de la meta encore présents (tout de suite quand l'admin retire quelqu'un). Les anciens messages restent lisibles avec l'ancienne clé (versionnage `key_version`). Un membre retiré est **banni** : le code qu'il connaît ne lui permet plus de redemander à entrer.
 - Le dernier admin désigne un autre admin (meta signée) avant de pouvoir partir.
+- **Discussion privée** (deux personnes) : ouverte depuis la fiche d'un groupe commun, uniquement avec un membre d'un groupe où l'on est tous les deux (le serveur le vérifie ; une seule par paire). C'est un groupe de deux (`groups.kind = 'direct'`) sans code ni mots-clés côté serveur : ses remises sont enveloppées sous une clé publique fixe (`directWrapKey`) au lieu de `wrapKey`, donc ouvrables avec l'identité seule, toujours scellées à chacun et signées par celui qui l'a ouverte. Sa meta (`direct: true`, les deux membres, tous deux admins, aucun mot-clé) est vérifiée comme celle d'un groupe ; un groupe présenté comme discussion privée (ou l'inverse) est refusé. Chaque téléphone verrouille la clé sous **son propre code**, choisi à la première ouverture, avec la clé maître. Personne n'entre ni ne sort ; la supprimer l'efface pour les deux.
 
 ### 4.4 Code de groupe et mots-clés
 - Le code de groupe (6+ caractères) et les **3 mots-clés** sont partagés entre les membres, en vrai. Ils **ne quittent jamais le téléphone** : `Argon2id(code + mots-clés)` (64 Mo ; casse, accents, espaces et ordre ignorés) donne deux clés indépendantes (`mobile/src/crypto/groupSecret.ts`) :
@@ -111,7 +112,7 @@
 ### 4.5 Protection contre le forçage
 - Code app : après 5 échecs → délai croissant (30 s, 1 min, 5 min, 15 min, 1 h). Option « auto-destruction » après 10 échecs = effacement des données locales.
   - Fait : option dans Réglages (désactivée, 10 ou 20 essais), `bs.wipe_after` dans le Secure Store. Secret de l'appareil, clé maître et copie pour l'empreinte effacés en premier, puis le reste, la clé matérielle et la base SQLite ; un effacement interrompu est terminé au lancement suivant.
-- Empreinte (fait) : optionnelle, pour ouvrir l'app à la place du code app. Une copie de la clé maître est gardée dans le Keychain/Keystore avec authentification biométrique obligatoire (`requireAuthentication`, invalidée si un doigt est ajouté, `WHEN_PASSCODE_SET_THIS_DEVICE_ONLY`). Offerte seulement avec un capteur d'empreinte. Activation avec le code app ; code redemandé après 48 h sans l'avoir tapé ; les groupes demandent toujours leur code.
+- Empreinte (fait) : optionnelle, pour ouvrir l'app à la place du code app. Une copie de la clé maître est gardée dans le Keychain/Keystore avec authentification biométrique obligatoire (`requireAuthentication`, invalidée si un doigt est ajouté, `WHEN_PASSCODE_SET_THIS_DEVICE_ONLY`). Offerte dès qu'une biométrie est enregistrée (25/10 : avant, seulement si l'empreinte était l'unique capteur, ce qui excluait les Samsung avec reconnaissance faciale). Le choix empreinte / visage n'appartient pas à l'app : iOS donne ce que l'iPhone a (Face ID ou Touch ID, jamais les deux) ; Android accepte toute biométrie **forte** enregistrée (l'empreinte, et le visage seulement là où il est de classe forte : pas sur les Samsung) sans pouvoir se limiter à l'une. L'app nomme ce qu'elle a (`biometricKind` : « Face ID », « Touch ID », « Empreinte digitale », « Empreinte ou visage ») et dessine un visage sur le lecteur du coffre pour Face ID. Activation avec le code app ; code redemandé après 48 h sans l'avoir tapé ; les groupes demandent toujours leur code.
 - Code groupe : même logique, compteur par groupe.
 - Compteurs stockés dans le Secure Store. Chaque essai est compté **avant** d'être tenté (tuer l'app pendant un essai ne le rend pas gratuit), et l'attente se mesure sur l'horloge de démarrage du téléphone : avancer la date ne la raccourcit pas, un redémarrage la fait repartir.
 - Serveur : invitations, créations de groupe et changements de code limités par utilisateur ; 60 messages par minute ; défis de connexion à usage unique ; un pseudo ne peut pas exister en deux casses (« Alice »/« alice ») ; une invitation brûle après 3 pseudos déjà pris.
@@ -134,8 +135,9 @@
   - Téléphone : images déchiffrées gardées en mémoire seulement (vidées au verrouillage). « Enregistrer dans la galerie » est un choix explicite ; l'image n'y est plus chiffrée.
   - Réactions (fait) : cinq réactions par message (pouce, couronne, pièces, flamme, cadenas), dessinées par l'app, jamais en emoji. Une par membre et par message, la dernière compte, `null` la retire. Corps de message `kind: 'reaction'` (id du message visé + identifiant), envoyé chiffré et signé comme un message mais marqué `quiet` : le serveur ne notifie personne et n'apprend que cela. Jamais dans le fil : comptées sous le message visé.
   - Documents (fait) : n'importe quel fichier (PDF, tableur, archive…) choisi avec le sélecteur du système, envoyé tel quel et chiffré exactement comme une image (corps de message `kind: 'file'` : clé de fichier, type MIME, nom, taille ; le nom et le type voyagent dans le chiffré, le serveur ne voit qu'un blob de 10 Mo max). Un nom avec un chemin ou des caractères de contrôle est refusé à la lecture. Dans le fil : une plaque avec l'icône, le nom, le type et la taille ; un toucher télécharge, déchiffre, puis confie le document à une autre app via la feuille de partage du système (visionneuse, enregistrement). Cette copie en clair, dans le cache de l'app, est supprimée avant le document suivant, au verrouillage et au lancement (balayage). Un document peut être cité en réponse (« 📎 nom »).
-  - Stories (fait) : une photo (appareil photo ou galerie) chiffrée exactement comme une image (corps de message `kind: 'story'`, même clé de fichier aléatoire, même recompression sans métadonnées), mais affichée dans une bande repliable en haut de la conversation (tirée vers le bas, elle couvre les messages jusqu'à la zone de saisie ; la photo entière est le rideau (fond flouté autour, jusqu'à la zone de saisie), une à la fois, toucher à droite / à gauche ou glisser pour changer) et non dans le fil. Le message part avec `expiresInSeconds: 86400` : le serveur pose la date d'expiration à 24 h (ou moins si le groupe a des messages éphémères plus courts) et la purge (toutes les 6 h) supprime le message et le fichier. Le serveur apprend seulement qu'un message vit 24 h, pas que c'est une story. Les stories déjà regardées sont notées dans le store local chiffré du téléphone (`stories/<groupe>`), jamais envoyées : pas de « vu par ». Enregistrer dans la galerie reste possible, avec le même avertissement.
-- Photo de profil : jamais de vraie photo. On choisit dans Réglages une icône de la bibliothèque Lucide (lucide.dev, licence ISC) : silhouette par défaut, ou masque, espion, banque, coffre-fort, diamant, pièces d'or, butin, tirelire, clé, perceuse, guetteur. Le serveur ne stocke que l'identifiant (`profiles.avatar`, liste fermée), visible par les membres des groupes comme le pseudo. Dans le chat, l'avatar et le nom ouvrent chaque série de messages d'un membre.
+  - Stories (fait) : une photo (appareil photo ou galerie) chiffrée exactement comme une image (corps de message `kind: 'story'`, même clé de fichier aléatoire, même recompression sans métadonnées), mais affichée dans une bande repliable en haut de la conversation (tirée vers le bas, elle couvre les messages jusqu'à la zone de saisie ; la photo entière est le rideau (fond flouté autour, jusqu'à la zone de saisie), une à la fois, toucher à droite / à gauche ou glisser pour changer) et non dans le fil. Le message part avec `expiresInSeconds: 86400` : le serveur pose la date d'expiration à 24 h (ou moins si le groupe a des messages éphémères plus courts) et la purge (toutes les 6 h) supprime le message et le fichier. Le serveur apprend seulement qu'un message vit 24 h, pas que c'est une story. Les stories déjà regardées sont notées dans le store local chiffré du téléphone (`stories/<groupe>`), jamais envoyées : pas de « vu par ». Enregistrer dans la galerie reste possible, avec le même avertissement. Quand sa propre story est partie, la barre de la bande le dit (« PUBLIÉE » quelques secondes, LED verte, la touche « + » devient une coche, une vibration), puis la nomme tant qu'elle est en ligne (« LA TIENNE », « LA TIENNE + 2 » avec les autres, « LA TIENNE · 2 NOUVELLES » quand il y en a à voir).
+- Photo de profil : jamais de vraie photo. On choisit dans Réglages une icône de la bibliothèque Lucide (lucide.dev, licence ISC) : silhouette par défaut, ou masque, espion, banque, coffre-fort, diamant, pièces d'or, butin, tirelire, clé, perceuse, guetteur. Le serveur ne stocke que l'identifiant (`profiles.avatar`, liste fermée), visible par les membres des groupes comme le pseudo. Dans le chat, l'avatar n'apparaît qu'avec l'affichage « Avec avatars » (ci-dessous).
+- Affichage de la discussion, au choix par groupe (fiche du groupe) : **Terminal** (par défaut : chaque message est une entrée `❯ auteur [heure]` en monospace, sans avatar) ou **Avec avatars** (chaque message sur une plaque d'acier biseautée, vert sombre pour les miens, métal sombre pour les autres ; ceux des autres ont l'avatar et le nom à gauche, sur chaque message). Le choix vaut pour ce téléphone seulement : il est rangé dans le store local chiffré (`look/<groupe>`), jamais envoyé, et oublié avec le groupe.
 - Réponses : la réponse embarque dans son corps chiffré et signé l'id, l'auteur et un extrait (140 caractères max) du message cité. Quand l'original est encore chargé, l'app affiche l'original et non l'extrait, pour qu'un membre ne puisse pas faire dire autre chose à quelqu'un. Sinon l'extrait est marqué « non vérifié » ; une citation qui contredit l'original chargé s'affiche « Citation falsifiée ».
 - Vérification des contacts : chacun a une **empreinte** (30 chiffres, Réglages). L'admin la compare en vrai avec celle qu'il voit avant d'accepter une demande, et peut la voir pour chaque membre (fiche du groupe). Les clés publiques des contacts sont **épinglées** à la première vue : une clé que le serveur changerait ensuite est refusée et signalée.
 - Images reçues : refusées avant affichage si ce n'est pas un JPEG bien formé ou si elles dépassent 4096 px (une image piégée ne peut pas faire planter l'app à chaque ouverture).
@@ -246,12 +248,13 @@ join_attempts (user_id uuid, group_id uuid, attempted_at timestamptz)
 
 1. `LockScreen` — carré central + pavé numérique 6 chiffres
 2. `Onboarding` — invitation → pseudo → création du code app → génération des clés
-3. `GroupsList` — liste des groupes verrouillés
+3. `GroupsList` — deux espaces : les groupes verrouillés, et les discussions privées
 4. `GroupUnlockModal` — saisie du code de groupe
 5. `Chat` — conversation
 6. `CreateGroup` / `JoinGroup` — création (nom, code, membres) / rejoindre
-7. `GroupSettings` — mots-clés (masqués : le code du groupe les révèle, un code faux compte comme un essai), membres, éphémère, changer le code, quitter
+7. `GroupSettings` — mots-clés (masqués : le code du groupe les révèle, un code faux compte comme un essai), membres, affichage de la discussion (terminal / avec avatars, sur ce téléphone), éphémère, changer le code, quitter
 8. `Settings` — profil, code app, auto-lock, biométrie, empreinte de sécurité
+9. `NewDirect` — discussion privée avec un membre d'un groupe commun : choix du code (deux fois), ou ouverture de celle qui existe
 
 Composants partagés : `PinPad`, `PinDots`, `VaultSquare` (animation), `MessageBubble`, `LockBadge`.
 
@@ -259,22 +262,43 @@ Composants partagés : `PinPad`, `PinDots`, `VaultSquare` (animation), `MessageB
 
 ## 8. Direction artistique
 
-- **Fond : noir (style Sephora)** `#000000`, surfaces `#0D0D0D` / `#1A1A1A`, bordures `#2A2A2A`.
-- Texte : blanc `#FFFFFF`, secondaire `#8A8A8A`.
-- ✅ **Accent principal : gris anthracite** — `#383E42` (RAL 7016) pour les aplats (boutons, face du coffre, texte blanc dessus : 11:1) et `#9AA1A7` pour les traits et textes sur le noir (points du code, bordures, liens : 7,8:1). Remplace l’Or Coffre initialement choisi.
-- ✅ **Seconde couleur : Vert forêt `#1E6B34`** — touche d'envoi, statuts « ouvert / envoyé ». (Texte blanc dessus : contraste 6,6:1.) Mes messages sont en anthracite `#383E42` (texte blanc : 11:1), ceux des autres en métal plus sombre.
-- Typo : une sans-serif géométrique (ex. *Inter* ou *Space Grotesk*), chiffres du pavé en grand.
-- Ambiance : coffre-fort / club privé. Peu d'éléments, beaucoup de noir, animations courtes et nettes.
-- Rayures fines noir/blanc possibles en clin d'œil Sephora (écran d'onboarding uniquement).
+Charte « la lame » (octobre 2026) : un coffre noir dont l’acier reste sombre et neutre, éclairé par deux lumières. La froide (bleu ciel) est la lumière de l’information ; la chaude (vert phosphore d’un terminal) celle de l’action. Une troisième, le rouge néon, est réservée à ce qui a échoué ou est fermé. Des filets pâles font les reflets.
 
-### Palettes d'accent proposées
+**Règle de grammaire : le coffre est l’objet, le terminal est ce qu’affichent ses écrans.** Trois couches, et rien d’autre :
+
+1. **La carrosserie, en acier** : panneaux, touches, barres, volet. Une seule famille de conteneurs (`Panel`) et de touches biseautées (`Key`), la lumière vient du haut à gauche, une touche pressée inverse son biseau.
+2. **Les écrans, en verre LCD** (`Screen`) : tout ce qui affiche ou prend de la donnée (code, invitation, mots-clés, champs de saisie, compteur de non-lus, fil des messages). Le texte « donnée » est en monospace, précédé d’une invite `❯`.
+3. **Les lumières** : bleu = information, vert = action, rouge = erreur / fermé, filament = reflet. Les étiquettes gravées (`Label`) sont en petites capitales monospace.
+
+Pas d’emoji dans l’interface : icônes lucide (traits) ou SVG maison. L’univers ne doit jamais coûter en lisibilité : corps de texte en police système, tailles ≥ 13, contrastes ≥ 6:1.
+
+| Rôle | Couleur | Usage |
+|---|---|---|
+| Fond | `#000000` | Partout. Surfaces `#0A0D10` / `#161B20`, bordures `#262D34`, acier des touches et plaques (voir `steel` dans `theme.ts`). |
+| Texte | `#FFFFFF`, secondaire `#8A95A0` | |
+| Bleu ciel clair (pointe du haut) | `#7FE6FF` | Caractères allumés des écrans LCD (code, invitation, mots-clés, numéro de sécurité, compteur de non-lus). 14,7:1 sur noir. |
+| Bleu ciel (haut de la lame) | `#4FC3FF` | Traits, liens, icônes, teinte du header, invite `❯` des champs ; LED « ok / ouvert » ; rétroéclairage du lecteur d’empreinte ; entrées des autres dans le chat. 10,6:1 sur noir. Aplats froids (option choisie) en acier bleu `#0E2E42` (texte blanc 14:1). |
+| Phosphore pâle (transition) | `#8CFF8C` | Arêtes éclairées des touches d’action, texte tapé au prompt du chat, lumière du portail. 16:1 sur noir. |
+| Vert terminal (bas de la lame et pointe) | `#33FF33` | « Secrète » du wordmark, invite `❯` et entrées à moi dans le chat, cœur du portail. Touches d’action (envoi, ouvrir, confirmer, continuer) : aplat `#0F5A28` (texte blanc 7,5:1), arête phosphore, dessous `#073018`, halo vert à 35 %. |
+| Rouge néon (alerte) | `#FF3B4E` | LED « erreur / fermé », envoi échoué, « FERMÉ » sur la liste, ce qui ne se défait pas ; couleur de l’icône de notification. Touche destructrice : `#3A0B10` à l’arête rouge. |
+| Filets lumineux | `#EAFCFF` à ~55 % | LED « en cours », glints, écran du code qui flashe quand il est accepté, bulles du portail. |
+
+- Écrans LCD du coffre : verre `#060B10`, caractères éteints `#17303D`, biseau inversé (sombre en haut).
+- LED d’état (écran du code, liste des groupes, messages, invitations) : éteinte `#1A2026`, **en cours** filament, **ok / ouvert** bleu ciel, **erreur / fermé** rouge néon.
+- Portail du coffre : bord bleu ciel clair, corps du bleu (bord) au vert (cœur), courants phosphore et filaments pâles.
+- Logo : l’œil blanc, la serrure en dégradé vertical bleu ciel clair → vert.
+- Réactions : bleu ciel, or `#D3B03A` (la couronne, seule teinte hors lame : une couronne est en or), phosphore pâle, rouge néon (la flamme), bleu ciel clair.
+- Typo : Space Grotesk (wordmark, titres, chiffres du pavé, touches) ; corps en police système ; monospace sur les écrans LCD, les étiquettes gravées et le fil du chat.
+- Ambiance : coffre-fort / club privé. Peu d’éléments, beaucoup de noir, animations courtes et nettes.
+
+Tout ce qui nomme une teinte vit dans `mobile/src/ui/theme.ts` (`blade`, `colors`, `glow`, `wash`, `led`, `lcd`, `steel`, `hotKey`, `dangerKey`, `coldPlate`, `hotPlate`, `calm`) ; les couleurs des réactions dans `chat/reactions.ts`. Les primitives : `ui/Key.tsx`, `ui/Panel.tsx`, `ui/Screen.tsx` (`Screen`, `Field`), `ui/Label.tsx`, `ui/Segment.tsx`. Revenir à la piste rouge (rouge comme lumière d’action) se fait dans `theme.ts`, sans toucher aux écrans : c’est l’historique git de ce fichier.
+
+### Pistes écartées
 | Nom | Accent | Ambiance |
 |---|---|---|
-| Or Coffre ⭐ | `#D4AF37` | Luxe, coffre-fort, très bien avec le noir |
-| Rouge Code | `#E50035` | Alerte, passion, énergie |
-| Vert Terminal | `#00FF9C` | Hacker, « base secrète » |
+| Or Coffre | `#D4AF37` | Luxe, coffre-fort (première DA, remplacée par l’anthracite `#383E42` + vert forêt `#1E6B34`, puis par la lame) |
+| Rouge néon en lumière d’action | `#FF3B4E` | Première version de la lame (octobre 2026) : le rouge disait à la fois « envoyer » et « fermé » |
 | Violet Néon | `#9B5CFF` | Moderne, nocturne, fun entre potes |
-| Bleu Glace | `#5CE1FF` | Froid, tech, sécurisé |
 
 ---
 

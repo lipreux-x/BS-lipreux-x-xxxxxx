@@ -1,7 +1,5 @@
 import Constants from 'expo-constants';
-import * as Notifications from 'expo-notifications';
-import { AndroidImportance, AndroidNotificationVisibility } from 'expo-notifications';
-import * as TaskManager from 'expo-task-manager';
+import type { NotificationResponse, NotificationTaskPayload } from 'expo-notifications';
 import { AppState, Platform } from 'react-native';
 import { whileSystemUi } from '@/session/autoLock';
 import type { Api } from './api';
@@ -36,6 +34,24 @@ import { secureStore } from './secureStore';
  * them the app works, it just does not ring.
  */
 
+/**
+ * expo-notifications and expo-task-manager, or null on a build without their
+ * native modules (a development client older than them, Expo Go, Jest): an
+ * import at the top would throw before anything is drawn, so they are
+ * required here, and the app then simply does not ring.
+ */
+function optional<T>(load: () => T): T | null {
+  try {
+    return load();
+  } catch {
+    return null;
+  }
+}
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const Notifications = optional(() => require('expo-notifications') as typeof import('expo-notifications'));
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const TaskManager = optional(() => require('expo-task-manager') as typeof import('expo-task-manager'));
+
 const CHANNEL = 'messages';
 const TASK = 'bs-push';
 /** Keystore record: { names: group id -> name, counts: group id -> messages since the last opening }. */
@@ -43,8 +59,8 @@ const STORE_KEY = 'bs.notif';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_NAME = 60;
 
-export type PushKind = 'message' | 'join_request' | 'approved' | 'member_left' | 'code_changed';
-const KINDS: readonly PushKind[] = ['message', 'join_request', 'approved', 'member_left', 'code_changed'];
+export type PushKind = 'message' | 'join_request' | 'approved' | 'member_left' | 'code_changed' | 'direct';
+const KINDS: readonly PushKind[] = ['message', 'join_request', 'approved', 'member_left', 'code_changed', 'direct'];
 const isKind = (k: unknown): k is PushKind => typeof k === 'string' && (KINDS as readonly string[]).includes(k);
 
 /** What the group waits for, under its name. */
@@ -53,6 +69,7 @@ const ACTION_BODY: Record<Exclude<PushKind, 'message'>, string> = {
   approved: 'Demande acceptée : entre le code du groupe',
   member_left: 'Un membre est parti : clé à renouveler',
   code_changed: 'Le code a changé : entre le nouveau',
+  direct: 'Nouveau tête-à-tête : choisis ton code',
 };
 
 interface Push {
@@ -65,7 +82,7 @@ interface Push {
 // Module scope, as expo-task-manager requires: the bundle is loaded headless
 // just to run this when a silent push arrives with the app closed.
 try {
-  TaskManager.defineTask<Notifications.NotificationTaskPayload>(TASK, async ({ data, error }) => {
+  TaskManager?.defineTask<NotificationTaskPayload>(TASK, async ({ data, error }) => {
     if (error || !data || 'actionIdentifier' in data) return; // a tap, handled by openFrom
     const push = parsePush(data.data);
     if (!push) return;
@@ -74,7 +91,7 @@ try {
     await show(push);
   });
 } catch {
-  // Module missing (Expo Go, tests): no background notifications.
+  // A task already defined (a reload): nothing to do.
 }
 
 /** The push's payload, as FCM hands it over (JSON in `dataString` or `body`, or already an object). */
@@ -107,7 +124,7 @@ async function show({ groupId, kind }: Push) {
   } else {
     body = ACTION_BODY[kind];
   }
-  await Notifications.scheduleNotificationAsync({
+  await Notifications?.scheduleNotificationAsync({
     identifier: notificationId(groupId, kind),
     content: { title: name ?? 'BaseSecrète', body: name ? body : `${body} · groupe verrouillé`, data: { groupId, kind }, sound: 'default' },
     trigger: null,
@@ -158,6 +175,7 @@ export async function clearGroupNotification(groupId: string) {
     delete store.counts[groupId];
     await writeStore(store);
   }
+  if (!Notifications) return;
   await Promise.all(KINDS.map((k) => Notifications.dismissNotificationAsync(notificationId(groupId, k)).catch(() => {})));
 }
 
@@ -167,7 +185,7 @@ let configured = false;
 
 /** Once at launch: how notifications show while the app is open, the Android channel, taps. */
 export function setupNotifications() {
-  if (configured) return;
+  if (configured || !Notifications) return;
   configured = true;
   try {
     Notifications.setNotificationHandler({
@@ -180,9 +198,9 @@ export function setupNotifications() {
     if (Platform.OS === 'android') {
       void Notifications.setNotificationChannelAsync(CHANNEL, {
         name: 'Messages',
-        importance: AndroidImportance.HIGH,
+        importance: Notifications.AndroidImportance.HIGH,
         // Shown on the lock screen like any other: the group's name and "Nouveau message", never a message.
-        lockscreenVisibility: AndroidNotificationVisibility.PUBLIC,
+        lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
         vibrationPattern: [0, 200, 120, 200],
       }).catch(() => {});
       // Silent pushes wake the task above, app closed or not.
@@ -194,7 +212,7 @@ export function setupNotifications() {
       .then((r) => r && openFrom(r))
       .catch(() => {});
   } catch {
-    // Module missing (Expo Go): no notifications.
+    // A step the build cannot do: no notifications.
   }
 }
 
@@ -203,12 +221,12 @@ export function setupNotifications() {
 let pending: string | null = null;
 const listeners = new Set<() => void>();
 
-function openFrom(r: Notifications.NotificationResponse) {
+function openFrom(r: NotificationResponse) {
   const id = r.notification.request.content.data?.groupId;
   if (typeof id !== 'string' || !UUID.test(id)) return;
   pending = id;
   for (const l of listeners) l();
-  void Notifications.clearLastNotificationResponseAsync().catch(() => {});
+  void Notifications?.clearLastNotificationResponseAsync().catch(() => {});
 }
 
 /** The group a tapped notification asked for, once (null if none). */
@@ -233,6 +251,7 @@ export type PushStatus = 'on' | 'denied' | 'blocked' | 'unavailable';
  * the server. `ask: false` only registers when already allowed.
  */
 export async function registerPush(api: Api, { ask = true } = {}): Promise<PushStatus> {
+  if (!Notifications) return 'unavailable';
   try {
     let { status, canAskAgain } = await Notifications.getPermissionsAsync();
     if (status !== 'granted' && ask && canAskAgain) {
@@ -250,7 +269,7 @@ export async function registerPush(api: Api, { ask = true } = {}): Promise<PushS
 
 /** Wipe: this phone stops receiving anything (the server forgets the token at the next send), and forgets the names. */
 export async function unregisterPush() {
-  await Notifications.unregisterForNotificationsAsync().catch(() => {});
-  await Notifications.dismissAllNotificationsAsync().catch(() => {});
+  await Notifications?.unregisterForNotificationsAsync().catch(() => {});
+  await Notifications?.dismissAllNotificationsAsync().catch(() => {});
   await secureStore.delete(STORE_KEY).catch(() => {});
 }

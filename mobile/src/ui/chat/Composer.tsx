@@ -1,8 +1,10 @@
-import * as Haptics from 'expo-haptics';
-import { Mic, X } from 'lucide-react-native';
-import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ArrowUp, Mic, Plus, X } from 'lucide-react-native';
+import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Key } from '../Key';
 import { Led } from '../Led';
-import { colors, fonts, led, mono } from '../theme';
+import { screenStyle } from '../Screen';
+import { blade, colors, fonts, led, mono, steel } from '../theme';
+import { QuoteExcerpt } from './MessageBubble';
 import type { Quote } from './replies';
 import { durationLabel } from './waveform';
 
@@ -10,13 +12,14 @@ const MAX_LENGTH = 4000;
 
 /**
  * The bottom bar as a strip of the safe's control panel: a metal key for
- * photos, the message typed into a recessed screen, and a green key to send
- * (lit only when there is something to send). Keys press in like the keypad.
- * When answering a message, a strip above shows what is being answered.
+ * photos, the message typed at a terminal prompt on a recessed screen, and
+ * the hot key to send (lit only when there is something to send). Keys press
+ * in like the keypad. When answering a message, a strip above shows what is
+ * being answered.
  *
  * With nothing typed, the send key is a microphone: one tap starts a voice
  * message. While recording, the screen shows a red LED, the time and the live
- * level; ✕ throws the recording away, the green key sends it.
+ * level; the X key throws the recording away, the hot key sends it.
  */
 export function Composer({
   value,
@@ -61,46 +64,27 @@ export function Composer({
             <Text style={styles.replyTitle} numberOfLines={1}>
               Réponse à {replyTo.author}
             </Text>
-            <Text style={styles.replyText} numberOfLines={1}>
-              {replyTo.image ? '📷 Photo' : replyTo.voice ? '🎤 Vocal' : replyTo.excerpt}
-            </Text>
+            <QuoteExcerpt quote={replyTo} style={styles.replyText} />
           </View>
           <Pressable accessibilityRole="button" accessibilityLabel="Annuler la réponse" hitSlop={12} onPress={onCancelReply}>
-            <Text style={styles.replyClose}>✕</Text>
+            <X size={18} color={colors.accentFg} />
           </Pressable>
         </View>
       ) : null}
       <View style={styles.bar}>
         {recording ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Annuler le vocal"
-            onPress={() => {
-              void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              voice.onCancel();
-            }}
-            style={({ pressed }) => [styles.key, styles.metal, pressed && styles.metalPressed]}
-          >
+          <Key square accessibilityLabel="Annuler le vocal" haptic="light" onPress={voice.onCancel}>
             <X size={22} color={colors.danger} />
-          </Pressable>
+          </Key>
         ) : (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Envoyer une photo"
-            disabled={attaching}
-            onPress={() => {
-              void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              onAttach();
-            }}
-            style={({ pressed }) => [styles.key, styles.metal, pressed && styles.metalPressed]}
-          >
-            {attaching ? <ActivityIndicator color={colors.accentFg} /> : <Text style={styles.attachLabel}>+</Text>}
-          </Pressable>
+          <Key square accessibilityLabel="Envoyer une photo" busy={attaching} haptic="light" onPress={onAttach}>
+            <Plus size={24} color={colors.accentFg} />
+          </Key>
         )}
         <View style={styles.screen}>
           {recording ? (
             <View style={styles.recording} accessibilityLabel={`Enregistrement, ${durationLabel(voice.elapsedMs)}`}>
-              <Led state="red" size={8} />
+              <Led state="error" size={8} />
               <Text style={styles.recordTime}>{durationLabel(voice.elapsedMs)}</Text>
               <View style={styles.levels}>
                 {voice.levels.map((h, i) => (
@@ -109,45 +93,37 @@ export function Composer({
               </View>
             </View>
           ) : (
-            <TextInput
-              ref={inputRef}
-              value={value}
-              onChangeText={onChange}
-              placeholder="Message chiffré"
-              placeholderTextColor="#4F5A52"
-              selectionColor={colors.forest}
-              multiline
-              maxLength={MAX_LENGTH}
-              style={styles.input}
-            />
+            <View style={styles.promptRow}>
+              <Text style={styles.prompt}>❯</Text>
+              <TextInput
+                ref={inputRef}
+                value={value}
+                onChangeText={onChange}
+                placeholder="Message chiffré"
+                placeholderTextColor={steel.engraving}
+                selectionColor={blade.neon}
+                cursorColor={blade.neon}
+                multiline
+                maxLength={MAX_LENGTH}
+                style={styles.input}
+              />
+            </View>
           )}
         </View>
         {canSend || recording ? (
-          <Pressable
-            accessibilityRole="button"
+          <Key
+            square
+            variant="hot"
             accessibilityLabel={recording ? 'Envoyer le vocal' : 'Envoyer'}
-            onPress={() => {
-              void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-              if (recording) voice.onSend();
-              else onSend();
-            }}
-            style={({ pressed }) => [styles.key, styles.green, pressed && styles.greenPressed]}
+            haptic="medium"
+            onPress={() => (recording ? voice.onSend() : onSend())}
           >
-            <Text style={styles.sendLabel}>↑</Text>
-          </Pressable>
+            <ArrowUp size={22} color={colors.text} strokeWidth={2.75} />
+          </Key>
         ) : (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Enregistrer un vocal"
-            disabled={voice.phase === 'starting'}
-            onPress={() => {
-              void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-              voice.onStart();
-            }}
-            style={({ pressed }) => [styles.key, styles.metal, pressed && styles.metalPressed]}
-          >
-            {voice.phase === 'starting' ? <ActivityIndicator color={colors.accentFg} /> : <Mic size={22} color={colors.accentFg} />}
-          </Pressable>
+          <Key square accessibilityLabel="Enregistrer un vocal" busy={voice.phase === 'starting'} haptic="medium" onPress={voice.onStart}>
+            <Mic size={22} color={colors.accentFg} />
+          </Key>
         )}
       </View>
     </View>
@@ -155,11 +131,6 @@ export function Composer({
 }
 
 const KEY = 44;
-const METAL = '#24282B';
-const LIGHT_EDGE = '#4A5056';
-const DARK_EDGE = '#0A0B0C';
-const GREEN_LIGHT = '#2E8A48';
-const GREEN_DARK = '#0F3D1D';
 
 const styles = StyleSheet.create({
   bar: {
@@ -170,60 +141,14 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     backgroundColor: colors.surface,
     borderTopWidth: 1,
-    borderTopColor: '#2E2E2E',
+    borderTopColor: steel.panelEdge,
   },
-  key: { width: KEY, height: KEY, borderRadius: 8, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
-  metal: {
-    backgroundColor: METAL,
-    borderTopColor: LIGHT_EDGE,
-    borderLeftColor: LIGHT_EDGE,
-    borderBottomColor: DARK_EDGE,
-    borderRightColor: DARK_EDGE,
-  },
-  // Pressed: the bevel inverts, as on the keypad.
-  metalPressed: {
-    backgroundColor: '#1B1E20',
-    borderTopColor: DARK_EDGE,
-    borderLeftColor: DARK_EDGE,
-    borderBottomColor: LIGHT_EDGE,
-    borderRightColor: LIGHT_EDGE,
-    transform: [{ translateY: 1 }],
-  },
-  green: {
-    backgroundColor: colors.forest,
-    borderTopColor: GREEN_LIGHT,
-    borderLeftColor: GREEN_LIGHT,
-    borderBottomColor: GREEN_DARK,
-    borderRightColor: GREEN_DARK,
-  },
-  greenPressed: {
-    backgroundColor: '#185A2B',
-    borderTopColor: GREEN_DARK,
-    borderLeftColor: GREEN_DARK,
-    borderBottomColor: GREEN_LIGHT,
-    borderRightColor: GREEN_LIGHT,
-    transform: [{ translateY: 1 }],
-  },
-  attachLabel: { color: colors.accentFg, fontSize: 26, fontFamily: fonts.medium, lineHeight: 30 },
-  sendLabel: { color: colors.text, fontSize: 22, fontFamily: fonts.bold },
   recording: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, height: 40 },
   recordTime: { fontFamily: mono, fontSize: 14, color: colors.text, minWidth: 40 },
   levels: { flex: 1, height: 24, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 2, overflow: 'hidden' },
-  level: { width: 3, borderRadius: 1, backgroundColor: led.green },
-  // Recessed screen: the bevel is inverted (dark on top), like the code display.
-  screen: {
-    flex: 1,
-    minHeight: KEY,
-    maxHeight: 140,
-    justifyContent: 'center',
-    borderRadius: 8,
-    backgroundColor: '#0B100C',
-    borderWidth: 2,
-    borderTopColor: '#000000',
-    borderLeftColor: '#000000',
-    borderBottomColor: colors.border,
-    borderRightColor: colors.border,
-  },
+  level: { width: 3, borderRadius: 1, backgroundColor: led.ok },
+  // Recessed screen, like the code display.
+  screen: { ...screenStyle, flex: 1, minHeight: KEY, maxHeight: 140, justifyContent: 'center' },
   reply: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -232,11 +157,13 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     backgroundColor: colors.surface,
     borderTopWidth: 1,
-    borderTopColor: '#2E2E2E',
+    borderTopColor: steel.panelEdge,
   },
   replyEdge: { width: 3, alignSelf: 'stretch', borderRadius: 2, backgroundColor: colors.accentFg },
   replyTitle: { color: colors.text, fontSize: 13, fontFamily: fonts.semibold },
   replyText: { color: colors.textDim, fontSize: 13 },
-  replyClose: { color: colors.accentFg, fontSize: 18, paddingHorizontal: 4 },
-  input: { color: colors.text, fontSize: 16, paddingHorizontal: 12, paddingTop: 10, paddingBottom: 10, maxHeight: 136 },
+  // The prompt and what is typed, in the terminal's font and light.
+  promptRow: { flexDirection: 'row', alignItems: 'flex-start' },
+  prompt: { fontFamily: mono, fontSize: 15, color: blade.neon, paddingLeft: 12, paddingTop: 11 },
+  input: { flex: 1, color: colors.hot, fontFamily: mono, fontSize: 15, paddingLeft: 8, paddingRight: 12, paddingTop: 10, paddingBottom: 10, maxHeight: 136 },
 });

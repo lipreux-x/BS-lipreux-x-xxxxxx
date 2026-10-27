@@ -2,7 +2,7 @@ import * as Haptics from 'expo-haptics';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AccessibilityInfo, Animated, Easing, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { Portal, PORTAL_GLOW } from './Portal';
-import { calm, colors, led, space, type } from './theme';
+import { calm, colors, led, space, steel, type } from './theme';
 import { BoltArt, DialArt, DialGloss, DoorFaceArt, FrameArt, Glow, HingeArt, SheenBand, WheelArt } from './VaultArt';
 import { VaultWall } from './VaultWall';
 
@@ -10,10 +10,12 @@ import { VaultWall } from './VaultWall';
 const BASE = 236;
 const BOLTS = 12;
 /** Behind the portal, at the edge of the opening. */
-const VOID = '#03140A';
+const VOID = '#02080E';
 /** How long the portal takes to pull you in, and how far the scene twists meanwhile. */
 const SUCK_MS = 1250;
 const TWIST_DEG = 140;
+/** Once the bolts have slammed shut, how long the door stays locked before opening by itself. */
+const SETTLE_MS = 450;
 
 /**
  * Being pulled in is a camera moving forward by TRAVEL: something at depth z then
@@ -46,10 +48,12 @@ const deg = (v: Animated.Value) => v.interpolate({ inputRange: [0, 360], outputR
 
 /**
  * Lock screen vault door. On mount it rises into place and its bolts slam shut
- * one after the other; while it waits, a glint sweeps across it and the red LED
- * pulses. Tap: the combination dial clicks through three numbers, the handwheel
- * turns and draws the bolts in one by one, the LED goes green, the door unseats
- * with a thud and swings open on a green swirling portal, whose light spills
+ * one after the other; a glint sweeps across it and the red LED pulses. Then it
+ * opens by itself (a tap opens it at once, without waiting): the combination
+ * dial clicks through three numbers, the handwheel
+ * turns and draws the bolts in one by one, the LED goes blue, the door unseats
+ * with a thud and swings open on a swirling portal, cold at its rim and red at
+ * its heart, whose light spills
  * out. The portal pulls you in: the camera speeds towards it while the whole
  * scene twists and the phone rumbles harder and harder, until you are
  * through and the code screen's `calm` backdrop fills the screen. Then
@@ -100,6 +104,8 @@ export function VaultDoor({ onOpen, hint }: { onOpen(): void; hint?: string }) {
       if (!alive) return;
       void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
       thud(2).start();
+      // Locked: a beat for the thud to settle, then it opens by itself.
+      setTimeout(() => alive && void open(), SETTLE_MS);
       idle.current = Animated.parallel([
         Animated.loop(Animated.sequence([t(pulse, 1, 900), t(pulse, 0, 900)])),
         Animated.loop(
@@ -260,7 +266,7 @@ export function VaultDoor({ onOpen, hint }: { onOpen(): void; hint?: string }) {
           ))}
           <View style={styles.led}>
             <Animated.View style={[styles.ledRed, { opacity: pulse.interpolate({ inputRange: [0, 1], outputRange: [0.45, 1] }) }]} />
-            <Animated.View style={[styles.ledGreen, { opacity: unlocked }]} />
+            <Animated.View style={[styles.ledOpen, { opacity: unlocked }]} />
           </View>
 
           <View style={styles.recess}>
@@ -337,12 +343,12 @@ function makeStyles(k: number) {
       paddingVertical: 8,
       paddingHorizontal: 28 * k,
       borderRadius: 4,
-      backgroundColor: '#2A2F33',
+      backgroundColor: steel.key,
       borderWidth: 1,
-      borderTopColor: '#5A6168',
-      borderLeftColor: '#5A6168',
-      borderBottomColor: '#0A0B0C',
-      borderRightColor: '#0A0B0C',
+      borderTopColor: steel.edgeLight,
+      borderLeftColor: steel.edgeLight,
+      borderBottomColor: steel.edgeDark,
+      borderRightColor: steel.edgeDark,
       justifyContent: 'center',
     },
     plateText: {
@@ -359,7 +365,7 @@ function makeStyles(k: number) {
       width: 5,
       height: 5,
       borderRadius: 2.5,
-      backgroundColor: '#0A0B0C',
+      backgroundColor: steel.edgeDark,
     },
     frame: {
       width: FRAME,
@@ -394,11 +400,11 @@ function makeStyles(k: number) {
       backgroundColor: colors.danger,
       boxShadow: [{ offsetX: 0, offsetY: 0, blurRadius: 8 * k, color: colors.danger }],
     },
-    ledGreen: {
+    ledOpen: {
       ...StyleSheet.absoluteFill,
       borderRadius: 4.5 * k,
-      backgroundColor: led.green,
-      boxShadow: [{ offsetX: 0, offsetY: 0, blurRadius: 10 * k, color: led.green }],
+      backgroundColor: led.ok,
+      boxShadow: [{ offsetX: 0, offsetY: 0, blurRadius: 10 * k, color: led.ok }],
     },
     recess: { ...circle(RECESS), alignItems: 'center', justifyContent: 'center' },
     inside: {

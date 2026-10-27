@@ -50,6 +50,41 @@ export function pruneSeen(seen: ReadonlySet<string>, stories: StoryMessage[]): s
 }
 
 /**
+ * The rail's line, folded or open. What the band is doing comes first
+ * (failed, sending, just published); then, folded, my own story is named
+ * ("LA TIENNE", with "+ 2" for the others when none is new) before the new
+ * ones, so that a story just sent stays visibly up.
+ */
+export function railLabel(s: {
+  failed: boolean;
+  sending: boolean;
+  published: boolean;
+  open: boolean;
+  index: number;
+  count: number;
+  /** Someone else's stories not watched yet. */
+  fresh: number;
+  /** My own stories still up. */
+  mine: number;
+}): string {
+  const parts = ['STORIES · 24 H'];
+  if (s.failed) parts.push('ÉCHEC');
+  else if (s.sending) parts.push('ENVOI…');
+  else if (s.published) parts.push('PUBLIÉE');
+  else if (s.open && s.count) parts.push(`${s.index + 1} / ${s.count}`);
+  else {
+    const others = s.count - s.mine;
+    if (s.mine) {
+      const own = s.mine > 1 ? 'LES TIENNES' : 'LA TIENNE';
+      parts.push(others && !s.fresh ? `${own} + ${others}` : own);
+    }
+    if (s.fresh) parts.push(`${s.fresh} NOUVELLE${s.fresh > 1 ? 'S' : ''}`);
+    else if (!s.mine && s.count) parts.push(String(s.count));
+  }
+  return parts.join(' · ');
+}
+
+/**
  * Where a tap on the big story leads: the left half goes back, the right
  * half forward. Past the last one the band folds ('close'); before the first
  * one, nothing (null).

@@ -1,5 +1,6 @@
+import { ChevronLeft } from 'lucide-react-native';
 import { useEffect, useMemo, useState } from 'react';
-import { BackHandler, KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { BackHandler, KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CryptoError, isValidPassword, MIN_PASSWORD_LENGTH, NativeCryptoMissingError, passwordProblem } from '@/crypto';
 import { useSession, type RecoveredAccount } from '@/session/SessionProvider';
@@ -9,9 +10,12 @@ import { CodeEntry } from '@/ui/CodeEntry';
 import { INVITE_LENGTH } from '@/ui/invite';
 import { InviteCodeInput } from '@/ui/InviteCode';
 import { Led, type LedState } from '@/ui/Led';
+import { Panel } from '@/ui/Panel';
 import { PasswordField } from '@/ui/PasswordField';
+import { Field } from '@/ui/Screen';
+import { Segment } from '@/ui/Segment';
 import { Wordmark } from '@/ui/Wordmark';
-import { colors, fonts, mono, space, type } from '@/ui/theme';
+import { colors, fonts, space, type } from '@/ui/theme';
 
 /*
  * SPEC §2.5: invite -> pseudo + password -> app code (twice) -> keys generated
@@ -83,8 +87,9 @@ export default function Onboarding() {
     return () => sub.remove();
   }, [back]);
   const backLink = back ? (
-    <Pressable onPress={back} hitSlop={12} style={[styles.back, { top: insets.top + space.sm }]}>
-      <Text style={styles.backText}>‹ Retour</Text>
+    <Pressable onPress={back} hitSlop={12} accessibilityRole="button" style={[styles.back, { top: insets.top + space.sm }]}>
+      <ChevronLeft size={20} color={colors.accentFg} />
+      <Text style={styles.backText}>Retour</Text>
     </Pressable>
   ) : null;
 
@@ -117,14 +122,14 @@ export default function Onboarding() {
           key="confirm"
           fadeOut
           title="Confirme ton code"
-          subtitle={login ? 'Enregistrement de ton compte sur ce téléphone…' : 'Création de tes clés sur le téléphone…'}
+          busyLabel={login ? 'Enregistrement de ton compte sur ce téléphone…' : 'Création de tes clés sur le téléphone…'}
           onComplete={async (code) => {
             if (code !== step.code) {
               setStep({ kind: 'code', notice: 'Les codes ne correspondent pas' });
               return null;
             }
             try {
-              // Green LED and a success buzz on the code just typed, then straight to the home:
+              // Blue LED and a success buzz on the code just typed, then straight to the home:
               // the code was typed twice already, no need to type it a third time.
               return login && recovered ? await restore(recovered, code) : await register({ inviteCode: invite, username, password, appCode: code });
             } catch (e) {
@@ -142,11 +147,11 @@ export default function Onboarding() {
   const passwordState: LedState = !password
     ? 'off'
     : passwordProblem(password)
-      ? 'amber'
+      ? 'busy'
       : password2 && password !== password2
-        ? 'red'
+        ? 'error'
         : password === password2
-          ? 'green'
+          ? 'ok'
           : 'off';
 
   return (
@@ -162,26 +167,18 @@ export default function Onboarding() {
             </Text>
           </View>
 
-          <View style={styles.segment}>
-            {(['register', 'login'] as const).map((m) => {
-              const on = mode === m;
-              return (
-                <Pressable
-                  key={m}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: on }}
-                  disabled={busy || on}
-                  onPress={() => switchMode(m)}
-                  style={[styles.option, on && styles.optionOn]}
-                >
-                  <Text style={[styles.optionText, on && styles.optionTextOn]}>{m === 'login' ? 'Se connecter' : 'Créer un compte'}</Text>
-                </Pressable>
-              );
-            })}
-          </View>
+          <Segment
+            options={[
+              { label: 'Créer un compte', value: 'register' as Mode },
+              { label: 'Se connecter', value: 'login' as Mode },
+            ]}
+            value={mode}
+            disabled={busy}
+            onChange={switchMode}
+          />
 
           {login ? null : (
-            <Card title="Invitation">
+            <Panel title="Invitation">
               <InviteCodeInput
                 value={invite}
                 onChange={(code) => {
@@ -191,21 +188,12 @@ export default function Onboarding() {
                 error={badInvite}
               />
               <Text style={styles.hint}>16 caractères, donnés par un membre. Valable 2 heures. Pas besoin de taper les tirets.</Text>
-            </Card>
+            </Panel>
           )}
 
-          <Card title={login ? 'Ton compte' : 'Ton profil'}>
+          <Panel title={login ? 'Ton compte' : 'Ton profil'}>
             <Text style={styles.label}>Pseudo</Text>
-            <TextInput
-              value={username}
-              onChangeText={setUsername}
-              placeholder="3 à 24 caractères"
-              placeholderTextColor={colors.textDim}
-              autoCapitalize="none"
-              autoCorrect={false}
-              textContentType="username"
-              style={styles.input}
-            />
+            <Field value={username} onChangeText={setUsername} placeholder="3 à 24 caractères" autoCapitalize="none" autoCorrect={false} textContentType="username" />
 
             <Text style={styles.label}>Mot de passe</Text>
             <PasswordField
@@ -213,7 +201,6 @@ export default function Onboarding() {
               onChangeText={setPassword}
               placeholder={login ? 'Ton mot de passe' : `${MIN_PASSWORD_LENGTH} caractères minimum`}
               textContentType={login ? 'password' : 'newPassword'}
-              style={styles.input}
             />
             {login ? null : (
               <>
@@ -222,7 +209,6 @@ export default function Onboarding() {
                   onChangeText={setPassword2}
                   placeholder="Confirme le mot de passe"
                   textContentType="newPassword"
-                  style={styles.input}
                 />
                 <View style={styles.status}>
                   <View style={styles.statusLed}>
@@ -238,7 +224,7 @@ export default function Onboarding() {
                 </View>
               </>
             )}
-          </Card>
+          </Panel>
 
           {error ? <Text style={styles.error}>{error}</Text> : null}
           {busy ? <Text style={[styles.hint, styles.centerText]}>Vérification… quelques secondes.</Text> : null}
@@ -265,15 +251,6 @@ function Stripes() {
       {Array.from({ length: 48 }, (_, i) => (
         <View key={i} style={[styles.flex, { backgroundColor: i % 2 ? colors.bg : colors.text }]} />
       ))}
-    </View>
-  );
-}
-
-function Card({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <View style={styles.card}>
-      <Text style={styles.cardTitle}>{title}</Text>
-      {children}
     </View>
   );
 }
@@ -307,30 +284,12 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   center: { flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center' },
   centerText: { textAlign: 'center' },
-  back: { position: 'absolute', left: space.md, zIndex: 1 },
-  backText: { color: colors.accentFg, fontSize: 16 },
+  back: { position: 'absolute', left: space.md, zIndex: 1, flexDirection: 'row', alignItems: 'center', gap: 2 },
+  backText: { color: colors.accentFg, fontSize: 16, fontFamily: fonts.medium },
   stripes: { flexDirection: 'row', height: 10, opacity: 0.85 },
   form: { flexGrow: 1, padding: space.lg, gap: space.md, justifyContent: 'center' },
   header: { alignItems: 'center', gap: space.xs, marginBottom: space.sm },
-  segment: { flexDirection: 'row', gap: space.sm },
-  option: { flex: 1, alignItems: 'center', paddingVertical: 12, borderRadius: 10, borderWidth: 1, borderColor: colors.border },
-  optionOn: { backgroundColor: colors.accent, borderColor: colors.accentFg },
-  optionText: { color: colors.textDim, fontFamily: fonts.medium, fontSize: 15 },
-  optionTextOn: { color: colors.text, fontFamily: fonts.semibold },
-  card: { gap: space.sm, padding: space.md, borderRadius: 14, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
-  cardTitle: { color: colors.accentFg, fontFamily: mono, fontSize: 12, letterSpacing: 2, textTransform: 'uppercase', marginBottom: space.xs },
   label: { ...type.dim, fontSize: 13 },
-  input: {
-    height: 52,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.bg,
-    color: colors.text,
-    paddingHorizontal: space.md,
-    fontSize: 16,
-    marginBottom: space.xs,
-  },
   hint: { ...type.dim, fontSize: 13, lineHeight: 18 },
   status: { flexDirection: 'row', gap: space.sm },
   // Centred on the first line of the hint.

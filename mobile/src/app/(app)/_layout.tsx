@@ -35,6 +35,7 @@ export default function AppLayout() {
       <Stack.Screen name="index" options={{ title: 'BaseSecrète' }} />
       <Stack.Screen name="group/new" options={{ title: 'Nouveau groupe', presentation: 'modal' }} />
       <Stack.Screen name="group/join" options={{ title: 'Rejoindre un groupe', presentation: 'modal' }} />
+      <Stack.Screen name="group/direct" options={{ title: 'Tête-à-tête', presentation: 'modal' }} />
       <Stack.Screen name="group/[id]" options={{ title: '' }} />
       <Stack.Screen name="group/code" options={{ title: 'Changer le code', presentation: 'modal' }} />
       <Stack.Screen name="group/settings" options={{ title: 'Réglages du groupe', presentation: 'modal' }} />

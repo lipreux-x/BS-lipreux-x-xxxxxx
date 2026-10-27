@@ -1,6 +1,9 @@
-import { ActivityIndicator, Pressable, StyleSheet, Text } from 'react-native';
-import { colors, fonts } from './theme';
+import { Key } from './Key';
 
+/**
+ * The full-width key of a form: `primary` is the hot action key, `ghost` a
+ * steel key with its label in the cold light (a lesser choice, a tool).
+ */
 export function Button({
   title,
   onPress,
@@ -15,30 +18,5 @@ export function Button({
   disabled?: boolean;
 }) {
   const primary = variant === 'primary';
-  return (
-    <Pressable
-      accessibilityRole="button"
-      onPress={onPress}
-      disabled={disabled || busy}
-      style={({ pressed }) => [
-        styles.base,
-        primary ? styles.primary : styles.ghost,
-        pressed && { opacity: 0.8 },
-        (disabled || busy) && { opacity: 0.4 },
-      ]}
-    >
-      {busy ? (
-        <ActivityIndicator color={primary ? colors.text : colors.accentFg} />
-      ) : (
-        <Text style={[styles.label, { color: primary ? colors.text : colors.accentFg }]}>{title}</Text>
-      )}
-    </Pressable>
-  );
+  return <Key size="lg" label={title} onPress={onPress} variant={primary ? 'hot' : 'steel'} tone={primary ? 'text' : 'cold'} busy={busy} disabled={disabled} />;
 }
-
-const styles = StyleSheet.create({
-  base: { height: 52, borderRadius: 14, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 20 },
-  primary: { backgroundColor: colors.accent, borderWidth: 1, borderColor: colors.accentFg },
-  ghost: { borderWidth: 1, borderColor: colors.accentFg },
-  label: { fontSize: 16, fontFamily: fonts.semibold, letterSpacing: 0.3 },
-});

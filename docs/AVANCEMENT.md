@@ -1,8 +1,83 @@
 # BaseSecrète — Avancement
 
-État du projet au 22/10/2026 (mis à jour après les notifications nommées et le compteur de messages en attente) : les derniers ajouts et changements, puis le plan du projet avec ce qui est fait et ce qui reste. La spec de référence est [SPEC.md](SPEC.md).
+État du projet au 25/10/2026 (mis à jour après le retour « story publiée » et le diagnostic des notifications en prod) : les derniers ajouts et changements, puis le plan du projet avec ce qui est fait et ce qui reste. La spec de référence est [SPEC.md](SPEC.md).
 
 ## Derniers ajouts et changements
+
+### Une couleur par compte dans les discussions (27/10)
+
+- **Réglages → Profil → « Couleur dans les discussions »** : chacun choisit sa couleur parmi 8 (Ciel, Phosphore, Turquoise, Violet, Rose, Ambre, Orange, Or ; pas de rouge, gardé pour les erreurs) ou « Par défaut » (vert pour soi, bleu ciel pour les autres, comme avant).
+- Tous les membres la voient : **la bulle de ses messages est teintée de sa couleur** (une version foncée, pour que le texte blanc reste lisible), et son nom est dans la couleur vive (en **Terminal**, le `❯` et le nom ; **avec avatars**, le nom au-dessus de la plaque).
+- Comme l'avatar, c'est un simple nom de couleur stocké sur le serveur (`profiles.color`, route `PUT /me/color`, renvoyé par `/me` et `/profiles`) : migration `0016_profile_color`, appliquée sur dev et déployée ; pas en prod. La couleur d'un autre membre se met à jour à la prochaine ouverture de l'app (comme son avatar).
+
+### Gestes : coffre qui s'ouvre seul, glisser entre Groupes et Tête-à-tête, glisser pour revenir (27/10)
+
+- **La porte du coffre s'ouvre toute seule** au lancement : elle se met en place, ses verrous claquent, puis la molette tourne et le portail aspire, sans toucher. Un toucher l'ouvre sans attendre. La plaque dit « Ouverture du coffre ».
+- **« Privé » devient « Tête-à-tête »** (touche, titre de la liste, fiche, notification) : « Privé » laissait croire que les groupes ne l'étaient pas.
+- **Groupes / Tête-à-tête côte à côte** : on passe de l'un à l'autre en glissant la liste vers la gauche ou la droite. Le pavé bleu de la touche choisie passe d'une touche à l'autre en suivant le doigt (l'espace entre les deux reste vide), et toucher une touche fait glisser la page.
+- **Dans une conversation, glisser vers la droite = retour** à la liste, n'importe où sur l'écran (pas seulement depuis le bord). L'écran suit le doigt et une flèche apparaît à gauche ; un geste rapide suffit.
+- **Répondre à un message se fait maintenant en le glissant vers la gauche** (avant : vers la droite), comme sur Telegram, pour laisser la droite au retour.
+
+### Discussions privées : deux espaces, Groupes et Privé (26/10)
+
+- **L'accueil a deux espaces**, choisis par deux touches en haut : « Groupes » et « Privé », chacune avec le nombre de messages en attente. Le « + » (nouveau groupe) et « Rejoindre un groupe » ne sont que dans l'espace Groupes.
+- **Ouvrir une discussion privée** : depuis la fiche d'un groupe (roue dentée), la bulle à cadenas à côté d'un membre (route `group/direct`). Seulement avec quelqu'un d'un groupe en commun : pas d'annuaire de pseudos, et ses clés sont déjà épinglées (numéro de sécurité vérifiable). S'il y a déjà une discussion entre vous, elle s'ouvre. Sinon on choisit un code, deux fois.
+- **Chacun son code** : rien à se donner en vrai. La clé de la discussion est tirée sur le téléphone, scellée à chacun des deux et signée ; ses remises sont enveloppées sous une clé publique fixe (`directWrapKey`) au lieu du code + mots-clés : elles s'ouvrent avec l'identité seule. Chaque téléphone verrouille ensuite la clé sous **son propre code** (même coffre, mêmes essais comptés que pour un groupe). L'autre voit la discussion sous ton pseudo (nom scellé à côté de la clé), « NOUVELLE · choisis ton code ».
+- **Meta signée** : `direct: true`, les deux membres, tous deux admins, aucun mot-clé (vérifié à l'ouverture : un groupe qui se ferait passer pour une discussion privée, ou l'inverse, est refusé). Le serveur ne laisse personne entrer, sortir ou changer de code ; **« Supprimer la discussion »** l'efface pour les deux (messages, photos, vocaux, clés).
+- Tout le reste est celui des groupes : photos, vocaux, documents, stories, réactions, messages éphémères, affichage terminal / avatars, notifications (« Nouvelle discussion privée : choisis ton code » à l'ouverture).
+- Serveur : migration `0015_direct_conversations` (`groups.kind`, `groups.direct_pair` unique : une discussion par paire, `join_lookup` devient facultatif), route `POST /groups/direct` (groupe commun exigé, 30 par jour), `GET /groups` renvoie `kind` et `peerId`. **Pas encore appliquée ni déployée sur dev** (à faire : `drizzle-kit migrate` puis `neon deploy --env .env --no-env-pull` dans `server/`), puis le test `e2eDirect` contre l'API.
+- Compromis : sur un nouveau téléphone (« Se connecter »), une discussion privée s'ouvre avec l'identité seule, puis on choisit un nouveau code ; un groupe, lui, redemande son code et ses mots-clés.
+
+### Écran verrouillé : le logo au lieu du nom (26/10)
+
+- L'écran du code app et le cache quand on quitte l'app montrent la lame (logo), plus « BaseSecrète ». La demande d'empreinte du système dit « Ouvrir le coffre ».
+
+### Thème de la discussion, au choix par groupe (26/10)
+
+- Fiche du groupe → « Affichage de la discussion » : **Terminal** (`❯ auteur [heure]`, sans avatar) ou **Avec avatars** (plaques, avatar et nom des autres). Sur ce téléphone seulement, rangé chiffré dans le store local (`look/<groupe>`).
+
+### Le nom du groupe sur un coffre jamais ouvert (25/10)
+
+- **Avant** : après « Se connecter » sur un téléphone, ou une adhésion acceptée, la liste disait « Groupe verrouillé » tant que le code n'avait pas été tapé : le nom est dans la meta chiffrée sous la clé du groupe, elle-même remise sous le code. Avec plusieurs coffres, impossible de savoir lequel est lequel avant de taper les codes.
+- **Maintenant** : chaque remise de clé porte en plus le **nom scellé au membre seul** (`group_keys.sealed_label` + `label_signature` : `crypto_box_seal` à sa clé publique, signé par l'admin qui remet, l'id du groupe à l'intérieur ; `sealHandout(..., label)` / `openHandoutLabel` dans `crypto/group.ts`). Le téléphone le lit avec le code app, sans le code du groupe, et la liste, l'en-tête du clavier et les notifications nomment le coffre. Les remises d'avant (sans nom) donnent toujours « Groupe verrouillé » ; elles sont remplacées à la prochaine rotation ou au prochain changement de code.
+- Écrit à la création, à l'acceptation d'un membre, à la rotation et au changement de code. Serveur : migrations `0013_handout_label` et `0014_label_signer`, les quatre routes acceptent les deux champs (optionnels), `GET /groups` les renvoie. Appliquées et redéployées sur dev le 25/10 ; **reste la prod** (avec `0012`).
+- **Rattrapage des groupes existants** : quand un admin ouvre un groupe, son téléphone demande au serveur quelles remises n'ont pas de nom (`GET /groups/:id/members`, `unlabelledKeyVersions`), scelle le nom à chaque membre concerné et l'envoie (`POST /groups/:id/keys/labels`, rempli une fois, jamais remplacé, signé par cet admin : `label_signer_id`). En arrière-plan, sans gêner l'ouverture. Un groupe d'avant se nomme donc dès qu'un de ses admins l'a ouvert une fois avec la nouvelle version.
+- Vérifié sur le téléphone (app dev) : un compte admin piloté depuis Node crée « Coffre des potes », ChefTesteur demande à entrer depuis le téléphone, l'admin accepte : la liste affiche « Coffre des potes · CLÉ REÇUE · tape le code du groupe » avant toute saisie du code.
+- Compromis assumé : le nom d'un coffre jamais ouvert devient lisible avec le seul code app, comme l'est déjà celui d'un coffre ouvert une fois sur ce téléphone.
+
+### Notifications Android : la tâche d'arrière-plan n'était jamais définie (25/10)
+
+- Premier test de bout en bout sur le téléphone (app prod, build du 23/10, pushes silencieux envoyés à la main via l'API Expo avec le même contenu que le serveur) : le reçu Expo est « ok », l'app se réveille bien en arrière-plan (`TaskService: Registered task 'bs-push'`, `Started headless task`), mais le JS répond **« No task registered for key expo-task-manager »** et rien ne s'affiche.
+- Cause : au démarrage sans écran, Expo Router ne charge que les fichiers de route qu'il dessine ; `services/push.ts`, qui définit la tâche au chargement, n'était importé que par `SessionProvider` depuis `app/_layout.tsx`, jamais chargé en mode headless.
+- Correction : point d'entrée `mobile/index.js` (`"main"` dans `package.json`) qui importe `services/push` avant `expo-router/entry`. Changement de bundle seulement, mais la prod charge son bundle depuis l'APK : **nouveau build `preview` nécessaire** pour le voir sur le téléphone.
+- Pour rejouer le test sans serveur : `POST https://exp.host/--/api/v2/push/send` avec `{ to: <ExponentPushToken>, data: { groupId, kind }, priority: 'high' }`, puis `getReceipts` avec les ids des tickets (un jeton périmé répond `DeviceNotRegistered` dans le reçu, pas dans le ticket).
+
+### Biométrie : empreinte ou visage, selon le téléphone (25/10)
+
+- **Pourquoi la section « Empreinte digitale » ne proposait rien** : l'option n'était offerte que si l'empreinte était l'unique capteur biométrique du téléphone (règle « jamais Face ID » du 20/10). Un Samsung avec la reconnaissance faciale activée tombait dans « pas de capteur ».
+- **Faisabilité du choix empreinte / Face ID** : ce n'est pas un réglage que l'app peut offrir. Sur iOS, un iPhone a Face ID ou Touch ID, jamais les deux : le Keychain (`biometryCurrentSet`) prend celui du téléphone. Sur Android, le Keystore accepte toute biométrie **forte** enregistrée (classe 3 : l'empreinte ; le visage seulement sur les téléphones où il l'est, pas les Samsung) et l'invite système ne peut pas se limiter à l'une d'elles ; le choix se fait dans les réglages du téléphone.
+- **Fait** : l'option est offerte dès qu'une biométrie est enregistrée ; les Réglages la nomment selon le téléphone (« Face ID », « Touch ID », « Empreinte digitale », « Empreinte ou visage ») avec l'icône qui va avec, et expliquent la règle Android ; le lecteur du coffre dessine un visage pour Face ID ; « Utiliser Face ID » / « Utiliser l'empreinte » sur l'écran du coffre. Texte iOS `NSFaceIDUsageDescription` corrigé (il disait que l'app n'utilise pas Face ID) : **nouveau build iOS nécessaire** ; sur Android, rien de natif ne change.
+- À tester sur ton Samsung (app dev, Metro) : Réglages → Empreinte ou visage → Activer → code → doigt ; puis verrouiller et rouvrir au doigt.
+
+### iOS : marges sûres des modales (25/10)
+
+- Symptôme rapporté : parfois, au retour de la caméra (aperçu de story) ou dans d'autres écrans, le contenu monte tout en haut sous la barre d'état. Les trois écrans en `<Modal>` natif (aperçu de story, visionneuse plein écran, panneau d'actions) utilisaient un `SafeAreaView` natif **dans** la modale : présentée au moment où la caméra se referme, une modale iOS peut mesurer des marges à zéro et les garder.
+- Correction : ces écrans prennent les marges du fournisseur de l'écran parent (`useSafeAreaInsets`, valeurs stables) et les appliquent en padding. Les écrans de pile gardent leur en-tête natif (haut) et `SafeAreaView` en bas ; le coffre et l'inscription gardent leur `SafeAreaView` plein écran, qui n'est pas dans une modale. À confirmer sur iPhone.
+
+### Stories : la grille d'abord, la photo ensuite (25/10)
+
+- En tirant le rideau, **c'est la grille d'acier qui descend** : la photo n'apparaît qu'en transparence à mesure que le rideau descend (18 % à mi-course), et n'est entière qu'une fois le rideau tout en bas. Un rideau tiré à moitié ne montre rien à quelqu'un qui regarde par-dessus l'épaule. Opacité pilotée nativement par la même valeur que la translation.
+
+### Stories : savoir que la sienne est partie (25/10)
+
+- **Après « Publier la story »**, la barre « STORIES · 24 H » dit **« PUBLIÉE »** pendant 4 s (LED verte, la touche « + » devient une coche, une vibration de succès), dès que le serveur a accepté le message. Un envoi en attente de réseau reste « ENVOI… », un refus reste « ÉCHEC ».
+- **Tant qu'elle est en ligne**, la barre repliée la nomme : « LA TIENNE » (« LES TIENNES » s'il y en a plusieurs), « LA TIENNE + 2 » quand d'autres sont là et déjà vues, « LA TIENNE · 2 NOUVELLES » quand il y en a à regarder. Sans story à soi, rien ne change (« 2 NOUVELLES », ou le nombre). Libellé calculé par `railLabel` (`ui/stories/stories.ts`, tests).
+- L'aperçu avant publication ferme avec l'icône Lucide « X » au lieu d'un caractère « ✕ ».
+
+### Notifications en prod : diagnostic (25/10)
+
+- Sur le téléphone, l'app prod (build `preview` du 23/10, commit `6965af2`) contient bien la logique du 22/10 (une notification par groupe, rien tant que l'app est ouverte). Mais **l'API de prod (branche Neon `main`) est restée à la version du 20/10** : pas de migration `0012` (`profiles.awake_until`, `push_tokens.platform`, `messages.quiet` absents), donc l'ancien `push.ts` : une notification **visible** par message, sans `kind`, sans présence. L'app ouverte prend un push sans `kind` pour une action et l'affiche en bannière ; app fermée, Android empile les pushes du serveur. D'où « une notification à chaque envoi, même dans l'app ».
+- **À faire pour corriger** (rien à coder) : appliquer `0012` sur `main` puis redéployer l'API : dans `server/`, `drizzle-kit migrate` avec le `DATABASE_URL` de `.env.production`, puis `neon deploy --branch main --env .env.production --no-env-pull`. Vérifier ensuite sur le téléphone : plus rien quand l'app est ouverte, une seule notification par groupe (« Nouveaux messages » remplace), retirée en ouvrant la conversation.
 
 ### Notifications : nom du groupe, regroupement, silence quand l'app est ouverte ; compteur et ordre des groupes (22/10)
 
@@ -209,7 +284,10 @@ Le changement s'applique à tous les écrans de code : verrouillage, inscription
 - 20/10 : migrations `0000` à `0011` appliquées, API, bucket `attachments` et purge planifiée déployés, avec des secrets propres à la prod (`server/.env.production`, jamais commité). Smoke test passé contre l'API déployée. Première invitation créée.
 - API : `https://br-green-silence-bahz9z6m-api.compute.c-8.eu-central-1.aws.neon.tech/`.
 - Les profils EAS `preview` (APK Android à partager) et `production` (iOS, TestFlight) pointent sur cette API ; `development` reste sur `dev`.
-- Déployer : `neon deploy --branch main --env .env.production --no-env-pull` dans `server/`.
+- Déployer : `neon deploy --branch main --env .env.production --no-env-pull` dans `server/`. Migrer : `npx drizzle-kit migrate --config drizzle.prod.config.ts` (lit `.env.production`).
+- **25/10, incident** : un déploiement n° 4 de la fonction prod à 17 h 18 (pas depuis cette session, qui n'a déployé que sur dev) a mis en ligne un code attendant les colonnes de `0012` et `0013` sur une base qui ne les avait pas : `POST /auth/recover` (et tout `select` sur `profiles` / `group_keys`) répondait 500, « Connexion impossible » dans l'app. Réparé en appliquant `0012`, `0013`, `0014` sur `main` (colonnes ajoutées seulement, rien supprimé), puis redéploiement de l'API avec le code courant. Règle : **toujours migrer avant de déployer**, et ne jamais déployer sur `main` un arbre de travail dont les migrations ne sont pas appliquées.
+- **Suite de l'incident, vraie cause** : la connexion échouait encore après la « migration » parce que **la migration n'avait pas touché la prod**. `drizzle-kit` charge `.env` (dev) de lui-même avant d'évaluer le fichier de config, et `process.loadEnvFile('.env.production')` n'écrase jamais une variable déjà posée : la config « prod » migrait dev en silence, avec un « migrations applied successfully » trompeur. Vérifié par `information_schema.columns` sur `main` (aucune colonne de 0012-0014) ; une inscription jetable sur la prod échouait en 500 comme la connexion, et réussissait sur dev. Le log `[error] Error` était l'erreur de requête de drizzle (`DrizzleQueryError` étend `Error` sans changer `name`) pour la colonne manquante, pas un souci de secrets (fausse piste suivie pendant une heure : les secrets de `.env.production` ouvrent bien les sauvegardes, et le redéploiement avec `--update-existing` n'a rien changé). Corrigé en migrant avec `DATABASE_URL` forcée ; `drizzle.prod.config.ts` lit désormais `.env.production` directement (`util.parseEnv`), sans passer par `process.env`. Après migration : inscription et connexion jetables OK sur la prod (compte supprimé ensuite). Le gestionnaire d'erreurs journalise maintenant la classe réelle et le SQLSTATE de la cause.
+- Commande de déploiement prod complète : `neon deploy --branch main --env .env.production --no-env-pull --update-existing` (sans `--update-existing`, le CLI garde les réglages existants de la branche quand ils diffèrent, et répond « non » tout seul hors terminal).
 
 ### Mise en production (branche Neon `dev`)
 

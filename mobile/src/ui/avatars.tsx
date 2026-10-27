@@ -14,7 +14,7 @@ import {
   type LucideIcon,
 } from 'lucide-react-native';
 import { StyleSheet, View } from 'react-native';
-import { colors } from './theme';
+import { colors, steel } from './theme';
 
 /*
  * Profile pictures are icons, never uploaded photos: an empty silhouette by
@@ -79,18 +79,18 @@ const styles = StyleSheet.create({
   ring: {
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#1D2023',
+    backgroundColor: steel.plate,
     borderWidth: 1.5,
-    borderTopColor: '#4A5056',
-    borderLeftColor: '#4A5056',
-    borderBottomColor: '#0A0B0C',
-    borderRightColor: '#0A0B0C',
+    borderTopColor: steel.edgeLight,
+    borderLeftColor: steel.edgeLight,
+    borderBottomColor: steel.edgeDark,
+    borderRightColor: steel.edgeDark,
   },
   selected: {
     backgroundColor: colors.accent,
-    borderTopColor: '#2E8A48',
-    borderLeftColor: '#2E8A48',
-    borderBottomColor: '#2E8A48',
-    borderRightColor: '#2E8A48',
+    borderTopColor: colors.accentFg,
+    borderLeftColor: colors.accentFg,
+    borderBottomColor: colors.accentFg,
+    borderRightColor: colors.accentFg,
   },
 });

@@ -1,8 +1,8 @@
 import * as Haptics from 'expo-haptics';
-import { FingerprintPattern } from 'lucide-react-native';
+import { FingerprintPattern, ScanFace } from 'lucide-react-native';
 import { useEffect, useRef, useState } from 'react';
 import { Animated, Easing, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
-import { colors, led } from './theme';
+import { colors, lcd, led, steel, wash } from './theme';
 
 /** Sensor window: a square of dark glass set into the plate. */
 const WINDOW = 124;
@@ -10,12 +10,12 @@ const ICON = 74;
 const GRID_STEP = 9;
 const MONO = Platform.select({ ios: 'Menlo', default: 'monospace' });
 
-const METAL = '#24282B';
-const LIGHT_EDGE = '#4A5056';
-const DARK_EDGE = '#0A0B0C';
-const GLASS = '#070B08';
-const LCD_ON = '#C8D3C0';
-const GRID = 'rgba(61, 214, 140, 0.10)';
+const METAL = steel.key;
+const LIGHT_EDGE = steel.edgeLight;
+const DARK_EDGE = steel.edgeDark;
+const GLASS = lcd.glass;
+const LCD_ON = lcd.on;
+const GRID = wash.coldGrid;
 
 type Phase = 'idle' | 'scanning' | 'open' | 'failed';
 
@@ -24,23 +24,37 @@ const HINT: Record<Phase, string> = {
   idle: 'Appuie sur le lecteur pour scanner',
   scanning: 'Pose ton doigt sur le capteur du téléphone',
   open: 'Ouverture',
-  failed: 'Empreinte refusée, appuie pour réessayer',
+  failed: 'Biométrie refusée, appuie pour réessayer',
 };
+/** After a cancel, with the scan started on its own: a touch only tries again. */
+const RETRY_HINT = 'Appuie sur le lecteur pour réessayer';
 
 /**
  * The safe's biometric reader, in the keypad's look: a screwed metal plate,
- * a square sensor window of dark glass with a green backlight, a grid and
+ * a square sensor window of dark glass with a sky-blue backlight, a grid and
  * aiming corners, and a small LCD status line with its LED.
  *
  * Touch the window: it lights up, a scan bar sweeps down over the print
  * while the phone checks the finger (on the system's own fingerprint sheet:
- * no app can read the sensor itself), then the window flashes green and the
+ * no app can read the sensor itself), then the window flashes blue and the
  * safe opens, or red with a shake.
  *
- * `onScan` resolves with `open` (called after the green flash) or null (cancelled / failed).
+ * `onScan` resolves with `open` (called after the blue flash) or null (cancelled / failed).
+ * `auto`: the scan starts by itself once the reader is on screen, without a
+ * touch; touching the window only tries again after a cancel or a failure.
  */
-export function FingerprintPad({ onScan }: { onScan(): Promise<(() => void) | null> }) {
+export function FingerprintPad({
+  onScan,
+  kind = 'fingerprint',
+  auto = false,
+}: {
+  onScan(): Promise<(() => void) | null>;
+  /** A face reader (Face ID) draws a face on the glass instead of a print. */
+  kind?: 'face' | 'fingerprint' | 'both';
+  auto?: boolean;
+}) {
   const [phase, setPhase] = useState<Phase>('idle');
+  const [tried, setTried] = useState(false);
   const [pulse] = useState(() => new Animated.Value(0));
   const [sweep] = useState(() => new Animated.Value(0));
   const [flash] = useState(() => new Animated.Value(0));
@@ -71,9 +85,18 @@ export function FingerprintPad({ onScan }: { onScan(): Promise<(() => void) | nu
     return () => loop.current?.stop();
   }, [phase, pulse, sweep]);
 
+  // Asked at once: the reader shows up, then the system's fingerprint sheet (after the screen's fade-in).
+  useEffect(() => {
+    if (!auto) return;
+    const t = setTimeout(() => void scan(), 350);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once, when the reader shows up
+  }, []);
+
   async function scan() {
     if (phase === 'scanning' || phase === 'open') return;
     sweep.setValue(0);
+    setTried(true);
     setPhase('scanning');
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     const open = await onScan();
@@ -93,8 +116,8 @@ export function FingerprintPad({ onScan }: { onScan(): Promise<(() => void) | nu
   }
 
   const failed = phase === 'failed';
-  const tint = failed ? colors.danger : led.green;
-  const ledColor = phase === 'open' ? led.green : failed ? colors.danger : phase === 'scanning' ? led.amber : null;
+  const tint = failed ? colors.danger : led.ok;
+  const ledColor = phase === 'open' ? led.ok : failed ? colors.danger : phase === 'scanning' ? led.busy : null;
   const backlight = pulse.interpolate({ inputRange: [0, 1], outputRange: phase === 'scanning' ? [0.5, 0.5] : [0.12, 0.3] });
   const printOpacity = pulse.interpolate({ inputRange: [0, 1], outputRange: phase === 'idle' ? [0.55, 0.85] : [1, 1] });
 
@@ -110,7 +133,7 @@ export function FingerprintPad({ onScan }: { onScan(): Promise<(() => void) | nu
 
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel="Ouvrir avec l’empreinte"
+        accessibilityLabel="Ouvrir avec la biométrie"
         onPress={() => void scan()}
         style={({ pressed }) => [styles.bezel, pressed && styles.bezelPressed]}
       >
@@ -128,7 +151,7 @@ export function FingerprintPad({ onScan }: { onScan(): Promise<(() => void) | nu
           ))}
 
           <Animated.View style={{ opacity: printOpacity }}>
-            <FingerprintPattern size={ICON} color={tint} strokeWidth={1.4} />
+            {kind === 'face' ? <ScanFace size={ICON} color={tint} strokeWidth={1.4} /> : <FingerprintPattern size={ICON} color={tint} strokeWidth={1.4} />}
           </Animated.View>
 
           {phase === 'scanning' ? (
@@ -147,7 +170,7 @@ export function FingerprintPad({ onScan }: { onScan(): Promise<(() => void) | nu
 
       <View style={styles.lcdBezel}>
         <View style={styles.lcd}>
-          <Text style={[styles.lcdText, failed && { color: colors.danger }, phase === 'open' && { color: led.green }]}>{STATUS[phase]}</Text>
+          <Text style={[styles.lcdText, failed && { color: colors.danger }, phase === 'open' && { color: led.ok }]}>{STATUS[phase]}</Text>
         </View>
         <View
           style={[
@@ -157,7 +180,9 @@ export function FingerprintPad({ onScan }: { onScan(): Promise<(() => void) | nu
         />
       </View>
 
-      <Text style={[styles.hint, failed && { color: colors.danger }]}>{HINT[phase]}</Text>
+      <Text style={[styles.hint, failed && { color: colors.danger }]}>
+        {phase === 'scanning' && kind === 'face' ? 'Regarde le téléphone' : phase === 'scanning' && kind === 'both' ? 'Pose ton doigt, ou regarde le téléphone' : phase === 'idle' && auto ? (tried ? RETRY_HINT : HINT.scanning) : HINT[phase]}
+      </Text>
     </Animated.View>
   );
 }
@@ -181,8 +206,8 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     backgroundColor: colors.surface,
     borderWidth: 1,
-    borderTopColor: '#2E2E2E',
-    borderLeftColor: '#2E2E2E',
+    borderTopColor: steel.panelEdge,
+    borderLeftColor: steel.panelEdge,
     borderBottomColor: '#000000',
     borderRightColor: '#000000',
   },
@@ -191,7 +216,7 @@ const styles = StyleSheet.create({
     width: 9,
     height: 9,
     borderRadius: 4.5,
-    backgroundColor: '#3A3F44',
+    backgroundColor: steel.screw,
     borderWidth: 1,
     borderColor: DARK_EDGE,
     alignItems: 'center',
@@ -202,7 +227,7 @@ const styles = StyleSheet.create({
   tr: { top: 7, right: 7 },
   bl: { bottom: 7, left: 7 },
   br: { bottom: 7, right: 7 },
-  engraving: { color: '#5A6168', fontFamily: MONO, fontSize: 9, letterSpacing: 2 },
+  engraving: { color: steel.engraving, fontFamily: MONO, fontSize: 9, letterSpacing: 2 },
 
   // Metal frame around the glass, bevelled like a key; pressed: pushed in.
   bezel: {
@@ -240,11 +265,11 @@ const styles = StyleSheet.create({
   column: { position: 'absolute', top: 0, bottom: 0, width: StyleSheet.hairlineWidth, backgroundColor: GRID },
   corner: { position: 'absolute', width: CORNER, height: CORNER },
   scan: { position: 'absolute', top: 0, left: 0, right: 0, height: 14 },
-  trail: { height: 11, backgroundColor: 'rgba(61, 214, 140, 0.18)' },
+  trail: { height: 11, backgroundColor: wash.coldTrail },
   bar: {
     height: 3,
-    backgroundColor: led.green,
-    boxShadow: `0 0 8px ${led.green}`,
+    backgroundColor: led.ok,
+    boxShadow: `0 0 8px ${led.ok}`,
   },
 
   // Status line: the code display's LCD and LED.
@@ -257,17 +282,17 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     backgroundColor: colors.surface2,
     borderWidth: 1,
-    borderTopColor: '#3A3A3A',
-    borderLeftColor: '#3A3A3A',
-    borderBottomColor: '#050505',
-    borderRightColor: '#050505',
+    borderTopColor: steel.bezelLight,
+    borderLeftColor: steel.bezelLight,
+    borderBottomColor: steel.bezelDark,
+    borderRightColor: steel.bezelDark,
   },
   lcd: {
     width: 116,
     alignItems: 'center',
     paddingVertical: 3,
     borderRadius: 4,
-    backgroundColor: '#0B100C',
+    backgroundColor: lcd.glass,
     borderWidth: 2,
     borderTopColor: '#000000',
     borderLeftColor: '#000000',
@@ -275,6 +300,6 @@ const styles = StyleSheet.create({
     borderRightColor: colors.border,
   },
   lcdText: { color: LCD_ON, fontFamily: MONO, fontSize: 12, letterSpacing: 1.5 },
-  led: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#2E2E2E', borderWidth: 1, borderColor: '#000000' },
+  led: { width: 8, height: 8, borderRadius: 4, backgroundColor: led.off, borderWidth: 1, borderColor: '#000000' },
   hint: { color: colors.textDim, fontSize: 12, textAlign: 'center' },
 });

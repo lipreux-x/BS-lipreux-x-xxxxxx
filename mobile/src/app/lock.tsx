@@ -2,35 +2,44 @@ import { useEffect, useState } from 'react';
 import { Animated, Easing, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeCryptoMissingError } from '@/crypto';
+import { biometricKind, biometricSwitchLabel, type BiometricKind } from '@/services/biometrics';
 import { useSession } from '@/session/SessionProvider';
 import { LockedOutError, WipedError, WrongCodeError } from '@/services/vault';
 import { CodeEntry, type CodeResult } from '@/ui/CodeEntry';
 import { FingerprintPad } from '@/ui/FingerprintPad';
 import { NamePlate } from '@/ui/InviteCode';
-import { calm, colors, fonts, space, type } from '@/ui/theme';
+import { Logo } from '@/ui/Logo';
+import { calm, colors, fonts, space } from '@/ui/theme';
 import { VaultDoor } from '@/ui/VaultDoor';
 
-// SPEC §2.1: vault door; tap -> it unlocks and opens -> a calm keypad for the 6-digit app code.
+// SPEC §2.1: vault door; it unlocks and opens by itself (a tap skips the wait) -> a calm keypad for the 6-digit app code.
 // The vault look is only for the opening; the code screen stays quiet. The door ends with its
 // portal pulling you in and the `calm` backdrop filling the screen, so the calm background shows
 // at once and only the keypad fades in, as if it were waiting on the other side.
 // With the fingerprint on (Settings), the door opens on the safe's fingerprint reader instead of
-// the keypad, under the same name plate: tap the green print, it scans, the safe opens. "Taper le code" switches to the
+// the keypad, under the same name plate: the system asks for the finger at once (no touch on the
+// print; touching it only tries again after a cancel), the safe opens. "Taper le code" switches to the
 // keypad; it is shown by itself when the code is due (every 48 h) or the fingerprint was dropped.
+// The app's name is never spelled out here: a phone left on this screen shows the blade, not "BaseSecrète".
 export default function LockScreen() {
   const { status, vault, unlock, unlockWithBiometrics } = useSession();
   const [opened, setOpened] = useState(false);
   const [lockedFor, setLockedFor] = useState(0);
   const [bio, setBio] = useState(false);
   const [useCode, setUseCode] = useState(false);
+  // What the phone checks (a face, a finger): the reader's glyph and the switch's wording.
+  const [kind, setKind] = useState<BiometricKind | null>(null);
+  useEffect(() => {
+    void biometricKind().then(setKind);
+  }, []);
   const [reveal] = useState(() => new Animated.Value(0));
 
   useEffect(() => {
     void vault.canUseBiometrics().then(setBio);
   }, [vault]);
 
-  // The screen has no exit fade (see _layout), so it fades out here, the green LED still lit,
-  // before the app takes over; otherwise the green beat is cut off dry.
+  // The screen has no exit fade (see _layout), so it fades out here, the blue LED still lit,
+  // before the app takes over; otherwise the blue beat is cut off dry.
   const leave = (enter: () => void) => () =>
     Animated.timing(reveal, { toValue: 0, duration: 320, easing: Easing.in(Easing.cubic), useNativeDriver: true }).start(() => enter());
 
@@ -90,9 +99,11 @@ export default function LockScreen() {
                   <NamePlate name={status.username} />
                 </View>
               ) : (
-                <Text style={styles.title}>BaseSecrète</Text>
+                <View style={styles.logo}>
+                  <Logo width={96} />
+                </View>
               )}
-              <FingerprintPad onScan={scan} />
+              <FingerprintPad onScan={scan} kind={kind ?? undefined} auto />
               <Pressable accessibilityRole="button" onPress={() => setUseCode(true)} style={styles.switch} hitSlop={8}>
                 <Text style={styles.switchText}>Taper le code</Text>
               </Pressable>
@@ -100,21 +111,29 @@ export default function LockScreen() {
           ) : (
             <>
               <CodeEntry
-                header={status.kind === 'locked' ? <NamePlate name={status.username} /> : undefined}
-                title={status.kind === 'locked' ? undefined : 'Code BaseSecrète'}
+                header={
+                  status.kind === 'locked' ? (
+                    <NamePlate name={status.username} />
+                  ) : (
+                    <View style={styles.logo}>
+                      <Logo width={72} />
+                    </View>
+                  )
+                }
                 onComplete={submit}
                 lockedForMs={lockedFor}
+                busyLabel="Ouverture du coffre…"
               />
               {bio ? (
                 <Pressable accessibilityRole="button" onPress={() => setUseCode(false)} style={styles.switch} hitSlop={8}>
-                  <Text style={styles.switchText}>Utiliser l’empreinte</Text>
+                  <Text style={styles.switchText}>{biometricSwitchLabel(kind)}</Text>
                 </Pressable>
               ) : null}
             </>
           )}
         </Animated.View>
       ) : (
-        <VaultDoor hint="Touche le coffre" onOpen={() => setOpened(true)} />
+        <VaultDoor hint="Ouverture du coffre" onOpen={() => setOpened(true)} />
       )}
     </SafeAreaView>
   );
@@ -126,7 +145,7 @@ function beforeWipe(n: number): string {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  title: { ...type.title, textAlign: 'center' },
+  logo: { alignItems: 'center' },
   plate: { marginBottom: space.lg },
   switch: { alignSelf: 'center', marginTop: space.lg, paddingVertical: space.sm, paddingHorizontal: space.md },
   switchText: { color: colors.accentFg, fontFamily: fonts.medium, fontSize: 16 },

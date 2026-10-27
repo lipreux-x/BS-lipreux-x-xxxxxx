@@ -1,11 +1,12 @@
 import * as Haptics from 'expo-haptics';
 import { router, Stack, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import { useHeaderHeight } from 'expo-router/react-navigation';
+import { Bomb, LockKeyholeOpen, Settings } from 'lucide-react-native';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Animated,
+  Easing,
   FlatList,
   Keyboard,
-  KeyboardAvoidingView,
   Modal,
   Pressable,
   StyleSheet,
@@ -13,6 +14,8 @@ import {
   TextInput,
   View,
   type ListRenderItemInfo,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { API_URL } from '@/config';
@@ -32,8 +35,10 @@ import {
   GroupTamperedError,
   joinRequests,
   KeyChangedError,
+  listedGroups,
   listGroups,
   newClientId,
+  plateName,
   rejectMember,
   sendAttachment,
   sendReaction,
@@ -63,16 +68,22 @@ import { LockedOutError, WrongCodeError } from '@/services/vault';
 import { Composer } from '@/ui/chat/Composer';
 import { myReaction, nextReaction, orderCounts, reactionOrder, tallyReactions, type ReactionCount } from '@/ui/chat/reactions';
 import { ActionKey, ActionSheet, MessageActions } from '@/ui/chat/MessageActions';
+import { chatLook, type ChatLook } from '@/ui/chat/look';
 import { DaySeparator, MessageBubble, type DeliveryStatus } from '@/ui/chat/MessageBubble';
 import { quoteResolver, replyRefFor, resolveQuote, type Quote } from '@/ui/chat/replies';
 import { SwipeToReply } from '@/ui/chat/SwipeToReply';
+import { SwipeBack } from '@/ui/SwipeBack';
 import { buildTimeline, countdownLabel, dateTimeLabel, dayLabel, dayRange, timeLabel } from '@/ui/chat/timeline';
 import { CodeEntry, type CodeResult } from '@/ui/CodeEntry';
 import { NamePlate } from '@/ui/InviteCode';
 import { useDialog } from '@/ui/Dialog';
+import { Key } from '@/ui/Key';
+import { labelText } from '@/ui/Label';
+import { panelStyle } from '@/ui/Panel';
 import { FileBubble, LocalFile } from '@/ui/FileBubble';
 import { ImageBubble, LocalImage } from '@/ui/ImageBubble';
 import { ImageViewer } from '@/ui/ImageViewer';
+import { KeyboardGlide } from '@/ui/KeyboardGlide';
 import { KeywordsForm } from '@/ui/KeywordsForm';
 import { PrivacyCover } from '@/ui/PrivacyCover';
 import { SentVoice, VoiceBubble, voiceTrack } from '@/ui/VoiceBubble';
@@ -80,12 +91,26 @@ import { Led } from '@/ui/Led';
 import { bandStories, pruneSeen, type StoryMessage } from '@/ui/stories/stories';
 import { STORIES_RAIL_H, StoriesBand } from '@/ui/stories/StoriesBand';
 import { StoryPreview } from '@/ui/stories/StoryPreview';
-import { colors, fonts, mono, space, type } from '@/ui/theme';
+import { Working } from '@/ui/Working';
+import { colors, fonts, led, mono, space, type } from '@/ui/theme';
+
+/** How far the history is dragged before the keyboard goes away. */
+const KEYBOARD_DRAG = 28;
+
+/** The code entry fading away over the chat, once its messages are there. */
+const REVEAL_MS = 260;
 
 export default function GroupScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { openGroups } = useUnlocked();
   const [open, setOpen] = useState<OpenGroup | undefined>(openGroups.get(id));
+  // Opened by its code: the code entry stays on top (blue LED, the blade turning)
+  // while the chat decrypts its history under it, and goes once the messages are
+  // there. Already open: the chat shows at once, with its own wait over the messages.
+  const [covered, setCovered] = useState(!open);
+  const [coverOpacity] = useState(() => new Animated.Value(1));
+  // Each locking brings a fresh code entry (the last one may still hold its success).
+  const [locks, setLocks] = useState(0);
   const update = useCallback(
     (g: OpenGroup) => {
       openGroups.set(id, g);
@@ -93,18 +118,51 @@ export default function GroupScreen() {
     },
     [openGroups, id],
   );
+  const lock = useCallback(() => {
+    coverOpacity.setValue(1);
+    setLocks((n) => n + 1);
+    setCovered(true);
+    setOpen(undefined);
+  }, [coverOpacity]);
   // Closed while away (10 min out of it): its code again.
-  useInsideGroup(id, useCallback(() => setOpen(openGroups.get(id)), [openGroups, id]));
+  useInsideGroup(
+    id,
+    useCallback(() => {
+      const g = openGroups.get(id);
+      if (g) setOpen(g);
+      else lock();
+    }, [openGroups, id, lock]),
+  );
 
   // The admin changed the code (and the key moved on under it): the group locks, its new code opens it.
   const relock = useCallback(() => {
     const g = openGroups.get(id);
     if (g) for (const k of g.keys.values()) wipe(k);
     openGroups.delete(id);
-    setOpen(undefined);
-  }, [openGroups, id]);
+    lock();
+  }, [openGroups, id, lock]);
 
-  return open ? <Chat groupId={id} group={open} onUpdate={update} onLocked={relock} /> : <GroupUnlock groupId={id} onOpen={update} />;
+  const reveal = useCallback(() => {
+    Animated.timing(coverOpacity, { toValue: 0, duration: REVEAL_MS, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start(
+      ({ finished }) => finished && setCovered(false),
+    );
+  }, [coverOpacity]);
+
+  // Dragged to the right anywhere on it, the conversation goes back to the list.
+  const back = useCallback(() => (router.canGoBack() ? router.back() : router.replace('/')), []);
+
+  return (
+    <SwipeBack onBack={back}>
+      <View style={styles.screen}>
+        {open ? <Chat groupId={id} group={open} onUpdate={update} onLocked={relock} onReady={covered ? reveal : undefined} titled={!covered} /> : null}
+        {covered ? (
+          <Animated.View key={locks} style={[StyleSheet.absoluteFill, styles.cover, { opacity: coverOpacity }]} pointerEvents={open ? 'none' : 'auto'}>
+            <GroupUnlock groupId={id} onOpen={update} />
+          </Animated.View>
+        ) : null}
+      </View>
+    </SwipeBack>
+  );
 }
 
 // ---- Unlock (SPEC §2.3) --------------------------------------------------------------
@@ -118,11 +176,16 @@ function securityMessage(e: unknown): string | null {
   return null;
 }
 
+/** While a typed code opens the group's key: what the wait is. */
+const DECRYPTING = 'Déchiffrement des messages…';
+
 function GroupUnlock({ groupId, onOpen }: { groupId: string; onOpen(g: OpenGroup): void }) {
   const { session, profiles } = useUnlocked();
-  const [state, setState] = useState<GroupLockState | null>(null);
-  // The group's name, when this phone already holds its meta: printed on the keypad's plate.
-  const [name, setName] = useState<string | null>(null);
+  // From the list just shown, at once; the fetch below then confirms it.
+  const [listed] = useState(() => listedGroups(session)?.find((x) => x.id === groupId));
+  const [state, setState] = useState<GroupLockState | null>(listed?.state ?? null);
+  // The group's name (or, before it is known, its other members): printed on the keypad's plate.
+  const [name, setName] = useState<string | null>(listed ? plateName(listed) : null);
   // Signed in again on this phone: the keywords are needed once, with the code.
   const [keywords, setKeywords] = useState<string[] | null>(null);
   const [firstCode, setFirstCode] = useState<string | null>(null);
@@ -134,17 +197,40 @@ function GroupUnlock({ groupId, onOpen }: { groupId: string; onOpen(g: OpenGroup
   const [gone, setGone] = useState(false);
   // The admin changed the code, and the keywords too: the new ones are typed before the new code.
   const [newWords, setNewWords] = useState(false);
+  // A private conversation: no keywords, its first code is chosen here.
+  const [direct, setDirect] = useState(listed?.direct ?? false);
+
+  // The header of a locked group: its name beside a red LED when this phone knows
+  // it (closed after being opened once, or sealed to us by an admin beside the
+  // key), as the open chat shows it beside the blue one.
+  const lockedHeader = useMemo(
+    () =>
+      name
+        ? {
+            headerTitle: () => (
+              <View style={styles.title}>
+                <Led state="error" size={7} />
+                <Text style={styles.titleText} numberOfLines={1}>
+                  {name}
+                </Text>
+              </View>
+            ),
+          }
+        : { title: direct ? 'Discussion verrouillée' : 'Groupe verrouillé' },
+    [name, direct],
+  );
 
   useEffect(() => {
-    listGroups(session)
+    listGroups(session, profiles)
       .then(({ items }) => {
         const g = items.find((x) => x.id === groupId);
         if (!g) setGone(true);
-        setName(g?.name ?? null);
+        setName(g ? plateName(g) : null);
+        setDirect(!!g?.direct);
         setState(g?.state ?? { kind: 'locked', codeChanged: false });
       })
       .catch(() => setState({ kind: 'locked', codeChanged: false }));
-  }, [session, groupId]);
+  }, [session, profiles, groupId]);
 
   async function attempt(code: string): Promise<CodeResult> {
     try {
@@ -153,7 +239,7 @@ function GroupUnlock({ groupId, onOpen }: { groupId: string; onOpen(g: OpenGroup
         setState({ kind: 'waiting-key' });
         return null;
       }
-      const group = { keys: res.keys, keyVersion: res.keyVersion, name: res.meta.name };
+      const group = { keys: res.keys, keyVersion: res.keyVersion, name: res.name, direct: !!res.meta.direct };
       if (res.codeChanged) {
         setRelock({ group, first: null, mismatch: false });
         return null;
@@ -172,13 +258,13 @@ function GroupUnlock({ groupId, onOpen }: { groupId: string; onOpen(g: OpenGroup
 
   // "Code" beside the group's name on the safe's screen; the plain title when the name is not known yet.
   const codeHeader = name ? <NamePlate label="Code" name={name} /> : undefined;
-  const codeTitle = name ? undefined : 'Code du groupe';
+  const codeTitle = name ? undefined : direct ? 'Code de la discussion' : 'Code du groupe';
 
   // The admin changed the keywords with the code: the new ones are typed first, then the code.
   if (newWords && !keywords) {
     return (
       <View style={[styles.center, { padding: space.lg }]}>
-        <Stack.Screen options={{ title: 'Groupe verrouillé' }} />
+        <Stack.Screen options={lockedHeader} />
         <KeywordsForm
           hint="Les 3 nouveaux mots-clés donnés par l’admin, puis le nouveau code."
           submitTitle="Continuer"
@@ -219,7 +305,8 @@ function GroupUnlock({ groupId, onOpen }: { groupId: string; onOpen(g: OpenGroup
         ) : (
           <CodeEntry
             key="confirm-new"
-            fadeOut
+            holdOnSuccess
+            busyLabel={DECRYPTING}
             title="Confirme le nouveau code"
             onComplete={async (code) => {
               if (code !== relock.first) {
@@ -229,7 +316,7 @@ function GroupUnlock({ groupId, onOpen }: { groupId: string; onOpen(g: OpenGroup
               try {
                 // The new code must open the key the admin re-wrapped with it: a wrong one is refused here.
                 const r = await relockGroup(session, profiles, groupId, group.keys, code, keywords ?? undefined);
-                const opened = { keys: r.keys, keyVersion: r.keyVersion, name: r.meta.name };
+                const opened = { keys: r.keys, keyVersion: r.keyVersion, name: r.name, direct: !!r.meta.direct };
                 return () => onOpen(opened);
               } catch (e) {
                 if (e instanceof WrongCodeError) {
@@ -248,9 +335,16 @@ function GroupUnlock({ groupId, onOpen }: { groupId: string; onOpen(g: OpenGroup
     );
   }
 
-  if (gone) return <GroupGone />;
+  if (gone) return <GroupGone direct={direct} />;
 
-  if (!state) return <SafeAreaView style={styles.center} />;
+  // The group's state is being fetched: the blade turning, not a black screen.
+  if (!state) {
+    return (
+      <View style={styles.center}>
+        <Working />
+      </View>
+    );
+  }
 
   if (state.kind === 'pending') {
     return (
@@ -268,7 +362,7 @@ function GroupUnlock({ groupId, onOpen }: { groupId: string; onOpen(g: OpenGroup
   if (state.kind === 'waiting-key') {
     return (
       <View style={[styles.center, { padding: space.lg, gap: space.md }]}>
-        <Stack.Screen options={{ title: 'Groupe verrouillé' }} />
+        <Stack.Screen options={lockedHeader} />
         <Text style={type.heading}>En attente de la clé</Text>
         <Text style={[type.dim, { textAlign: 'center' }]}>
           Tu es membre. La nouvelle clé du groupe arrivera chiffrée pour toi dès qu’un admin ouvrira le groupe sur son téléphone.
@@ -281,7 +375,7 @@ function GroupUnlock({ groupId, onOpen }: { groupId: string; onOpen(g: OpenGroup
   if (state.kind === 'first-unlock' && state.needsKeywords && !keywords) {
     return (
       <View style={[styles.center, { padding: space.lg }]}>
-        <Stack.Screen options={{ title: 'Groupe verrouillé' }} />
+        <Stack.Screen options={lockedHeader} />
         <KeywordsForm
           hint="Tu t’es reconnecté sur ce téléphone : entre les 3 mots-clés du groupe, puis son code."
           submitTitle="Continuer"
@@ -295,17 +389,22 @@ function GroupUnlock({ groupId, onOpen }: { groupId: string; onOpen(g: OpenGroup
   }
 
   // First unlock: the code typed here becomes this phone's lock for the key. Ask twice.
+  // A private conversation: there is no shared code, the one chosen here is this phone's own.
   if (state.kind === 'first-unlock') {
     return (
       <View style={styles.center}>
-        <Stack.Screen options={{ title: 'Groupe verrouillé' }} />
+        <Stack.Screen options={lockedHeader} />
         {firstCode === null ? (
           <CodeEntry
             key="code"
             initialError={mismatch ? 'Les codes ne correspondent pas' : undefined}
             header={codeHeader}
             title={codeTitle}
-            subtitle="La clé est arrivée. Entre le code du groupe pour la protéger sur ce téléphone."
+            subtitle={
+              direct
+                ? 'Tête-à-tête, chiffré pour vous deux. Choisis un code pour la verrouiller sur ce téléphone.'
+                : 'La clé est arrivée. Entre le code du groupe pour la protéger sur ce téléphone.'
+            }
             onComplete={async (code) => {
               setFirstCode(code);
               return null;
@@ -314,7 +413,8 @@ function GroupUnlock({ groupId, onOpen }: { groupId: string; onOpen(g: OpenGroup
         ) : (
           <CodeEntry
             key="confirm"
-            fadeOut
+            holdOnSuccess
+            busyLabel={DECRYPTING}
             title="Confirme le code"
             onComplete={async (code) => {
               if (code !== firstCode) {
@@ -327,7 +427,7 @@ function GroupUnlock({ groupId, onOpen }: { groupId: string; onOpen(g: OpenGroup
           />
         )}
         {/* Asked to join before the admin changed the code: the new keywords may be needed. */}
-        {firstCode === null && !state.needsKeywords ? wordsLink : null}
+        {firstCode === null && !state.needsKeywords && !direct ? wordsLink : null}
       </View>
     );
   }
@@ -337,14 +437,15 @@ function GroupUnlock({ groupId, onOpen }: { groupId: string; onOpen(g: OpenGroup
 
   return (
     <View style={styles.center}>
-      <Stack.Screen options={{ title: 'Groupe verrouillé' }} />
+      <Stack.Screen options={lockedHeader} />
       <CodeEntry
         header={codeHeader}
         title={codeTitle}
         subtitle={codeChanged ? (keywords ? 'Nouveaux mots-clés notés : tape le nouveau code.' : 'L’admin a changé le code : tape le nouveau.') : undefined}
         onComplete={attempt}
         lockedForMs={lockedFor}
-        fadeOut
+        holdOnSuccess
+        busyLabel={DECRYPTING}
       />
       {codeChanged ? wordsLink : null}
     </View>
@@ -353,15 +454,16 @@ function GroupUnlock({ groupId, onOpen }: { groupId: string; onOpen(g: OpenGroup
 
 // ---- Chat (SPEC §2.4) ------------------------------------------------------------------
 
-/** The group no longer exists for us: self-destructed (or we were removed). */
-function GroupGone() {
+/** The group no longer exists for us: self-destructed (or we were removed); a private conversation: one of the two deleted it. */
+function GroupGone({ direct }: { direct?: boolean }) {
   return (
     <View style={[styles.center, { padding: space.lg, gap: space.md }]}>
-      <Stack.Screen options={{ title: 'Groupe effacé' }} />
-      <Text style={styles.emptyIcon}>💥</Text>
-      <Text style={type.heading}>Ce groupe n’existe plus</Text>
+      <Stack.Screen options={{ title: direct ? 'Discussion effacée' : 'Groupe effacé' }} />
+      <Bomb size={36} color={colors.danger} />
+      <Text style={type.heading}>{direct ? 'Cette discussion n’existe plus' : 'Ce groupe n’existe plus'}</Text>
       <Text style={[type.dim, { textAlign: 'center' }]}>
-        Il s’est autodétruit ou tu n’en fais plus partie. Ses messages, ses photos, ses vocaux et ses clés ont été effacés de ce téléphone.
+        {direct ? 'L’un de vous deux l’a supprimée.' : 'Il s’est autodétruit ou tu n’en fais plus partie.'} Ses messages, ses photos, ses vocaux et ses clés ont
+        été effacés de ce téléphone.
       </Text>
     </View>
   );
@@ -373,7 +475,23 @@ const ERASE_SPANS: { days: number; label: string }[] = [
   { days: 7, label: 'Les 7 jours jusqu’à ce jour' },
 ];
 
-function Chat({ groupId, group, onUpdate, onLocked }: { groupId: string; group: OpenGroup; onUpdate(g: OpenGroup): void; onLocked(): void }) {
+function Chat({
+  groupId,
+  group,
+  onUpdate,
+  onLocked,
+  onReady,
+  titled,
+}: {
+  groupId: string;
+  group: OpenGroup;
+  onUpdate(g: OpenGroup): void;
+  onLocked(): void;
+  /** Called once there is something to show: the history decrypted, or the group gone. */
+  onReady?(): void;
+  /** False while the code entry is still over it: the header stays the locked group's. */
+  titled: boolean;
+}) {
   const { session, profiles, openGroups } = useUnlocked();
   const [dialog, dialogView] = useDialog();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -388,7 +506,6 @@ function Chat({ groupId, group, onUpdate, onLocked }: { groupId: string; group: 
   const input = useRef<React.ComponentRef<typeof TextInput>>(null);
   // Where this screen starts below the top of the display (status bar + header):
   // what the keyboard avoider needs to keep the composer just above the keyboard.
-  const headerHeight = useHeaderHeight();
 
   /** Answer `m`: reply strip above the composer, keyboard up. */
   const startReply = useCallback((m: ChatMessage) => {
@@ -426,6 +543,8 @@ function Chat({ groupId, group, onUpdate, onLocked }: { groupId: string; group: 
     setSeen((prev) => (prev.has(id) ? prev : new Set([...prev, id])));
   }, []);
   const [online, setOnline] = useState(true);
+  // The last fetch failed for another reason than the network (server error): said, with a retry.
+  const [fetchFailed, setFetchFailed] = useState(false);
   const [removed, setRemoved] = useState(false);
   // From the server at each sync: only admins erase days; self-destruct date if any.
   const [role, setRole] = useState<'admin' | 'member'>('member');
@@ -464,7 +583,7 @@ function Chat({ groupId, group, onUpdate, onLocked }: { groupId: string; group: 
       setExpiresAt(r.summary.expiresAt ? new Date(r.summary.expiresAt) : null);
       if (r.adminChanged) setNewAdmin(true);
       setAlert(null);
-      const g = { keys: r.keys, keyVersion: r.keyVersion, name: r.meta.name };
+      const g = { keys: r.keys, keyVersion: r.keyVersion, name: r.name, direct: !!r.meta.direct };
       current.current = g;
       onUpdate(g);
       setRequests(admin ? await joinRequests(session, profiles, groupId).catch(() => []) : []);
@@ -607,16 +726,17 @@ function Chat({ groupId, group, onUpdate, onLocked }: { groupId: string; group: 
         merge(await decrypt(res.messages), full);
         setLoaded(true);
         setOnline(true);
+        setFetchFailed(false);
         setFlushes((n) => n + 1);
         void keep(async (l) => {
           await (full ? l.replaceMessages(groupId, res.messages) : l.saveMessages(groupId, res.messages));
           await l.setRecord(records.chat(groupId), { purgeSeq: res.purgeSeq });
         });
       } catch (e) {
-        if (e instanceof NetworkError) {
-          setOnline(false);
-          setLoaded(true);
-        }
+        // Whatever went wrong, the wait ends: what the phone kept shows, the banner says why nothing newer.
+        setLoaded(true);
+        if (e instanceof NetworkError) setOnline(false);
+        else setFetchFailed(true);
       }
     },
     [session, groupId, decrypt, merge, keep, loadLocal],
@@ -641,6 +761,11 @@ function Chat({ groupId, group, onUpdate, onLocked }: { groupId: string; group: 
     rt.start();
     return () => rt.stop();
   }, [session, groupId, resync, decrypt, merge, keep]);
+
+  const ready = loaded || removed || destroyed;
+  useEffect(() => {
+    if (ready) onReady?.();
+  }, [ready, onReady]);
 
   /** Self-destructed: keys out of memory and off the phone, nothing left to show. */
   const destroy = useCallback(() => {
@@ -715,6 +840,13 @@ function Chat({ groupId, group, onUpdate, onLocked }: { groupId: string; group: 
   const chatPending = useMemo(
     () => (pending.some((p) => p.kind === 'story' || p.kind === 'reaction') ? pending.filter((p) => p.kind !== 'story' && p.kind !== 'reaction') : pending),
     [pending],
+  );
+  // How the conversation is drawn, chosen for this group on this phone (group settings): read again on coming back from them.
+  const [look, setLook] = useState<ChatLook>('terminal');
+  useFocusEffect(
+    useCallback(() => {
+      void keep(async (l) => setLook(chatLook((await l.getRecord<{ look: unknown }>(records.look(groupId)))?.look)));
+    }, [keep, groupId]),
   );
   // The five reaction keys in the order chosen on this phone (long press in the panel), kept in the local store.
   const [order, setOrder] = useState(() => reactionOrder(null));
@@ -950,11 +1082,11 @@ function Chat({ groupId, group, onUpdate, onLocked }: { groupId: string; group: 
       ) : item.localFile ? (
         <LocalFile file={item.localFile} />
       ) : item.text === null ? (
-        <Text style={styles.unreadable}>Message illisible (signature ou clé invalide)</Text>
+        <Text style={look === 'plates' ? styles.plateUnreadable : styles.unreadable}>Message illisible (signature ou clé invalide)</Text>
       ) : (
-        <Text style={styles.text}>{item.text}</Text>
+        <Text style={look === 'plates' ? styles.plateText : styles.text}>{item.text}</Text>
       ),
-    [session, groupId, openImage, openFile],
+    [session, groupId, openImage, openFile, look],
   );
 
   const eraseMenu = useMemo(
@@ -974,7 +1106,7 @@ function Chat({ groupId, group, onUpdate, onLocked }: { groupId: string; group: 
     () => ({
       headerTitle: () => (
         <View style={styles.title}>
-          <Led state="green" size={7} />
+          <Led state="ok" size={7} />
           <Text style={styles.titleText} numberOfLines={1}>
             {group.name}
           </Text>
@@ -984,18 +1116,20 @@ function Chat({ groupId, group, onUpdate, onLocked }: { groupId: string; group: 
         <Pressable
           hitSlop={12}
           accessibilityRole="button"
-          accessibilityLabel="Réglages du groupe"
+          accessibilityLabel={group.direct ? 'Réglages de la discussion' : 'Réglages du groupe'}
           onPress={() => router.push({ pathname: '/group/settings', params: { id: groupId } })}
         >
-          <Text style={styles.headerButton}>⚙</Text>
+          <Settings size={22} color={colors.accentFg} />
         </Pressable>
       ),
     }),
-    [group.name, groupId],
+    [group.name, group.direct, groupId],
   );
 
-  if (destroyed) return <GroupGone />;
+  if (destroyed) return <GroupGone direct={group.direct} />;
 
+  // A private conversation is never left alone: gone from the server means the other one deleted it.
+  if (removed && group.direct) return <GroupGone direct />;
   if (removed) {
     return (
       <View style={[styles.center, { padding: space.lg, gap: space.md }]}>
@@ -1008,17 +1142,23 @@ function Chat({ groupId, group, onUpdate, onLocked }: { groupId: string; group: 
 
   return (
     <SafeAreaView style={styles.screen} edges={['bottom']}>
-      <Stack.Screen options={headerOptions} />
+      {titled ? <Stack.Screen options={headerOptions} /> : null}
       {dialogView}
       {!online ? (
         <View style={styles.banner}>
-          <Led state="amber" size={7} />
+          <Led state="busy" size={7} />
           <Text style={styles.bannerText}>HORS LIGNE — ENVOI AU RETOUR DU RÉSEAU</Text>
         </View>
       ) : null}
+      {online && fetchFailed ? (
+        <Pressable style={[styles.banner, styles.alertBanner]} onPress={() => void resync()} accessibilityRole="button">
+          <Led state="error" size={7} />
+          <Text style={styles.bannerText}>MESSAGES NON CHARGÉS — APPUIE POUR RÉESSAYER</Text>
+        </Pressable>
+      ) : null}
       {expiresAt ? (
         <View style={styles.banner}>
-          <Led state="red" size={7} />
+          <Led state="error" size={7} />
           <Text style={styles.bannerText} numberOfLines={1}>
             AUTODESTRUCTION {countdownLabel(expiresAt, now).toUpperCase()} — {dateTimeLabel(expiresAt, now).toUpperCase()}
           </Text>
@@ -1026,19 +1166,19 @@ function Chat({ groupId, group, onUpdate, onLocked }: { groupId: string; group: 
       ) : null}
       {alert ? (
         <View style={[styles.banner, styles.alertBanner]}>
-          <Led state="red" size={7} />
+          <Led state="error" size={7} />
           <Text style={styles.bannerText}>{alert.toUpperCase()}</Text>
         </View>
       ) : null}
       {newAdmin ? (
         <Pressable style={styles.banner} onPress={() => setNewAdmin(false)} accessibilityRole="button">
-          <Led state="amber" size={7} />
+          <Led state="busy" size={7} />
           <Text style={styles.bannerText}>LES ADMINS DU GROUPE ONT CHANGÉ — VOIR LES RÉGLAGES</Text>
         </Pressable>
       ) : null}
       {requests.length ? (
         <Pressable style={styles.banner} onPress={() => setReviewing(true)} accessibilityRole="button">
-          <Led state="amber" size={7} />
+          <Led state="busy" size={7} />
           <Text style={styles.bannerText}>
             {requests.length === 1 ? '1 DEMANDE D’ACCÈS — APPUIE POUR VOIR' : `${requests.length} DEMANDES D’ACCÈS — APPUIE POUR VOIR`}
           </Text>
@@ -1063,14 +1203,8 @@ function Chat({ groupId, group, onUpdate, onLocked }: { groupId: string; group: 
                   </Text>
                 )}
                 <View style={styles.requestButtons}>
-                  <Pressable style={[styles.requestButton, styles.reject]} onPress={() => void decide(r, false)} accessibilityRole="button">
-                    <Text style={styles.requestButtonText}>Refuser</Text>
-                  </Pressable>
-                  {!r.keyChanged ? (
-                    <Pressable style={[styles.requestButton, styles.accept]} onPress={() => void decide(r, true)} accessibilityRole="button">
-                      <Text style={styles.requestButtonText}>Accepter</Text>
-                    </Pressable>
-                  ) : null}
+                  <Key grow label="Refuser" tone="cold" onPress={() => void decide(r, false)} />
+                  {!r.keyChanged ? <Key grow variant="hot" label="Accepter" onPress={() => void decide(r, true)} /> : null}
                 </View>
               </View>
             ))}
@@ -1082,14 +1216,16 @@ function Chat({ groupId, group, onUpdate, onLocked }: { groupId: string; group: 
         {/* A modal is drawn above the app's own cover: it needs its own for the app switcher. */}
         <PrivacyCover />
       </Modal>
-      {/* 'padding' on both platforms: with edge-to-edge (always on since SDK 54),
-          Android no longer shrinks the window for the keyboard by itself. */}
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding" keyboardVerticalOffset={headerHeight}>
+      {/* With edge-to-edge (always on since SDK 54), Android no longer shrinks the window
+          for the keyboard by itself: the composer is lifted here, in a glide. */}
+      <KeyboardGlide style={{ flex: 1 }}>
         {/* The messages start under the stories' rail; the band itself lies over them (rendered last: on top)
             and comes down to the composer, never over it. */}
         <View style={{ flex: 1 }}>
           <View style={{ height: STORIES_RAIL_H }} />
           <Timeline
+            look={look}
+            direct={!!group.direct}
             listRef={list}
             loaded={loaded}
             messages={chatMessages}
@@ -1120,6 +1256,8 @@ function Chat({ groupId, group, onUpdate, onLocked }: { groupId: string; group: 
             onSeen={markSeen}
             onView={openImage}
           />
+          {/* Until the history is decrypted (from the phone, or fetched): what the wait is, not a black screen. */}
+          {!loaded ? <Working label={DECRYPTING} style={styles.decrypting} /> : null}
         </View>
         <ChatComposer
           attaching={picking}
@@ -1137,7 +1275,7 @@ function Chat({ groupId, group, onUpdate, onLocked }: { groupId: string; group: 
             void send({ clientId: newClientId(), at: new Date().toISOString(), kind: 'voice', voice, failed: false, replyTo: takeReply() })
           }
         />
-      </KeyboardAvoidingView>
+      </KeyboardGlide>
       <ImageViewer jpeg={viewing} onClose={() => setViewing(null)} />
       <StoryPreview image={storyPick} onPublish={publishStory} onCancel={() => setStoryPick(null)} />
       {/* The pickers open once the panel is gone (iOS refuses to present over a modal on its way out). */}
@@ -1150,7 +1288,7 @@ function Chat({ groupId, group, onUpdate, onLocked }: { groupId: string; group: 
           next?.();
         }}
       >
-        <Text style={styles.sheetTitle}>ENVOYER · CHIFFRÉ POUR LE GROUPE</Text>
+        <Text style={styles.sheetTitle}>ENVOYER · CHIFFRÉ</Text>
         <ActionKey label="Une photo" onPress={() => closeAttachSheet(() => void sendPhoto())} />
         <ActionKey label="Un document (PDF, …)" onPress={() => closeAttachSheet(() => void sendDocument())} />
         <ActionKey label="Annuler" dim onPress={() => closeAttachSheet()} />
@@ -1298,6 +1436,8 @@ interface Line {
   mine: boolean;
   author: string;
   avatar?: string | null;
+  /** The author's account color id. */
+  color?: string | null;
   text: string | null;
   image?: ImageBody;
   local?: PreparedImage;
@@ -1321,6 +1461,8 @@ type Item = ReturnType<typeof buildTimeline<Line>>[number];
 const itemKey = (i: Item) => i.key;
 
 const Timeline = memo(function Timeline({
+  look,
+  direct,
   listRef,
   loaded,
   messages,
@@ -1334,6 +1476,9 @@ const Timeline = memo(function Timeline({
   onReact,
   onDoubleTap,
 }: {
+  look: ChatLook;
+  /** A private conversation: only the two of them read it. */
+  direct: boolean;
   listRef: React.RefObject<FlatList<Item> | null>;
   loaded: boolean;
   messages: ChatMessage[];
@@ -1353,8 +1498,17 @@ const Timeline = memo(function Timeline({
   /** Two quick taps on a delivered message: the first reaction of this phone's order. */
   onDoubleTap(m: ChatMessage): void;
 }) {
-  const { session } = useUnlocked();
+  const { session, profiles } = useUnlocked();
   const me = session.account.userId;
+  const myName = session.account.username;
+  // My color, for my messages still on their way (the sent ones carry it from my profile).
+  const [myColor, setMyColor] = useState<string | null>(null);
+  useEffect(() => {
+    profiles
+      .get([me])
+      .then((known) => setMyColor(known.get(me)?.color ?? null))
+      .catch(() => {});
+  }, [profiles, me]);
   // Original lit for a moment after tapping a quote.
   const [highlight, setHighlight] = useState<string | null>(null);
   const highlightTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -1371,6 +1525,7 @@ const Timeline = memo(function Timeline({
         mine: m.mine,
         author: m.senderName,
         avatar: m.senderAvatar,
+        color: m.senderColor,
         text: m.text,
         image: m.image ?? undefined,
         voice: m.voice ?? undefined,
@@ -1387,7 +1542,8 @@ const Timeline = memo(function Timeline({
         senderId: me,
         at: new Date(p.at),
         mine: true,
-        author: '',
+        author: myName,
+        color: myColor,
         text: p.kind === 'text' ? p.text : null,
         local: p.kind === 'image' ? p.image : undefined,
         localVoice: p.kind === 'voice' ? p.voice : undefined,
@@ -1399,7 +1555,7 @@ const Timeline = memo(function Timeline({
       })),
     ];
     return buildTimeline(lines, new Date()).reverse();
-  }, [messages, pending, me, reactions]);
+  }, [messages, pending, me, myName, myColor, reactions]);
 
   const jumpTo = useCallback(
     (messageId: string) => {
@@ -1423,6 +1579,7 @@ const Timeline = memo(function Timeline({
       // what is never in doubt; only mine are grouped in runs.
       return (
         <TimelineRow
+          look={look}
           line={line}
           last={!line.mine || item.last}
           highlighted={highlight === line.key}
@@ -1436,8 +1593,21 @@ const Timeline = memo(function Timeline({
         />
       );
     },
-    [highlight, renderContent, onRetry, onLongPress, onReply, onDayLongPress, jumpTo, onReact, onDoubleTap],
+    [look, highlight, renderContent, onRetry, onLongPress, onReply, onDayLongPress, jumpTo, onReact, onDoubleTap],
   );
+
+  const dragFrom = useRef<number | null>(null);
+  const startDrag = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    dragFrom.current = Keyboard.isVisible() ? e.nativeEvent.contentOffset.y : null;
+  }, []);
+  const dragged = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    if (dragFrom.current === null || Math.abs(e.nativeEvent.contentOffset.y - dragFrom.current) < KEYBOARD_DRAG) return;
+    dragFrom.current = null;
+    Keyboard.dismiss();
+  }, []);
+  const endDrag = useCallback(() => {
+    dragFrom.current = null;
+  }, []);
 
   return (
     <FlatList
@@ -1451,16 +1621,25 @@ const Timeline = memo(function Timeline({
         setTimeout(() => listRef.current?.scrollToIndex({ index: info.index, viewPosition: 0.5, animated: true }), 100);
       }}
       keyboardShouldPersistTaps="handled"
+      // Scrolling back through the conversation puts the keyboard away (the whole screen for
+      // reading), after a short slide: a light touch on the list leaves it up.
+      onScrollBeginDrag={startDrag}
+      onScroll={dragged}
+      onScrollEndDrag={endDrag}
+      scrollEventThrottle={16}
       contentContainerStyle={styles.timeline}
       ListEmptyComponent={
         // The list flips its empty state back upright by itself (inversionStyle in VirtualizedList).
-        !loaded ? undefined : <View style={styles.empty}>
-          <Text style={styles.emptyIcon}>🔓</Text>
-          <Text style={styles.emptyTitle}>Coffre ouvert</Text>
-          <Text style={[type.dim, { textAlign: 'center' }]}>
-            Les messages, les photos et les vocaux sont chiffrés sur ton téléphone. Seuls les membres du groupe peuvent les lire.
-          </Text>
-        </View>
+        !loaded ? undefined : (
+          <View style={styles.empty}>
+            <LockKeyholeOpen size={36} color={led.ok} />
+            <Text style={styles.emptyTitle}>Coffre ouvert</Text>
+            <Text style={[type.dim, { textAlign: 'center' }]}>
+              Les messages, les photos et les vocaux sont chiffrés sur ton téléphone.{' '}
+              {direct ? 'Vous seuls, tous les deux, pouvez les lire.' : 'Seuls les membres du groupe peuvent les lire.'}
+            </Text>
+          </View>
+        )
       }
       renderItem={renderItem}
     />
@@ -1469,6 +1648,7 @@ const Timeline = memo(function Timeline({
 
 /** A message of the timeline: re-rendered when it changes, not on every render of the list. */
 const TimelineRow = memo(function TimelineRow({
+  look,
   line,
   last,
   highlighted,
@@ -1480,6 +1660,7 @@ const TimelineRow = memo(function TimelineRow({
   onDoubleTap,
   onQuotePress,
 }: {
+  look: ChatLook;
   line: Line;
   last: boolean;
   highlighted: boolean;
@@ -1498,9 +1679,11 @@ const TimelineRow = memo(function TimelineRow({
     <View style={last ? styles.runEnd : undefined}>
       <SwipeToReply onReply={message ? () => onReply(message) : undefined}>
         <MessageBubble
+          look={look}
           mine={line.mine}
-          author={line.mine ? undefined : line.author}
+          author={line.author}
           avatar={line.avatar}
+          color={line.color}
           time={timeLabel(line.at)}
           status={line.status}
           error={pending?.error}
@@ -1524,10 +1707,11 @@ const TimelineRow = memo(function TimelineRow({
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
+  cover: { backgroundColor: colors.bg },
   center: { flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center' },
+  decrypting: { backgroundColor: colors.bg },
   title: { flexDirection: 'row', alignItems: 'center', gap: 8, maxWidth: 220 },
   titleText: { color: colors.text, fontSize: 17, fontFamily: fonts.semibold },
-  headerButton: { color: colors.accentFg, fontSize: 24 },
   banner: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1541,7 +1725,7 @@ const styles = StyleSheet.create({
   bannerText: { fontFamily: mono, fontSize: 10, letterSpacing: 1, color: colors.textDim },
   alertBanner: { borderBottomColor: colors.danger },
   sheetBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', padding: space.lg },
-  sheet: { backgroundColor: colors.surface, borderRadius: 12, padding: space.lg, gap: space.md, borderWidth: 1, borderColor: colors.border },
+  sheet: { ...panelStyle, padding: space.lg, gap: space.md },
   sheetClose: { alignSelf: 'center', padding: space.sm },
   wordsLink: { marginTop: space.md, paddingVertical: space.sm, paddingHorizontal: space.md },
   wordsLinkText: { color: colors.accentFg, fontFamily: fonts.medium, fontSize: 15 },
@@ -1550,16 +1734,15 @@ const styles = StyleSheet.create({
   requestWarning: { color: colors.danger },
   safety: { fontFamily: mono, fontSize: 15, letterSpacing: 1, color: colors.text, lineHeight: 22 },
   requestButtons: { flexDirection: 'row', gap: space.sm },
-  requestButton: { flex: 1, paddingVertical: 12, borderRadius: 8, alignItems: 'center' },
-  accept: { backgroundColor: colors.forest },
-  reject: { backgroundColor: colors.surface2, borderWidth: 1, borderColor: colors.border },
-  requestButtonText: { color: colors.text, fontFamily: fonts.semibold },
   timeline: { paddingHorizontal: space.md, paddingVertical: space.sm, gap: 3, flexGrow: 1 },
   runEnd: { marginBottom: space.sm },
-  text: { color: colors.text, fontSize: 16, lineHeight: 21 },
-  unreadable: { color: colors.textDim, fontStyle: 'italic', fontSize: 14 },
+  // Entries of the terminal: the monospace font.
+  text: { color: colors.text, fontFamily: mono, fontSize: 15, lineHeight: 22 },
+  unreadable: { color: colors.textDim, fontFamily: mono, fontStyle: 'italic', fontSize: 14 },
+  // On the plates (look chosen per group): the text font.
+  plateText: { color: colors.text, fontSize: 16, lineHeight: 21 },
+  plateUnreadable: { color: colors.textDim, fontStyle: 'italic', fontSize: 14 },
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: space.sm, padding: space.xl },
-  emptyIcon: { fontSize: 32 },
   emptyTitle: { color: colors.text, fontSize: 18, fontFamily: fonts.semibold },
-  sheetTitle: { fontFamily: mono, fontSize: 11, letterSpacing: 1.5, color: colors.textDim, textAlign: 'center', marginBottom: space.xs },
+  sheetTitle: { ...labelText, textAlign: 'center', marginBottom: space.xs },
 });

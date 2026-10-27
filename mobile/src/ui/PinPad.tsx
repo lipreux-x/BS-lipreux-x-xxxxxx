@@ -1,7 +1,8 @@
 import * as Haptics from 'expo-haptics';
 import { useMemo } from 'react';
 import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
-import { colors, fonts } from './theme';
+import { Panel } from './Panel';
+import { colors, fonts, steel } from './theme';
 
 const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '⌫'] as const;
 const GAP = 12;
@@ -46,12 +47,7 @@ export function PinPad({
     [w, h],
   );
   return (
-    <View style={styles.plate}>
-      {(['tl', 'tr', 'bl', 'br'] as const).map((c) => (
-        <View key={c} style={[styles.screw, styles[c]]}>
-          <View style={styles.slot} />
-        </View>
-      ))}
+    <Panel screws style={styles.plate}>
       <View style={[styles.grid, size.grid]}>
         {KEYS.map((k) => {
           const fn = k === 'C' || k === '⌫';
@@ -74,41 +70,16 @@ export function PinPad({
           );
         })}
       </View>
-    </View>
+    </Panel>
   );
 }
 
-const METAL = '#24282B';
-const LIGHT_EDGE = '#4A5056';
-const DARK_EDGE = '#0A0B0C';
+const METAL = steel.key;
+const LIGHT_EDGE = steel.edgeLight;
+const DARK_EDGE = steel.edgeDark;
 
 const styles = StyleSheet.create({
-  plate: {
-    padding: PLATE_PAD,
-    borderRadius: 14,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderTopColor: '#2E2E2E',
-    borderLeftColor: '#2E2E2E',
-    borderBottomColor: '#000000',
-    borderRightColor: '#000000',
-  },
-  screw: {
-    position: 'absolute',
-    width: 9,
-    height: 9,
-    borderRadius: 4.5,
-    backgroundColor: '#3A3F44',
-    borderWidth: 1,
-    borderColor: DARK_EDGE,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  slot: { width: 5, height: 1.5, backgroundColor: DARK_EDGE, transform: [{ rotate: '45deg' }] },
-  tl: { top: 7, left: 7 },
-  tr: { top: 7, right: 7 },
-  bl: { bottom: 7, left: 7 },
-  br: { bottom: 7, right: 7 },
+  plate: { padding: PLATE_PAD, gap: 0 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: GAP },
   key: {
     borderRadius: 8,
@@ -123,7 +94,7 @@ const styles = StyleSheet.create({
   },
   // Pressed: the bevel inverts, the key looks pushed in.
   pressed: {
-    backgroundColor: '#1B1E20',
+    backgroundColor: steel.keyPressed,
     borderTopColor: DARK_EDGE,
     borderLeftColor: DARK_EDGE,
     borderBottomColor: LIGHT_EDGE,

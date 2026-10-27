@@ -1,6 +1,6 @@
 import { forwardRef, useImperativeHandle, useRef } from 'react';
 import { Animated, Platform, StyleSheet, Text, View } from 'react-native';
-import { colors } from './theme';
+import { colors, lcd, led, steel } from './theme';
 
 export interface SafeDisplayHandle {
   shake(): void;
@@ -12,8 +12,9 @@ const MONO = Platform.select({ ios: 'Menlo', default: 'monospace' });
 
 /**
  * Safe-style backlit screen: one `-` per empty slot, `*` per typed digit
- * (never the digit itself), plus a status LED: grey idle, amber while the
- * code is checked, green when it is right, red on error.
+ * (never the digit itself), plus a status LED: dark idle, a pale filament
+ * while the code is checked, sky blue when it is right (the whole display
+ * flashes paler too), red on error.
  */
 export const SafeDisplay = forwardRef<SafeDisplayHandle, { length: number; filled: number; state?: SafeDisplayState }>(
   function SafeDisplay({ length, filled, state = 'idle' }, ref) {
@@ -48,9 +49,9 @@ export const SafeDisplay = forwardRef<SafeDisplayHandle, { length: number; fille
   },
 );
 
-const LCD_ON = '#C8D3C0';
-const AMBER = '#E8A33D';
-const GREEN = '#3DD68C';
+const LCD_ON = lcd.on;
+const BUSY = led.busy;
+const OK = led.ok;
 
 const styles = StyleSheet.create({
   bezel: {
@@ -62,10 +63,10 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     backgroundColor: colors.surface2,
     borderWidth: 1,
-    borderTopColor: '#3A3A3A',
-    borderLeftColor: '#3A3A3A',
-    borderBottomColor: '#050505',
-    borderRightColor: '#050505',
+    borderTopColor: steel.bezelLight,
+    borderLeftColor: steel.bezelLight,
+    borderBottomColor: steel.bezelDark,
+    borderRightColor: steel.bezelDark,
   },
   screen: {
     flexDirection: 'row',
@@ -73,7 +74,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 4,
-    backgroundColor: '#0B100C',
+    backgroundColor: lcd.glass,
     borderWidth: 2,
     borderTopColor: '#000000',
     borderLeftColor: '#000000',
@@ -82,11 +83,11 @@ const styles = StyleSheet.create({
   },
   char: { fontFamily: MONO, fontSize: 30, width: 20, textAlign: 'center' },
   on: { color: LCD_ON, textShadowColor: LCD_ON, textShadowRadius: 6 },
-  off: { color: '#26302A' },
+  off: { color: lcd.off },
   errorChar: { color: colors.danger, textShadowColor: colors.danger },
-  successChar: { color: GREEN, textShadowColor: GREEN },
-  led: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#2E2E2E', borderWidth: 1, borderColor: '#000000' },
-  ledBusy: { backgroundColor: AMBER, boxShadow: `0 0 6px ${AMBER}` },
-  ledSuccess: { backgroundColor: GREEN, boxShadow: `0 0 6px ${GREEN}` },
+  successChar: { color: lcd.flash, textShadowColor: lcd.flash },
+  led: { width: 10, height: 10, borderRadius: 5, backgroundColor: led.off, borderWidth: 1, borderColor: '#000000' },
+  ledBusy: { backgroundColor: BUSY, boxShadow: `0 0 6px ${BUSY}` },
+  ledSuccess: { backgroundColor: OK, boxShadow: `0 0 6px ${OK}` },
   ledError: { backgroundColor: colors.danger, boxShadow: `0 0 6px ${colors.danger}` },
 });

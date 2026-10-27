@@ -1,4 +1,4 @@
-import { bandStories, fitStory, isNew, openingIndex, pruneSeen, storyAlive, storyExpiry, storyTap, type StoryMessage } from '../stories';
+import { bandStories, fitStory, isNew, openingIndex, pruneSeen, railLabel, storyAlive, storyExpiry, storyTap, type StoryMessage } from '../stories';
 
 const now = new Date('2026-10-20T15:00:00Z');
 const hoursAgo = (h: number) => new Date(now.getTime() - h * 3_600_000).toISOString();
@@ -90,5 +90,29 @@ describe('photo in the shutter', () => {
   it('is capped by the area, narrower then, and fills it without dimensions', () => {
     expect(fitStory({ width: 900, height: 1600 }, 400, 600)).toEqual({ width: 338, height: 600 });
     expect(fitStory({ width: 0, height: 0 }, 400, 600)).toEqual({ width: 400, height: 600 });
+  });
+});
+
+describe('railLabel', () => {
+  const base = { failed: false, sending: false, published: false, open: false, index: 0, count: 0, fresh: 0, mine: 0 };
+  it('says what the band is doing first', () => {
+    expect(railLabel({ ...base, failed: true, mine: 1 })).toBe('STORIES · 24 H · ÉCHEC');
+    expect(railLabel({ ...base, sending: true, count: 2, fresh: 2 })).toBe('STORIES · 24 H · ENVOI…');
+    expect(railLabel({ ...base, published: true, count: 1, mine: 1 })).toBe('STORIES · 24 H · PUBLIÉE');
+  });
+  it('counts the pages when open', () => {
+    expect(railLabel({ ...base, open: true, index: 1, count: 3, mine: 1 })).toBe('STORIES · 24 H · 2 / 3');
+    expect(railLabel({ ...base, open: true })).toBe('STORIES · 24 H');
+  });
+  it('names my story while it is up, with the others', () => {
+    expect(railLabel({ ...base, count: 1, mine: 1 })).toBe('STORIES · 24 H · LA TIENNE');
+    expect(railLabel({ ...base, count: 3, mine: 1 })).toBe('STORIES · 24 H · LA TIENNE + 2');
+    expect(railLabel({ ...base, count: 4, mine: 2 })).toBe('STORIES · 24 H · LES TIENNES + 2');
+    expect(railLabel({ ...base, count: 3, mine: 1, fresh: 2 })).toBe('STORIES · 24 H · LA TIENNE · 2 NOUVELLES');
+  });
+  it('without one of mine: the new ones, or the count', () => {
+    expect(railLabel({ ...base, count: 3, fresh: 1 })).toBe('STORIES · 24 H · 1 NOUVELLE');
+    expect(railLabel({ ...base, count: 3 })).toBe('STORIES · 24 H · 3');
+    expect(railLabel(base)).toBe('STORIES · 24 H');
   });
 });

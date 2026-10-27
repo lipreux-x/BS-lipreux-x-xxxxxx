@@ -7,10 +7,11 @@ import {
 } from '@expo-google-fonts/space-grotesk';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { ActivityIndicator, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
 import { SessionProvider, useSession } from '@/session/SessionProvider';
 import { Button } from '@/ui/Button';
 import { PrivacyCover } from '@/ui/PrivacyCover';
+import { Working } from '@/ui/Working';
 import { colors, fonts, space, type } from '@/ui/theme';
 
 function RootStack() {
@@ -33,8 +34,8 @@ function RootStack() {
   }
   if (status.kind === 'loading' || (!fontsLoaded && !fontError)) {
     return (
-      <View style={{ flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center' }}>
-        <ActivityIndicator color={colors.accentFg} />
+      <View style={{ flex: 1, backgroundColor: colors.bg }}>
+        <Working />
       </View>
     );
   }

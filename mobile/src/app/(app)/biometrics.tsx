@@ -22,13 +22,13 @@ export default function EnableBiometrics() {
         return 'Trop d’essais';
       }
       if (e instanceof WipedError) return 'Données effacées';
-      return 'Empreinte refusée ou indisponible';
+      return 'Biométrie refusée ou indisponible';
     }
   }
 
   return (
     <View style={styles.screen}>
-      <CodeEntry title="Confirme ton code" subtitle="Pour ouvrir l’app avec ton empreinte." onComplete={submit} lockedForMs={lockedFor} />
+      <CodeEntry title="Confirme ton code" subtitle="Pour ouvrir l’app sans le code, avec ton empreinte ou ton visage." onComplete={submit} lockedForMs={lockedFor} />
     </View>
   );
 }

@@ -102,7 +102,7 @@ run('app services against the API', () => {
     await expect(joinGroup(bob, groupCode, ['ete', 'plage', 'lune'])).rejects.toMatchObject({ code: 'wrong_code' });
     expect(await joinGroup(bob, groupCode, ['SOLEIL', 'ete', 'plage'])).toBe(groupId);
     // Pending: nothing of the group is visible, not even messages.
-    expect((await listGroups(bob)).items[0]).toMatchObject({ id: groupId, name: null, state: { kind: 'pending' } });
+    expect((await listGroups(bob, bob.profiles)).items[0]).toMatchObject({ id: groupId, name: null, state: { kind: 'pending' } });
     await expect(bob.api.messages(groupId, 0)).rejects.toMatchObject({ status: 404 });
 
     // Alice sees the request with Bob's fingerprint, and lets him in.
@@ -112,17 +112,17 @@ run('app services against the API', () => {
     await approveMember(alice, alice.profiles, groupId, aliceOpen.keys, bob.account.userId);
 
     // Bob's first unlock: his handout opens with the code he joined with, then is locked under it.
-    expect((await listGroups(bob)).items[0]!.state).toEqual({ kind: 'first-unlock', needsKeywords: false });
+    expect((await listGroups(bob, bob.profiles)).items[0]!.state).toEqual({ kind: 'first-unlock', needsKeywords: false });
     await expect(unlockGroup(bob, bob.profiles, groupId, 'ZZWRONG1')).rejects.toBeInstanceOf(WrongCodeError);
     const bobOpen = (await unlockGroup(bob, bob.profiles, groupId, groupCode))!;
     expect(bobOpen.meta.members).toEqual([alice.account.userId, bob.account.userId]);
-    expect((await listGroups(bob)).items[0]).toMatchObject({ name: 'Les Potes', state: { kind: 'locked' } });
+    expect((await listGroups(bob, bob.profiles)).items[0]).toMatchObject({ name: 'Les Potes', state: { kind: 'locked' } });
 
     // Mallory knows the code + keywords (overheard) and asks too: she stays pending until an admin decides.
     expect(await joinGroup(mallory, groupCode, keywords)).toBe(groupId);
     expect((await joinRequests(alice, alice.profiles, groupId)).map((r) => r.userId)).toEqual([mallory.account.userId]);
     await alice.api.rejectMember(groupId, mallory.account.userId);
-    expect(await listGroups(mallory)).toEqual([]);
+    expect(await listGroups(mallory, mallory.profiles)).toEqual([]);
 
     // Chat: Bob sends, Alice reads (live over the WebSocket when available).
     const clientId = newClientId();
@@ -194,7 +194,7 @@ run('app services against the API', () => {
     const local2 = await LocalStore.open(nodeSqlite(), re.masterKey);
     const alice2 = { ...re, vault: newPhone, local: local2, api: new Api(API_URL!, { userId: alice.account.userId, identity: restoredIdentity }) };
     const profiles2 = new ProfileCache(alice2.api, newPhone, re.masterKey);
-    expect((await listGroups(alice2)).items[0]!.state).toEqual({ kind: 'first-unlock', needsKeywords: true });
+    expect((await listGroups(alice2, new ProfileCache(alice2.api, alice2.vault, alice2.masterKey))).items[0]!.state).toEqual({ kind: 'first-unlock', needsKeywords: true });
     await expect(unlockGroup(alice2, profiles2, groupId, groupCode, ['ete', 'plage', 'lune'])).rejects.toBeInstanceOf(WrongCodeError);
     const again = (await unlockGroup(alice2, profiles2, groupId, groupCode, keywords))!;
     expect(again.keyVersion).toBe(2);

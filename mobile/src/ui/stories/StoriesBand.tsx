@@ -1,5 +1,5 @@
 import * as Haptics from 'expo-haptics';
-import { ChevronDown, Plus } from 'lucide-react-native';
+import { Check, ChevronDown, Plus } from 'lucide-react-native';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Animated, FlatList, Image, PanResponder, Pressable, StyleSheet, Text, View } from 'react-native';
 import Svg, { Defs, Pattern, Rect } from 'react-native-svg';
@@ -11,9 +11,9 @@ import { safeToDisplay } from '@/services/jpeg';
 import { Avatar, isAvatarId } from '../avatars';
 import { Led } from '../Led';
 import { Logo } from '../Logo';
-import { colors, fonts, mono } from '../theme';
+import { colors, fonts, hotKey, mono, steel } from '../theme';
 import { agoLabel } from '../chat/timeline';
-import { fitStory, isNew, openingIndex, storyExpiry, storyTap, type StoryMessage } from './stories';
+import { fitStory, isNew, openingIndex, railLabel, storyExpiry, storyTap, type StoryMessage } from './stories';
 
 /** Height of the shutter's bottom rail: the only part of the band that stays in the chat's flow. */
 export const STORIES_RAIL_H = 48;
@@ -28,6 +28,8 @@ const SLAT = 12;
 const SLAT_TILE = 36;
 const SLOT_W = 14;
 const SPRING = { useNativeDriver: true, bounciness: 2, speed: 16 } as const;
+/** How long the rail says "PUBLIÉE" after a story of mine went out. */
+const PUBLISHED_MS = 4000;
 
 type Loaded = { kind: 'loading' } | { kind: 'ready'; jpeg: Uint8Array } | { kind: 'error'; message: string };
 
@@ -79,7 +81,9 @@ function useStoryImage(session: Session, groupId: string, story: StoryMessage, e
  * (or tapped), the photo itself comes down with the rail and is the whole
  * shutter, down to the composer: the photo whole and as large as it fits,
  * centred, and behind it the same photo blurred and stretched to fill the
- * rest (like a story). A tap on the right half goes to the next one, on the
+ * rest (like a story). It shows through the steel grille only as the
+ * shutter goes further down, whole once it is all the way: a band pulled
+ * halfway shows the grille, not the photo. A tap on the right half goes to the next one, on the
  * left half to the previous one, a swipe does the same, and a tap past the
  * last one folds the shutter back. It opens on the first photo not watched
  * yet (oldest first); the photo shown counts as watched. A long press on
@@ -140,7 +144,50 @@ export function StoriesBand({
   // animates, and the shutter would jump for a frame.
   const slide = useMemo(() => Animated.subtract(height, maxH), [height, maxH]);
   const chevron = useMemo(() => height.interpolate({ inputRange: [0, Math.max(1, openH)], outputRange: ['0deg', '180deg'] }), [height, openH]);
+  // What comes down first is the steel grille: the photo only shows through
+  // it as the shutter goes further, whole only once it is all the way down.
+  // A glance at a half-pulled band shows nothing to someone looking over the shoulder.
+  const reveal = useMemo(
+    () => height.interpolate({ inputRange: [0, Math.max(1, openH) * 0.55, Math.max(1, openH)], outputRange: [0, 0.18, 1], extrapolate: 'clamp' }),
+    [height, openH],
+  );
+  // All the way down and at rest: the photo is shown by a plain opacity, not
+  // by \`reveal\`. With the native driver, a re-render during the spring
+  // commits the opacity JS knew then (stale, the grille still on), and the
+  // native side does not always put the right one back once it stops (seen
+  // on iPhone): the photo stayed behind the grille with the shutter open.
+  // Where the last spring came to rest (null: a drag moved it since).
+  const [restAt, setRestAt] = useState<number | null>(null);
+  const atRest = open && openH > 0 && restAt === openH;
+  const springTo = useCallback(
+    (to: number) => {
+      Animated.spring(height, { toValue: to, ...SPRING }).start(({ finished }) => {
+        if (finished) setRestAt(to);
+      });
+    },
+    [height],
+  );
   const fresh = stories.filter((s) => isNew(s, seen)).length;
+  const mine = stories.filter((s) => s.mine).length;
+
+  // A story of mine just went out (the send ended without a refusal): the
+  // rail says so for a moment, the "+" key shows a check, the phone taps
+  // once. Then the rail names it ("LA TIENNE") as long as it is up.
+  const [published, setPublished] = useState(false);
+  const wasSending = useRef(sending);
+  useEffect(() => {
+    const was = wasSending.current;
+    wasSending.current = sending;
+    if (was && !sending && !failed) {
+      setPublished(true);
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    }
+  }, [sending, failed]);
+  useEffect(() => {
+    if (!published) return;
+    const t = setTimeout(() => setPublished(false), PUBLISHED_MS);
+    return () => clearTimeout(t);
+  }, [published]);
 
   // The gesture handler outlives renders: it reads the latest values from refs.
   const latest = useRef({ open, openH, onOpenChange });
@@ -150,10 +197,7 @@ export function StoriesBand({
 
   const settle = useCallback(
     (target: boolean) => {
-      Animated.spring(height, {
-        toValue: target ? latest.current.openH : 0,
-        ...SPRING,
-      }).start();
+      springTo(target ? latest.current.openH : 0);
       if (target !== latest.current.open) {
         void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
         // Known at once, before the parent renders: a gesture callback that
@@ -163,13 +207,13 @@ export function StoriesBand({
         latest.current.onOpenChange(target);
       }
     },
-    [height],
+    [springTo],
   );
 
   // Opened or closed from outside (or from a tap), or the area resized: the shutter follows.
   useEffect(() => {
-    Animated.spring(height, { toValue: open ? openH : 0, ...SPRING }).start();
-  }, [open, openH, height]);
+    springTo(open ? openH : 0);
+  }, [open, openH, springTo]);
 
   // Created once; the refs are only read while a drag runs, never during render.
   // eslint-disable-next-line react-hooks/refs
@@ -181,6 +225,7 @@ export function StoriesBand({
       // left-right swipe of the photos still reach them.
       onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dy) > 6 && Math.abs(g.dy) > Math.abs(g.dx),
       onPanResponderGrant: () => {
+        setRestAt(null);
         height.stopAnimation((v) => {
           from = v;
         });
@@ -254,7 +299,8 @@ export function StoriesBand({
         <View style={[styles.stage, { height: maxH }]}>
           <Shutter />
           {stories.length && area.width > 0 && maxH > 0 ? (
-            <FlatList
+            <Animated.View style={{ height: maxH, opacity: atRest ? 1 : reveal }}>
+              <FlatList
               ref={list}
               horizontal
               pagingEnabled
@@ -283,7 +329,8 @@ export function StoriesBand({
                   onView={onView}
                 />
               )}
-            />
+              />
+            </Animated.View>
           ) : (
             // At the bottom of the stage, like the photos: that is the part that comes down.
             <View style={{ height: openH, justifyContent: 'center' }}>
@@ -308,21 +355,8 @@ export function StoriesBand({
             onPress={() => settle(!open)}
             style={styles.edgeMain}
           >
-            <Led state={failed ? 'red' : fresh ? 'green' : 'off'} size={6} />
-            <Text style={styles.label}>
-              STORIES · 24 H
-              {failed
-                ? ' · ÉCHEC'
-                : sending
-                  ? ' · ENVOI…'
-                  : open && stories.length
-                    ? ` · ${at + 1} / ${stories.length}`
-                    : fresh
-                      ? ` · ${fresh} NOUVELLE${fresh > 1 ? 'S' : ''}`
-                      : stories.length
-                        ? ` · ${stories.length}`
-                        : ''}
-            </Text>
+            <Led state={failed ? 'error' : sending ? 'busy' : published || fresh ? 'ok' : 'off'} size={6} />
+            <Text style={styles.label}>{railLabel({ failed, sending, published, open, index: at, count: stories.length, fresh, mine })}</Text>
             <Animated.View
               style={{
                 transform: [{ rotate: chevron }],
@@ -338,7 +372,13 @@ export function StoriesBand({
             onPress={add}
             style={({ pressed }) => [styles.plus, pressed && styles.plusPressed]}
           >
-            {sending ? <ActivityIndicator color={colors.text} size="small" /> : <Plus size={14} color={colors.text} strokeWidth={3} />}
+            {sending ? (
+              <ActivityIndicator color={colors.text} size="small" />
+            ) : published ? (
+              <Check size={14} color={colors.text} strokeWidth={3} />
+            ) : (
+              <Plus size={14} color={colors.text} strokeWidth={3} />
+            )}
           </Pressable>
           <View style={styles.grip} pointerEvents="none" />
         </View>
@@ -524,7 +564,7 @@ const styles = StyleSheet.create({
     paddingLeft: 16,
     paddingRight: 12,
     paddingBottom: 4,
-    backgroundColor: '#24282B',
+    backgroundColor: steel.key,
     borderTopWidth: 1,
     borderTopColor: 'rgba(255,255,255,0.12)',
   },
@@ -553,11 +593,11 @@ const styles = StyleSheet.create({
     width: 26,
     height: 26,
     borderRadius: 13,
-    backgroundColor: colors.forest,
+    backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  plusPressed: { backgroundColor: '#185A2B' },
+  plusPressed: { backgroundColor: hotKey.facePressed },
   pressed: { transform: [{ scale: 0.97 }] },
   // The photo's box, centred on its page over the blurred backdrop.
   page: {

@@ -131,7 +131,7 @@ export class LocalStore {
     const key = this.k();
     const gid = blindLocalId(groupId, key);
     await this.db.runAsync('DELETE FROM messages WHERE gid = ?', [gid]);
-    for (const name of [records.group(groupId), records.chat(groupId), records.seen(groupId), records.outbox(groupId), records.stories(groupId)]) {
+    for (const name of [records.group(groupId), records.chat(groupId), records.seen(groupId), records.outbox(groupId), records.stories(groupId), records.look(groupId)]) {
       await this.db.runAsync('DELETE FROM records WHERE k = ?', [blindLocalId(name, key)]);
     }
     const blobs = await this.db.getAllAsync<{ name: string }>('SELECT name FROM blobs WHERE gid = ?', [gid]);
@@ -245,6 +245,8 @@ export const records = {
   seen: (id: string) => `seen/${id}`,
   /** Stories already watched in a group: { seen: message ids } (ui/stories). */
   stories: (id: string) => `stories/${id}`,
+  /** How the conversation is drawn on this phone: { look: ChatLook } (ui/chat/look). */
+  look: (id: string) => `look/${id}`,
   /** Messages written but not sent yet (services/outbox.ts). */
   outbox: (id: string) => `outbox/${id}`,
   /** Profiles of people met in groups, by user id. */

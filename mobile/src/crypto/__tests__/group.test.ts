@@ -7,6 +7,7 @@ import {
   encryptMessage,
   generateGroupKey,
   openHandout,
+  openHandoutLabel,
   sealHandout,
   type EncryptedMessage,
   type GroupMeta,
@@ -207,5 +208,51 @@ describe('group metadata', () => {
   it('a malformed meta is refused even when properly signed', () => {
     const bad = encryptGroupMeta({ ...meta, admins: [MALLORY] }, ctx.groupId, 1, groupKey, alice); // admin not a member
     expectCryptoError(() => decryptGroupMeta(bad, alice.signPublicKey, ctx.groupId, 1, groupKey), 'DECRYPT_FAILED');
+  });
+
+  it('a private conversation: the two of them, both admins, no keywords, nobody else', () => {
+    const direct: GroupMeta = { name: '', keywords: [], admins: [ALICE, BOB], members: [ALICE, BOB], rev: 1, direct: true };
+    const open = (m: GroupMeta) => decryptGroupMeta(encryptGroupMeta(m, ctx.groupId, 1, groupKey, alice), alice.signPublicKey, ctx.groupId, 1, groupKey);
+    expect(open(direct)).toEqual(direct);
+    expectCryptoError(() => open({ ...direct, members: [ALICE, BOB, MALLORY], admins: [ALICE, BOB, MALLORY] }), 'DECRYPT_FAILED');
+    expectCryptoError(() => open({ ...direct, admins: [ALICE] }), 'DECRYPT_FAILED');
+    expectCryptoError(() => open({ ...direct, keywords: ['été', 'plage', 'soleil'] }), 'DECRYPT_FAILED');
+    // A group without keywords is not one.
+    expectCryptoError(() => open({ ...meta, keywords: [] }), 'DECRYPT_FAILED');
+  });
+});
+
+describe('handout labels (the group name sealed beside the key)', () => {
+  let wrapKey: Uint8Array;
+  const bobMe = () => ({ ...bob, userId: BOB });
+  beforeAll(async () => {
+    wrapKey = (await deriveGroupSecrets('482913', ['été', 'plage', 'soleil'])).wrapKey;
+  });
+
+  it('opens with the identity alone, before the code; the key still needs the code', () => {
+    const h = sealHandout(groupKey, wrapKey, ctx.groupId, 2, { userId: BOB, boxPublicKey: bob.boxPublicKey }, alice, 'Les potes du 93');
+    expect(openHandoutLabel(h, alice.signPublicKey, ctx.groupId, 2, bobMe())).toBe('Les potes du 93');
+    expect(openHandout(h, alice.signPublicKey, wrapKey, ctx.groupId, 2, bobMe())).toEqual(groupKey);
+  });
+
+  it('a handout without one gives null', () => {
+    const h = sealHandout(groupKey, wrapKey, ctx.groupId, 2, { userId: BOB, boxPublicKey: bob.boxPublicKey }, alice);
+    expect(h.sealedLabel).toBeUndefined();
+    expect(openHandoutLabel(h, alice.signPublicKey, ctx.groupId, 2, bobMe())).toBeNull();
+  });
+
+  it('is cut to 200 characters', () => {
+    const h = sealHandout(groupKey, wrapKey, ctx.groupId, 2, { userId: BOB, boxPublicKey: bob.boxPublicKey }, alice, 'x'.repeat(300));
+    expect(openHandoutLabel(h, alice.signPublicKey, ctx.groupId, 2, bobMe())).toBe('x'.repeat(200));
+  });
+
+  it('refuses a label not signed by the claimed admin, not sealed to us, or moved to another version', () => {
+    const h = sealHandout(groupKey, wrapKey, ctx.groupId, 2, { userId: BOB, boxPublicKey: bob.boxPublicKey }, alice, 'Les potes');
+    const byMallory = sealHandout(groupKey, wrapKey, ctx.groupId, 2, { userId: BOB, boxPublicKey: bob.boxPublicKey }, mallory, 'Les potes');
+    expectCryptoError(() => openHandoutLabel(byMallory, alice.signPublicKey, ctx.groupId, 2, bobMe()), 'BAD_SIGNATURE');
+    expectCryptoError(() => openHandoutLabel(h, alice.signPublicKey, ctx.groupId, 3, bobMe()), 'BAD_SIGNATURE');
+    const forMallory = sealHandout(groupKey, wrapKey, ctx.groupId, 2, { userId: BOB, boxPublicKey: mallory.boxPublicKey }, alice, 'Les potes');
+    expectCryptoError(() => openHandoutLabel(forMallory, alice.signPublicKey, ctx.groupId, 2, bobMe()), 'DECRYPT_FAILED');
+    expectCryptoError(() => openHandoutLabel({ ...h, sealedLabel: '***' }, alice.signPublicKey, ctx.groupId, 2, bobMe()), 'INVALID_INPUT');
   });
 });
