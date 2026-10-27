@@ -51,6 +51,7 @@ const LOGIN_FAILURES_PER_HOUR_ALL = 300; // all usernames together: password spr
 const OPEN_INVITES_PER_USER = 3; // unused and unexpired
 const INVITES_PER_DAY = 10;
 const GROUP_CODES_PER_DAY = 10; // group creations + code changes: each costs two Argon2id hashes
+const DIRECTS_PER_DAY = 30; // private conversations opened
 const MESSAGES_PER_MINUTE = 60;
 const STORY_SECONDS = 24 * 3600; // a story's lifetime (mobile src/crypto/attachment.ts: STORY_TTL_SECONDS)
 const REGISTER_FAILURES_PER_INVITE = 3; // username already taken
@@ -111,7 +112,7 @@ const requireAuth: MiddlewareHandler<Env> = async (c, next) => {
 /** 404 rather than 403, so non-members cannot probe which groups exist. Pending requests are not members yet. */
 async function requireMember(groupId: string, userId: string) {
   const [row] = await db
-    .select({ role: groupMembers.role, currentKeyVersion: groups.currentKeyVersion, ephemeralSeconds: groups.ephemeralSeconds })
+    .select({ role: groupMembers.role, currentKeyVersion: groups.currentKeyVersion, ephemeralSeconds: groups.ephemeralSeconds, kind: groups.kind })
     .from(groupMembers)
     .innerJoin(groups, eq(groups.id, groupMembers.groupId))
     .where(and(eq(groupMembers.groupId, groupId), eq(groupMembers.userId, userId), eq(groupMembers.status, 'active'), groupAlive));
@@ -120,7 +121,7 @@ async function requireMember(groupId: string, userId: string) {
 }
 
 /** Records one `action` for the user, or 429 once the day's quota is spent. Record first, then count: races cannot slip past. */
-async function spendQuota(userId: string, action: 'invite' | 'group_code', perDay: number) {
+async function spendQuota(userId: string, action: 'invite' | 'group_code' | 'direct', perDay: number) {
   await db.insert(userActions).values({ userId, action });
   const [{ count } = { count: 0 }] = await db
     .select({ count: sql<number>`count(*)::int` })
@@ -176,8 +177,11 @@ export const app = new Hono<Env>();
 
 app.onError((err, c) => {
   if (err instanceof HTTPException) return c.json({ error: err.message }, err.status);
-  // Never log request data: only the error class (SPEC §4.7).
-  console.error('[error]', err.name);
+  // Never log request data: only the error class (SPEC §4.7), and for a
+  // failed query the SQLSTATE of its cause (drizzle's own error is a bare
+  // "Error" by name: a missing column read as nothing at all on 25/10).
+  const cause = (err as { cause?: { code?: unknown } }).cause;
+  console.error('[error]', err.constructor.name, typeof cause?.code === 'string' ? cause.code : '');
   return c.json({ error: 'internal' }, 500);
 });
 
@@ -443,6 +447,12 @@ app.get('/profiles', async (c) => {
 const b64Key = b64Bytes({ exact: 32 });
 const sealedKey = b64Bytes({ max: 256 });
 const signature = b64Bytes({ exact: 64 });
+// The group's name sealed to the member beside the key (200 chars of UTF-8 at most, plus the seal's 48 bytes).
+const sealedLabel = b64Bytes({ max: 1024 }).optional();
+const labelSignature = signature.optional();
+/** The label columns of a handout row: both when the phone sent both, none otherwise. */
+const label = (h: { sealedLabel?: string; labelSignature?: string }) =>
+  h.sealedLabel && h.labelSignature ? { sealedLabel: h.sealedLabel, labelSignature: h.labelSignature } : {};
 const encryptedMeta = b64Bytes({ max: 32 * 1024 });
 const ephemeral = z.union([z.literal(86_400), z.literal(604_800)]).nullable();
 
@@ -459,6 +469,8 @@ app.get('/groups', async (c) => {
       rotationPending: groups.rotationPending,
       codeVersion: groups.codeVersion,
       expiresAt: groups.expiresAt,
+      kind: groups.kind,
+      directPair: groups.directPair,
       role: groupMembers.role,
       status: groupMembers.status,
     })
@@ -474,21 +486,32 @@ app.get('/groups', async (c) => {
           sealedKey: groupKeys.sealedKey,
           signerId: groupKeys.signerId,
           signature: groupKeys.signature,
+          sealedLabel: groupKeys.sealedLabel,
+          labelSignature: groupKeys.labelSignature,
+          labelSignerId: groupKeys.labelSignerId,
         })
         .from(groupKeys)
         .where(and(eq(groupKeys.userId, me), inArray(groupKeys.groupId, active.map((r) => r.id))))
     : [];
   return c.json(
-    rows.map((g) =>
+    rows.map(({ directPair, ...g }) =>
       g.status === 'pending'
         ? // Waiting for an admin: nothing of the group yet, not even its meta.
           { id: g.id, status: 'pending' as const, expiresAt: g.expiresAt?.toISOString() ?? null }
         : {
             ...g,
+            // Direct conversation: who the other one is (a hint for the list; the phones go by the signed meta).
+            ...(directPair && { peerId: directPair.split(':').find((u) => u !== me) ?? me }),
             expiresAt: g.expiresAt?.toISOString() ?? null,
             sealedKeys: keys
               .filter((k) => k.groupId === g.id)
-              .map(({ keyVersion, sealedKey, signerId, signature }) => ({ keyVersion, sealedKey, signerId, signature })),
+              .map(({ keyVersion, sealedKey, signerId, signature, sealedLabel, labelSignature, labelSignerId }) => ({
+                keyVersion,
+                sealedKey,
+                signerId,
+                signature,
+                ...(sealedLabel && labelSignature && { sealedLabel, labelSignature, ...(labelSignerId && { labelSignerId }) }),
+              })),
           },
     ),
   );
@@ -504,6 +527,8 @@ app.post('/groups', async (c) => {
       joinKey: b64Key,
       sealedKey,
       keySignature: signature,
+      sealedLabel,
+      labelSignature,
       ephemeralSeconds: ephemeral.optional(),
       // Self-destruct date, chosen at creation only.
       expiresAt: z.iso.datetime().nullable().optional(),
@@ -545,8 +570,72 @@ app.post('/groups', async (c) => {
       sealedKey: input.sealedKey,
       signerId: me,
       signature: input.keySignature,
+      ...label(input),
     });
   });
+  return c.json({ id: input.id, currentKeyVersion: 1 }, 201);
+});
+
+/**
+ * A private conversation with someone we share a group with (SPEC §4.3). The
+ * phone drew its key, sealed it to both of us and signed both handouts and
+ * the meta (the two of us, both admins). No code reaches the server: each
+ * phone locks the key with a code of its own. One conversation per pair.
+ */
+app.post('/groups/direct', async (c) => {
+  const input = await body(
+    c,
+    z.object({
+      id: z.uuid(),
+      peerId: z.uuid(),
+      encryptedMeta,
+      metaSignature: signature,
+      keys: z.array(z.object({ userId: z.uuid(), sealedKey, signature, sealedLabel, labelSignature })).length(2),
+    }),
+  );
+  const me = c.get('userId');
+  const peer = input.peerId;
+  if (peer === me) throw new HTTPException(400, { message: 'invalid_peer' });
+  const sent = new Set(input.keys.map((k) => k.userId));
+  if (sent.size !== 2 || !sent.has(me) || !sent.has(peer)) throw new HTTPException(400, { message: 'invalid_keys' });
+  // Only someone met in a group: no directory of usernames to write to.
+  const shared = await db.execute(sql`
+    select 1 from ${groupMembers} a
+      join ${groupMembers} b on b.group_id = a.group_id
+      join ${groups} g on g.id = a.group_id
+     where a.user_id = ${me} and b.user_id = ${peer} and a.status = 'active' and b.status = 'active'
+       and g.kind = 'group' and (g.expires_at is null or g.expires_at > now())
+     limit 1`);
+  if (!shared.rows.length) throw new HTTPException(404, { message: 'not_found' });
+  await spendQuota(me, 'direct', DIRECTS_PER_DAY);
+  const pair = [me, peer].sort().join(':');
+  await db.transaction(async (tx) => {
+    const inserted = await tx
+      .insert(groups)
+      .values({
+        id: input.id,
+        kind: 'direct',
+        directPair: pair,
+        encryptedMeta: input.encryptedMeta,
+        metaSignerId: me,
+        metaSignature: input.metaSignature,
+        createdBy: me,
+      })
+      .onConflictDoNothing()
+      .returning({ id: groups.id });
+    if (inserted.length === 0) {
+      const [existing] = await tx.select({ id: groups.id }).from(groups).where(eq(groups.directPair, pair));
+      throw new HTTPException(409, { message: existing ? 'direct_exists' : 'group_exists' });
+    }
+    await tx.insert(groupMembers).values([
+      { groupId: input.id, userId: me, role: 'admin', status: 'active' },
+      { groupId: input.id, userId: peer, role: 'admin', status: 'active' },
+    ]);
+    await tx
+      .insert(groupKeys)
+      .values(input.keys.map((k) => ({ groupId: input.id, userId: k.userId, keyVersion: 1, sealedKey: k.sealedKey, signerId: me, signature: k.signature, ...label(k) })));
+  });
+  await notifyAction(input.id, 'direct', [peer]);
   return c.json({ id: input.id, currentKeyVersion: 1 }, 201);
 });
 
@@ -608,7 +697,7 @@ app.get('/groups/:groupId/members', async (c) => {
     .where(eq(groupMembers.groupId, groupId))
     .orderBy(groupMembers.joinedAt);
   const held = await db
-    .select({ userId: groupKeys.userId, keyVersion: groupKeys.keyVersion })
+    .select({ userId: groupKeys.userId, keyVersion: groupKeys.keyVersion, sealedLabel: groupKeys.sealedLabel })
     .from(groupKeys)
     .where(eq(groupKeys.groupId, groupId));
   const members = rows
@@ -617,6 +706,8 @@ app.get('/groups/:groupId/members', async (c) => {
       userId: r.userId,
       role: r.role,
       keyVersions: held.filter((h) => h.userId === r.userId).map((h) => h.keyVersion),
+      // Handouts without the group's name sealed beside the key (from before it): an admin's phone fills them in.
+      unlabelledKeyVersions: held.filter((h) => h.userId === r.userId && !h.sealedLabel).map((h) => h.keyVersion),
     }));
   // Only admins decide on requests; members do not see who knocked.
   const pending =
@@ -626,12 +717,37 @@ app.get('/groups/:groupId/members', async (c) => {
   return c.json({ currentKeyVersion, members, pending });
 });
 
+/**
+ * Admin: the group's name sealed beside handouts that have none (from before
+ * it): filled in, never replaced, signed by this admin (label_signer_id).
+ * The phones verify the signature against that admin's pinned key.
+ */
+app.post('/groups/:groupId/keys/labels', async (c) => {
+  const groupId = groupIdParam(c);
+  const me = c.get('userId');
+  const input = await body(
+    c,
+    z.object({ keys: z.array(z.object({ userId: z.uuid(), keyVersion, sealedLabel: b64Bytes({ max: 1024 }), labelSignature: signature })).min(1).max(5000) }),
+  );
+  await requireAdmin(groupId, me);
+  let labelled = 0;
+  for (const k of input.keys) {
+    const done = await db
+      .update(groupKeys)
+      .set({ sealedLabel: k.sealedLabel, labelSignature: k.labelSignature, labelSignerId: me })
+      .where(and(eq(groupKeys.groupId, groupId), eq(groupKeys.userId, k.userId), eq(groupKeys.keyVersion, k.keyVersion), isNull(groupKeys.sealedLabel)))
+      .returning({ userId: groupKeys.userId });
+    labelled += done.length;
+  }
+  return c.json({ labelled });
+});
+
 /** Admin: accepts a request, handing over the current key and the meta that now lists the newcomer. */
 app.post('/groups/:groupId/members/:userId/approve', async (c) => {
   const groupId = groupIdParam(c);
   const me = c.get('userId');
   const target = uuidParam(c, 'userId');
-  const input = await body(c, z.object({ keyVersion, sealedKey, keySignature: signature, encryptedMeta, metaSignature: signature }));
+  const input = await body(c, z.object({ keyVersion, sealedKey, keySignature: signature, sealedLabel, labelSignature, encryptedMeta, metaSignature: signature }));
   await requireAdmin(groupId, me);
   await db.transaction(async (tx) => {
     const [g] = await tx.select({ currentKeyVersion: groups.currentKeyVersion }).from(groups).where(eq(groups.id, groupId)).for('update');
@@ -649,6 +765,7 @@ app.post('/groups/:groupId/members/:userId/approve', async (c) => {
       sealedKey: input.sealedKey,
       signerId: me,
       signature: input.keySignature,
+      ...label(input),
     });
     await tx
       .update(groups)
@@ -705,6 +822,22 @@ async function removeMember(groupId: string, userId: string, ban: boolean) {
   if (orphaned.length) await deleteObjects(orphaned).catch((e: Error) => console.error('[storage]', e.name));
 }
 
+/** A private conversation goes for both of us at once: its files, then the group (members, keys, messages cascade). */
+async function deleteConversation(groupId: string) {
+  const files = await db.transaction(async (tx) => {
+    const files = await tx.select({ id: attachments.id }).from(attachments).where(eq(attachments.groupId, groupId));
+    await tx.delete(groups).where(eq(groups.id, groupId));
+    return files.map((f) => objectKey(groupId, f.id));
+  });
+  if (files.length) await deleteObjects(files).catch((e: Error) => console.error('[storage]', e.name));
+  realtime.nudge();
+}
+
+/** What only a group with a code has (members coming and going, a code to change): refused for a private conversation. */
+function requireGroupKind(kind: 'group' | 'direct') {
+  if (kind === 'direct') throw new HTTPException(400, { message: 'direct_conversation' });
+}
+
 async function requireAdmin(groupId: string, userId: string) {
   const row = await requireMember(groupId, userId);
   if (row.role !== 'admin') throw new HTTPException(403, { message: 'admin_only' });
@@ -730,7 +863,12 @@ async function activeCount(groupId: string): Promise<number> {
 app.post('/groups/:groupId/leave', async (c) => {
   const groupId = groupIdParam(c);
   const me = c.get('userId');
-  const { role } = await requireMember(groupId, me);
+  const { role, kind } = await requireMember(groupId, me);
+  // Leaving a private conversation deletes it, for the other one too.
+  if (kind === 'direct') {
+    await deleteConversation(groupId);
+    return c.json({ left: true });
+  }
   // Nobody could approve newcomers or rotate keys any more.
   if (role === 'admin' && (await adminCount(groupId)) === 1 && (await activeCount(groupId)) > 1) {
     throw new HTTPException(409, { message: 'handover_required' });
@@ -744,7 +882,7 @@ app.post('/groups/:groupId/leave', async (c) => {
 app.post('/groups/:groupId/members/:userId/remove', async (c) => {
   const groupId = groupIdParam(c);
   const me = c.get('userId');
-  await requireAdmin(groupId, me);
+  requireGroupKind((await requireAdmin(groupId, me)).kind);
   const target = uuidParam(c, 'userId');
   if (target === me) throw new HTTPException(400, { message: 'invalid_member' });
   const [row] = await db
@@ -773,7 +911,7 @@ app.post('/groups/:groupId/rotate', async (c) => {
       encryptedMeta,
       metaSignature: signature,
       admins: z.array(z.uuid()).min(1).max(500),
-      keys: z.array(z.object({ userId: z.uuid(), sealedKey, signature })).min(1).max(500),
+      keys: z.array(z.object({ userId: z.uuid(), sealedKey, signature, sealedLabel, labelSignature })).min(1).max(500),
     }),
   );
   await requireAdmin(groupId, me);
@@ -797,7 +935,7 @@ app.post('/groups/:groupId/rotate', async (c) => {
     const v = g.currentKeyVersion + 1;
     await tx
       .insert(groupKeys)
-      .values(input.keys.map((k) => ({ groupId, userId: k.userId, keyVersion: v, sealedKey: k.sealedKey, signerId: me, signature: k.signature })));
+      .values(input.keys.map((k) => ({ groupId, userId: k.userId, keyVersion: v, sealedKey: k.sealedKey, signerId: me, signature: k.signature, ...label(k) })));
     await tx
       .update(groups)
       .set({ currentKeyVersion: v, encryptedMeta: input.encryptedMeta, metaSignerId: me, metaSignature: input.metaSignature, rotationPending: false })
@@ -823,7 +961,7 @@ app.put('/groups/:groupId/admins', async (c) => {
   const groupId = groupIdParam(c);
   const me = c.get('userId');
   const input = await body(c, z.object({ keyVersion, admins: z.array(z.uuid()).min(1).max(500), encryptedMeta, metaSignature: signature }));
-  await requireAdmin(groupId, me);
+  requireGroupKind((await requireAdmin(groupId, me)).kind);
   await db.transaction(async (tx) => {
     const [g] = await tx.select({ currentKeyVersion: groups.currentKeyVersion }).from(groups).where(eq(groups.id, groupId)).for('update');
     if (!g || g.currentKeyVersion !== input.keyVersion) throw new HTTPException(409, { message: 'stale_key_version' });
@@ -856,10 +994,10 @@ app.put('/groups/:groupId/code', async (c) => {
       keyVersion,
       encryptedMeta,
       metaSignature: signature,
-      keys: z.array(z.object({ userId: z.uuid(), keyVersion, sealedKey, signature })).max(5000),
+      keys: z.array(z.object({ userId: z.uuid(), keyVersion, sealedKey, signature, sealedLabel, labelSignature })).max(5000),
     }),
   );
-  await requireAdmin(groupId, me);
+  requireGroupKind((await requireAdmin(groupId, me)).kind);
   await spendQuota(me, 'group_code', GROUP_CODES_PER_DAY);
   const lookup = joinLookup(fromB64(input.joinKey)!);
   const codeVersion = await db.transaction(async (tx) => {
@@ -887,7 +1025,7 @@ app.put('/groups/:groupId/code', async (c) => {
     if (input.keys.length) {
       await tx
         .insert(groupKeys)
-        .values(input.keys.map((k) => ({ groupId, userId: k.userId, keyVersion: k.keyVersion, sealedKey: k.sealedKey, signerId: me, signature: k.signature })));
+        .values(input.keys.map((k) => ({ groupId, userId: k.userId, keyVersion: k.keyVersion, sealedKey: k.sealedKey, signerId: me, signature: k.signature, ...label(k) })));
     }
     await tx
       .update(groups)

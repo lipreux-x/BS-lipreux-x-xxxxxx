@@ -14,7 +14,9 @@ import {
   CodeChangedError,
   createGroup,
   joinGroup,
+  labelHandouts,
   listGroups,
+  plateName,
   ProfileCache,
   relockGroup,
   rotateNow,
@@ -73,7 +75,16 @@ class FakeServer {
               sealedKeys: r.keys.filter((k) => k.userId === me).map(({ userId: _, ...k }) => k),
             };
           }),
-      createGroup: async (i: { id: string; encryptedMeta: string; metaSignature: string; joinKey: string; sealedKey: string; keySignature: string }) => {
+      createGroup: async (i: {
+        id: string;
+        encryptedMeta: string;
+        metaSignature: string;
+        joinKey: string;
+        sealedKey: string;
+        keySignature: string;
+        sealedLabel?: string;
+        labelSignature?: string;
+      }) => {
         this.groups.set(i.id, {
           id: i.id,
           encryptedMeta: i.encryptedMeta,
@@ -84,7 +95,7 @@ class FakeServer {
           codeVersion: 1,
           rotationPending: false,
           members: new Map([[me, { role: 'admin', status: 'active' }]]),
-          keys: [{ userId: me, keyVersion: 1, sealedKey: i.sealedKey, signerId: me, signature: i.keySignature }],
+          keys: [{ userId: me, keyVersion: 1, sealedKey: i.sealedKey, signerId: me, signature: i.keySignature, sealedLabel: i.sealedLabel, labelSignature: i.labelSignature }],
         });
         return { id: i.id, currentKeyVersion: 1 };
       },
@@ -101,26 +112,55 @@ class FakeServer {
           currentKeyVersion: r.currentKeyVersion,
           members: all
             .filter(([, m]) => m.status === 'active')
-            .map(([userId, m]) => ({ userId, role: m.role, keyVersions: r.keys.filter((k) => k.userId === userId).map((k) => k.keyVersion) })),
+            .map(([userId, m]) => ({
+              userId,
+              role: m.role,
+              keyVersions: r.keys.filter((k) => k.userId === userId).map((k) => k.keyVersion),
+              unlabelledKeyVersions: r.keys.filter((k) => k.userId === userId && !k.sealedLabel).map((k) => k.keyVersion),
+            })),
           pending: all.filter(([, m]) => m.status === 'pending').map(([userId]) => ({ userId, requestedAt: '' })),
         };
       },
-      approveMember: async (id: string, userId: string, i: { keyVersion: number; sealedKey: string; keySignature: string; encryptedMeta: string; metaSignature: string }) => {
+      approveMember: async (
+        id: string,
+        userId: string,
+        i: { keyVersion: number; sealedKey: string; keySignature: string; sealedLabel?: string; labelSignature?: string; encryptedMeta: string; metaSignature: string },
+      ) => {
         const r = g(id);
         if (i.keyVersion !== r.currentKeyVersion) throw new ApiError(409, 'stale_key_version');
         r.members.set(userId, { role: 'member', status: 'active' });
-        r.keys.push({ userId, keyVersion: i.keyVersion, sealedKey: i.sealedKey, signerId: me, signature: i.keySignature });
+        r.keys.push({ userId, keyVersion: i.keyVersion, sealedKey: i.sealedKey, signerId: me, signature: i.keySignature, sealedLabel: i.sealedLabel, labelSignature: i.labelSignature });
         Object.assign(r, { encryptedMeta: i.encryptedMeta, metaSignature: i.metaSignature, metaSignerId: me });
         return { approved: true };
       },
-      rotateKey: async (id: string, i: { fromKeyVersion: number; encryptedMeta: string; metaSignature: string; admins: string[]; keys: { userId: string; sealedKey: string; signature: string }[] }) => {
+      rotateKey: async (
+        id: string,
+        i: {
+          fromKeyVersion: number;
+          encryptedMeta: string;
+          metaSignature: string;
+          admins: string[];
+          keys: { userId: string; sealedKey: string; signature: string; sealedLabel?: string; labelSignature?: string }[];
+        },
+      ) => {
         const r = g(id);
         if (i.fromKeyVersion !== r.currentKeyVersion) throw new ApiError(409, 'stale_key_version');
         const v = r.currentKeyVersion + 1;
-        for (const k of i.keys) r.keys.push({ userId: k.userId, keyVersion: v, sealedKey: k.sealedKey, signerId: me, signature: k.signature });
+        for (const k of i.keys) r.keys.push({ userId: k.userId, keyVersion: v, sealedKey: k.sealedKey, signerId: me, signature: k.signature, sealedLabel: k.sealedLabel, labelSignature: k.labelSignature });
         for (const [uid, m] of r.members) if (m.status === 'active') m.role = i.admins.includes(uid) ? 'admin' : 'member';
         Object.assign(r, { currentKeyVersion: v, rotationPending: false, encryptedMeta: i.encryptedMeta, metaSignature: i.metaSignature, metaSignerId: me });
         return { currentKeyVersion: v };
+      },
+      labelKeys: async (id: string, i: { keys: { userId: string; keyVersion: number; sealedLabel: string; labelSignature: string }[] }) => {
+        const r = g(id);
+        let labelled = 0;
+        for (const k of i.keys) {
+          const row = r.keys.find((x) => x.userId === k.userId && x.keyVersion === k.keyVersion && !x.sealedLabel);
+          if (!row) continue;
+          Object.assign(row, { sealedLabel: k.sealedLabel, labelSignature: k.labelSignature, labelSignerId: me });
+          labelled++;
+        }
+        return { labelled };
       },
       setAdmins: async (id: string, i: { keyVersion: number; admins: string[]; encryptedMeta: string; metaSignature: string }) => {
         const r = g(id);
@@ -197,12 +237,12 @@ describe('group code changes', () => {
     await changeGroupCode(admin, admin.profiles, id, keys, '333333', WORDS);
     const [a, b] = members as [Phone, Phone];
 
-    expect((await listGroups(a)).items[0]!.state).toEqual({ kind: 'locked', codeChanged: true });
+    expect((await listGroups(a, a.profiles)).items[0]!.state).toEqual({ kind: 'locked', codeChanged: true });
     // The code in between opens nothing.
     await expect(unlockGroup(a, a.profiles, id, '222222')).rejects.toBeInstanceOf(WrongCodeError);
     // The newest one does, and from then on it is the code of this phone.
     expect(await unlockGroup(a, a.profiles, id, '333333')).toMatchObject({ codeChanged: false, keyVersion: 1 });
-    expect((await listGroups(a)).items[0]!.state).toEqual({ kind: 'locked', codeChanged: false });
+    expect((await listGroups(a, a.profiles)).items[0]!.state).toEqual({ kind: 'locked', codeChanged: false });
     expect(await unlockGroup(a, a.profiles, id, '333333')).toMatchObject({ codeChanged: false });
     await expect(unlockGroup(a, a.profiles, id, '111111')).rejects.toBeInstanceOf(WrongCodeError);
 
@@ -277,7 +317,8 @@ describe('group code changes', () => {
     await changeGroupCode(admin, admin.profiles, id, keys, '777777', WORDS);
     await approveMember(admin, admin.profiles, id, keys, late.account.userId);
 
-    expect((await listGroups(late)).items[0]!.state).toEqual({ kind: 'first-unlock', needsKeywords: false });
+    // Named before the first unlock: the admin sealed the name to them beside the key.
+    expect((await listGroups(late, late.profiles)).items[0]).toMatchObject({ name: 'Les Potes', state: { kind: 'first-unlock', needsKeywords: false } });
     await expect(unlockGroup(late, late.profiles, id, '111111')).rejects.toBeInstanceOf(WrongCodeError);
     expect(await unlockGroup(late, late.profiles, id, '777777')).toMatchObject({ codeChanged: false });
   });
@@ -292,5 +333,28 @@ describe('group code changes', () => {
     const first = (err as WrongCodeError).attemptsBeforeDelay;
     const err2 = (await unlockGroup(a, a.profiles, id, '999998').catch((e: unknown) => e)) as WrongCodeError;
     expect(err2.attemptsBeforeDelay).toBe(first - 1);
+  });
+});
+
+describe('the group name sealed beside the key', () => {
+  it('an admin fills it in on handouts from before it; the member then sees the name before the code', async () => {
+    const server = new FakeServer();
+    const { admin, id, keys } = await groupWith(server, 0);
+    const late = await phone(server, 'late');
+    await joinGroup(late, '111111', WORDS);
+    await approveMember(admin, admin.profiles, id, keys, late.account.userId);
+    // Handouts written before the sealed name existed.
+    for (const k of server.groups.get(id)!.keys) {
+      delete k.sealedLabel;
+      delete k.labelSignature;
+    }
+    const unnamed = (await listGroups(late, late.profiles)).items[0]!;
+    expect(unnamed).toMatchObject({ name: null, state: { kind: 'first-unlock' } });
+    // Still told apart from other locked groups: by who else is in it.
+    expect(plateName(unnamed)).toBe(`Avec ${admin.account.username}`);
+    const meta = (await admin.vault.meta(id, admin.masterKey))!;
+    expect(await labelHandouts(admin, admin.profiles, id, meta)).toBe(2);
+    expect(await labelHandouts(admin, admin.profiles, id, meta)).toBe(0);
+    expect((await listGroups(late, late.profiles)).items[0]).toMatchObject({ name: 'Les Potes', members: null, state: { kind: 'first-unlock' } });
   });
 });

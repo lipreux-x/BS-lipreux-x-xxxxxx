@@ -58,9 +58,16 @@ export const groups = pgTable(
     encryptedMeta: text('encrypted_meta').notNull(),
     metaSignerId: uuid('meta_signer_id').notNull(),
     metaSignature: text('meta_signature').notNull(),
+    // 'group': entered with its code + keywords. 'direct': a private
+    // conversation between two people who share a group, opened by one of
+    // them; no code on the server (each locks it on their phone with their own).
+    kind: text('kind', { enum: ['group', 'direct'] }).notNull().default('group'),
     // HMAC(GROUP_CODE_PEPPER, joinKey): joinKey is derived on the phone from
     // the group code + keywords, which the server never sees (lib/crypto.ts).
-    joinLookup: text('join_lookup').notNull().unique(),
+    // Null for a direct conversation: nobody joins it.
+    joinLookup: text('join_lookup').unique(),
+    // Direct conversation: its two user ids, sorted, joined by ':'. One per pair.
+    directPair: text('direct_pair').unique(),
     currentKeyVersion: integer('current_key_version').notNull().default(1),
     // Set when a member leaves or is removed: the next member who opens the
     // group draws a new key for those who remain (POST /groups/:id/rotate).
@@ -113,6 +120,14 @@ export const groupKeys = pgTable(
     // phones accept a key only from an admin they trust.
     signerId: uuid('signer_id').notNull(),
     signature: text('signature').notNull(),
+    // The group's name, crypto_box_seal'd to the member alone (no code needed)
+    // and signed by the same admin: shown on their locked plate before the
+    // first unlock. Null on handouts from before it.
+    sealedLabel: text('sealed_label'),
+    labelSignature: text('label_signature'),
+    // Who signed the label when it was filled in later by another admin (POST
+    // /groups/:id/keys/labels); null when the handout's signer did.
+    labelSignerId: uuid('label_signer_id'),
   },
   (t) => [primaryKey({ columns: [t.groupId, t.userId, t.keyVersion] })],
 );
@@ -248,7 +263,7 @@ export const userActions = pgTable(
     userId: uuid('user_id')
       .notNull()
       .references(() => profiles.id, { onDelete: 'cascade' }),
-    action: text('action', { enum: ['invite', 'group_code'] }).notNull(),
+    action: text('action', { enum: ['invite', 'group_code', 'direct'] }).notNull(),
     at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index('user_actions_user_time_idx').on(t.userId, t.action, t.at)],

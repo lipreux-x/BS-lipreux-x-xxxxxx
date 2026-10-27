@@ -28,7 +28,7 @@ const TIMEOUT_MS = 3000;
 /** How long one PUT /me/presence counts (the app renews it every 30 s). */
 export const PRESENCE_SECONDS = 75;
 
-export type PushKind = 'message' | 'join_request' | 'approved' | 'member_left' | 'code_changed';
+export type PushKind = 'message' | 'join_request' | 'approved' | 'member_left' | 'code_changed' | 'direct';
 export type ActionKind = Exclude<PushKind, 'message'>;
 
 export const PUSH_TITLE = 'BaseSecrète';
@@ -39,6 +39,7 @@ export const PUSH_BODY: Record<PushKind, string> = {
   approved: 'Demande acceptée : entre le code du groupe',
   member_left: 'Un membre est parti : la clé du groupe est à renouveler',
   code_changed: 'Le code du groupe a changé : entre le nouveau',
+  direct: 'Nouvelle discussion privée : choisis son code',
 };
 
 export const PUSH_TOKEN = /^(ExponentPushToken|ExpoPushToken)\[[A-Za-z0-9_-]{10,200}\]$/;

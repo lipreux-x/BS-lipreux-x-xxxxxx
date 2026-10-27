@@ -1,0 +1,1 @@
+ALTER TABLE "group_keys" ADD COLUMN "label_signer_id" uuid;

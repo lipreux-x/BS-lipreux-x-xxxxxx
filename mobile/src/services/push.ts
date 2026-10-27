@@ -59,8 +59,8 @@ const STORE_KEY = 'bs.notif';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_NAME = 60;
 
-export type PushKind = 'message' | 'join_request' | 'approved' | 'member_left' | 'code_changed';
-const KINDS: readonly PushKind[] = ['message', 'join_request', 'approved', 'member_left', 'code_changed'];
+export type PushKind = 'message' | 'join_request' | 'approved' | 'member_left' | 'code_changed' | 'direct';
+const KINDS: readonly PushKind[] = ['message', 'join_request', 'approved', 'member_left', 'code_changed', 'direct'];
 const isKind = (k: unknown): k is PushKind => typeof k === 'string' && (KINDS as readonly string[]).includes(k);
 
 /** What the group waits for, under its name. */
@@ -69,6 +69,7 @@ const ACTION_BODY: Record<Exclude<PushKind, 'message'>, string> = {
   approved: 'Demande acceptée : entre le code du groupe',
   member_left: 'Un membre est parti : clé à renouveler',
   code_changed: 'Le code a changé : entre le nouveau',
+  direct: 'Nouvelle discussion privée : choisis ton code',
 };
 
 interface Push {

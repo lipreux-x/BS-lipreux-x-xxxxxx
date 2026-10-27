@@ -1,4 +1,5 @@
 import { router, Stack, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { LockKeyhole, MessageSquareLock } from 'lucide-react-native';
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -8,12 +9,20 @@ import { useInsideGroup } from '@/session/useInsideGroup';
 import { ApiError, NetworkError } from '@/services/api';
 import { groupInfo, leaveGroup, type GroupInfo, type GroupInfoMember } from '@/services/groupInfo';
 import { CodeChangedError, fingerprintOf, GroupTamperedError, KeyChangedError, rotateNow, setAdmins } from '@/services/groups';
+import { records } from '@/services/localStore';
 import { LockedOutError, WrongCodeError } from '@/services/vault';
 import { Avatar, isAvatarId } from '@/ui/avatars';
+import { CHAT_LOOKS, chatLook, type ChatLook } from '@/ui/chat/look';
 import { countdownLabel, dateTimeLabel } from '@/ui/chat/timeline';
 import { CodeEntry } from '@/ui/CodeEntry';
 import { useDialog } from '@/ui/Dialog';
-import { colors, space, type } from '@/ui/theme';
+import { Key } from '@/ui/Key';
+import { Label } from '@/ui/Label';
+import { panelStyle } from '@/ui/Panel';
+import { screenStyle } from '@/ui/Screen';
+import { Segment } from '@/ui/Segment';
+import { Working } from '@/ui/Working';
+import { colors, fonts, lcd, mono, neon, space, type } from '@/ui/theme';
 
 const EPHEMERAL: { label: string; seconds: number | null }[] = [
   { label: 'Désactivés', seconds: null },
@@ -23,8 +32,13 @@ const EPHEMERAL: { label: string; seconds: number | null }[] = [
 
 /**
  * Group settings (SPEC §7): keywords, members (admin first), disappearing
- * messages, leave. Admins also remove members (the key is rotated right
+ * messages, the look of the conversation on this phone, leave. Admins also remove members (the key is rotated right
  * away) and change the code. Only reachable from an open group.
+ *
+ * Each other member can be written to in private (a conversation of two,
+ * group/direct). A private conversation's own sheet has no keywords, no code
+ * to change and nobody to remove: the other person (their safety number),
+ * the same settings, and « Supprimer la discussion », for both.
  */
 export default function GroupSettings() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -41,6 +55,18 @@ export default function GroupSettings() {
   const [keywordsShown, setKeywordsShown] = useState<'hidden' | 'asking' | 'shown'>('hidden');
   const [lockedFor, setLockedFor] = useState(0);
   useEffect(() => () => setKeywordsShown('hidden'), []);
+  // The look of the conversation: this phone's own choice, sealed in its local store (undefined: not read yet).
+  const [look, setLook] = useState<ChatLook | undefined>(undefined);
+  useEffect(() => {
+    session.local
+      .getRecord<{ look: unknown }>(records.look(id))
+      .then((r) => setLook(chatLook(r?.look)))
+      .catch(() => setLook('terminal'));
+  }, [session, id]);
+  function chooseLook(next: ChatLook) {
+    setLook(next);
+    session.local.setRecord(records.look(id), { look: next }).catch(() => {});
+  }
 
   /** The group code against the key locked on this phone: a wrong one counts as an attempt, like at the door. */
   async function revealKeywords(code: string) {
@@ -102,7 +128,7 @@ export default function GroupSettings() {
               const open = openGroups.get(id);
               if (open) {
                 const r = await rotateNow(session, profiles, id, open.keys);
-                openGroups.set(id, { keys: r.keys, keyVersion: r.keyVersion, name: r.meta.name });
+                openGroups.set(id, { keys: r.keys, keyVersion: r.keyVersion, name: r.name });
               }
               load();
             }, 'Impossible de retirer ce membre'),
@@ -120,6 +146,29 @@ export default function GroupSettings() {
       f.keyChanged
         ? `Attention : ses clés ont changé depuis que ce téléphone les a vues. Ses nouveaux messages ne sont pas considérés comme les siens.\n\nNuméro connu :\n${f.fingerprint}`
         : `${f.fingerprint}\n\nCompare ces chiffres avec ceux affichés dans Réglages sur son téléphone (Mon numéro de sécurité). Identiques : c’est bien lui, personne n’a remplacé ses clés.`,
+    );
+  }
+
+  /** A private conversation goes for both of us, with everything in it. */
+  function deleteDirect(i: GroupInfo) {
+    dialog(
+      'Supprimer la discussion ?',
+      `Elle sera effacée pour toi et pour ${i.name ?? 'l’autre'} : messages, photos, vocaux et clés. Impossible de revenir en arrière.`,
+      [
+        { text: 'Annuler', style: 'cancel' },
+        {
+          text: 'Supprimer',
+          style: 'destructive',
+          onPress: () =>
+            void run(async () => {
+              await leaveGroup(session, id, i.keyVersion);
+              const open = openGroups.get(id);
+              if (open) for (const k of open.keys.values()) wipe(k);
+              openGroups.delete(id);
+              router.dismissAll();
+            }, 'Impossible de supprimer la discussion'),
+        },
+      ],
     );
   }
 
@@ -168,61 +217,64 @@ export default function GroupSettings() {
   if (!info) {
     return (
       <View style={styles.center}>
-        {error ? <Text style={styles.error}>{error}</Text> : <ActivityIndicator color={colors.accentFg} />}
+        {error ? <Text style={styles.error}>{error}</Text> : <Working />}
       </View>
     );
   }
 
   const admin = info.myRole === 'admin';
+  const direct = info.direct;
+  // In a private conversation, only the other person is listed.
+  const shown = direct ? info.members.filter((m) => !m.me) : info.members;
   return (
     // Edge to edge: "Quitter le groupe" stays above the navigation bar / home indicator.
     <ScrollView style={styles.screen} contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + space.xl }]}>
       {info.name ? <Stack.Screen options={{ title: info.name }} /> : null}
       {dialogView}
 
-      <Text style={styles.section}>Mots-clés pour rejoindre</Text>
-      <View style={styles.card}>
-        {keywordsShown === 'shown' ? (
-          <>
-            <View style={styles.keywords}>
-              {(info.keywords ?? []).map((k, i) => (
-                <View key={i} style={styles.chip}>
-                  <Text style={styles.chipText}>{k}</Text>
-                </View>
-              ))}
-            </View>
-            <Pressable accessibilityRole="button" onPress={() => setKeywordsShown('hidden')} style={styles.reveal}>
-              <Text style={styles.revealText}>Masquer</Text>
-            </Pressable>
-            <Text style={[type.dim, styles.note]}>À donner en vrai avec le code, jamais par message.</Text>
-          </>
-        ) : keywordsShown === 'asking' ? (
-          <>
-            <CodeEntry title="Code du groupe" subtitle="Pour afficher les mots-clés." onComplete={revealKeywords} lockedForMs={lockedFor} />
-            <Pressable accessibilityRole="button" onPress={() => setKeywordsShown('hidden')} hitSlop={8} style={styles.link}>
-              <Text style={styles.linkText}>Annuler</Text>
-            </Pressable>
-          </>
-        ) : (
-          <>
-            <View style={styles.keywords}>
-              {(info.keywords ?? []).map((k, i) => (
-                <View key={i} style={[styles.chip, styles.chipHidden]}>
-                  <Text style={styles.chipText}>{'•'.repeat(Math.max(4, Math.min(8, k.length)))}</Text>
-                </View>
-              ))}
-            </View>
-            <Pressable accessibilityRole="button" onPress={() => setKeywordsShown('asking')} style={styles.reveal} disabled={!info.keywords}>
-              <Text style={styles.revealText}>Afficher · code du groupe</Text>
-            </Pressable>
-            <Text style={[type.dim, styles.note]}>Masqués tant que le code du groupe n’est pas retapé. À donner en vrai avec le code, jamais par message.</Text>
-          </>
-        )}
-      </View>
+      {direct ? null : (
+        <>
+        <Label style={styles.section}>Mots-clés pour rejoindre</Label>
+        <View style={styles.card}>
+          {keywordsShown === 'shown' ? (
+            <>
+              <View style={styles.keywords}>
+                {(info.keywords ?? []).map((k, i) => (
+                  <View key={i} style={styles.chip}>
+                    <Text style={styles.chipText}>{k}</Text>
+                  </View>
+                ))}
+              </View>
+              <Key size="sm" tone="cold" label="Masquer" style={styles.reveal} onPress={() => setKeywordsShown('hidden')} />
+              <Text style={[type.dim, styles.note]}>À donner en vrai avec le code, jamais par message.</Text>
+            </>
+          ) : keywordsShown === 'asking' ? (
+            <>
+              <CodeEntry title="Code du groupe" subtitle="Pour afficher les mots-clés." onComplete={revealKeywords} lockedForMs={lockedFor} />
+              <Pressable accessibilityRole="button" onPress={() => setKeywordsShown('hidden')} hitSlop={8} style={styles.link}>
+                <Text style={styles.linkText}>Annuler</Text>
+              </Pressable>
+            </>
+          ) : (
+            <>
+              <View style={styles.keywords}>
+                {(info.keywords ?? []).map((k, i) => (
+                  <View key={i} style={[styles.chip, styles.chipHidden]}>
+                    <Text style={[styles.chipText, styles.chipTextHidden]}>{'•'.repeat(Math.max(4, Math.min(8, k.length)))}</Text>
+                  </View>
+                ))}
+              </View>
+              <Key size="sm" tone="cold" label="Afficher · code du groupe" style={styles.reveal} disabled={!info.keywords} onPress={() => setKeywordsShown('asking')} />
+              <Text style={[type.dim, styles.note]}>Masqués tant que le code du groupe n’est pas retapé. À donner en vrai avec le code, jamais par message.</Text>
+            </>
+          )}
+        </View>
+        </>
+      )}
 
-      <Text style={styles.section}>Membres · {info.members.length}</Text>
+      <Label style={styles.section}>{direct ? 'Discussion privée' : `Membres · ${info.members.length}`}</Label>
       <View style={styles.card}>
-        {info.members.map((m, i) => (
+        {shown.map((m, i) => (
           <View key={m.userId} style={[styles.row, i > 0 && styles.divider]}>
             <Avatar id={isAvatarId(m.avatar) ? m.avatar : null} size={36} />
             <Pressable style={{ flex: 1 }} disabled={m.me} onPress={() => void showFingerprint(m)} accessibilityRole="button">
@@ -234,12 +286,25 @@ export default function GroupSettings() {
               {m.unknown ? <Text style={styles.danger}>Pas accepté par un admin : ne reçoit pas la clé</Text> : null}
               {!m.me && !m.keyChanged && !m.unknown ? <Text style={type.dim}>Voir son numéro de sécurité</Text> : null}
             </Pressable>
-            {m.role === 'admin' ? (
+            {m.role === 'admin' && !direct ? (
               <View style={styles.badge}>
                 <Text style={styles.badgeText}>Admin</Text>
               </View>
             ) : null}
-            {admin && !m.me ? (
+            {!direct && !m.me && !m.unknown && !m.keyChanged ? (
+              <Pressable
+                hitSlop={8}
+                disabled={busy}
+                accessibilityRole="button"
+                accessibilityLabel={`Écrire en privé à ${m.username}`}
+                // The settings sheet gives way to the new conversation.
+                onPress={() => router.replace({ pathname: '/group/direct', params: { peer: m.userId } })}
+                style={styles.directBtn}
+              >
+                <MessageSquareLock size={20} color={colors.accentFg} strokeWidth={2} />
+              </Pressable>
+            ) : null}
+            {admin && !m.me && !direct ? (
               <Pressable hitSlop={8} disabled={busy} onPress={() => remove(m)} style={styles.removeBtn}>
                 <Text style={styles.danger}>Retirer</Text>
               </Pressable>
@@ -248,30 +313,30 @@ export default function GroupSettings() {
         ))}
       </View>
 
-      <Text style={styles.section}>Messages éphémères</Text>
+      <Label style={styles.section}>Affichage de la discussion</Label>
       <View style={styles.card}>
-        <View style={styles.segment}>
-          {EPHEMERAL.map((o) => {
-            const on = info.ephemeralSeconds === o.seconds;
-            return (
-              <Pressable
-                key={o.label}
-                disabled={!admin || busy || on}
-                accessibilityRole="button"
-                accessibilityState={{ selected: on }}
-                onPress={() =>
-                  void run(async () => {
-                    await session.api.setEphemeral(id, o.seconds);
-                    load();
-                  }, 'Impossible de changer ce réglage')
-                }
-                style={[styles.option, on && styles.optionOn]}
-              >
-                <Text style={[styles.optionText, on && styles.optionTextOn]}>{o.label}</Text>
-              </Pressable>
-            );
-          })}
-        </View>
+        <Segment options={CHAT_LOOKS} value={look} onChange={chooseLook} />
+        <Text style={[type.dim, styles.note]}>
+          {look === 'plates'
+            ? 'Chaque message sur sa plaque, avec l’avatar et le nom de qui l’a écrit.'
+            : 'Chaque message comme une ligne de terminal, sans avatar.'}{' '}
+          Sur ce téléphone seulement : ce choix reste chiffré ici, le serveur ne le voit pas.
+        </Text>
+      </View>
+
+      <Label style={styles.section}>Messages éphémères</Label>
+      <View style={styles.card}>
+        <Segment
+          options={EPHEMERAL.map((o) => ({ label: o.label, value: o.seconds }))}
+          value={info.ephemeralSeconds}
+          disabled={!admin || busy}
+          onChange={(seconds) =>
+            void run(async () => {
+              await session.api.setEphemeral(id, seconds);
+              load();
+            }, 'Impossible de changer ce réglage')
+          }
+        />
         <Text style={[type.dim, styles.note]}>
           {admin ? 'Les nouveaux messages s’effaceront après ce délai.' : 'Seul un admin peut changer ce réglage.'}
         </Text>
@@ -279,7 +344,7 @@ export default function GroupSettings() {
 
       {info.expiresAt ? (
         <>
-          <Text style={styles.section}>Autodestruction</Text>
+          <Label style={styles.section}>Autodestruction</Label>
           <View style={styles.card}>
             <Text style={type.body}>
               {dateTimeLabel(new Date(info.expiresAt), new Date())} ({countdownLabel(new Date(info.expiresAt), new Date())})
@@ -293,7 +358,7 @@ export default function GroupSettings() {
 
       {admin ? (
         <>
-          <Text style={styles.section}>Effacer des messages</Text>
+          <Label style={styles.section}>Effacer des messages</Label>
           <View style={styles.card}>
             <Text style={type.dim}>
               Dans la conversation, appuie longuement sur une date pour effacer ce jour, ce jour et la veille, ou la semaine jusqu’à ce jour. Effacé pour tous les membres, photos comprises.
@@ -304,10 +369,13 @@ export default function GroupSettings() {
 
       <View style={[styles.card, styles.actions]}>
         <Pressable disabled={busy} onPress={close} style={[styles.action, styles.separator]}>
-          <Text style={type.body}>🔒 Fermer le coffre</Text>
+          <View style={styles.actionRow}>
+            <LockKeyhole size={16} color={colors.accentFg} />
+            <Text style={type.body}>Fermer le coffre</Text>
+          </View>
           <Text style={type.dim}>Le code sera redemandé pour rouvrir la discussion.</Text>
         </Pressable>
-        {admin ? (
+        {admin && !direct ? (
           <Pressable
             disabled={busy}
             onPress={() => router.push({ pathname: '/group/code', params: { id } })}
@@ -316,8 +384,9 @@ export default function GroupSettings() {
             <Text style={type.body}>Changer le code et les mots-clés</Text>
           </Pressable>
         ) : null}
-        <Pressable disabled={busy} onPress={() => leave(info)} style={styles.action}>
-          <Text style={styles.danger}>Quitter le groupe</Text>
+        <Pressable disabled={busy} onPress={() => (direct ? deleteDirect(info) : leave(info))} style={styles.action}>
+          <Text style={styles.danger}>{direct ? 'Supprimer la discussion' : 'Quitter le groupe'}</Text>
+          {direct ? <Text style={type.dim}>Pour vous deux, avec tout ce qu’elle contient.</Text> : null}
         </Pressable>
       </View>
       {busy ? <ActivityIndicator color={colors.accentFg} style={{ marginTop: space.md }} /> : null}
@@ -338,29 +407,27 @@ const styles = StyleSheet.create({
   content: { padding: space.lg, gap: space.sm, paddingBottom: space.xl },
   center: { flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center' },
   error: { color: colors.danger },
-  section: { color: colors.textDim, fontSize: 13, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.8, marginTop: space.md },
-  card: { backgroundColor: colors.surface, borderRadius: 12, borderWidth: 1, borderColor: colors.border, padding: space.md },
+  section: { marginTop: space.md },
+  card: { ...panelStyle, padding: space.md },
   keywords: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
-  chip: { backgroundColor: colors.accent, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 },
-  chipText: { color: colors.text, fontSize: 16, fontWeight: '600' },
-  chipHidden: { backgroundColor: colors.surface2, opacity: 0.8 },
-  reveal: { marginTop: space.md, alignSelf: 'flex-start', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 8, borderWidth: 1, borderColor: colors.border },
-  revealText: { color: colors.accentFg, fontSize: 14, fontWeight: '600' },
+  // The keywords on the safe's screen: lit characters, dark while hidden.
+  chip: { ...screenStyle, borderRadius: 6, paddingHorizontal: 12, paddingVertical: 8 },
+  chipText: { color: lcd.on, fontFamily: mono, fontSize: 16, letterSpacing: 1, ...neon.text(lcd.on, 6) },
+  chipTextHidden: { color: lcd.off, textShadowRadius: 0 },
+  chipHidden: {},
+  reveal: { marginTop: space.md, alignSelf: 'flex-start' },
   link: { marginTop: space.sm, alignSelf: 'center', paddingVertical: space.sm, paddingHorizontal: space.md },
   linkText: { color: colors.textDim, fontSize: 15 },
   note: { marginTop: space.md, fontSize: 13 },
   row: { flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingVertical: space.sm },
   divider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
   badge: { borderWidth: 1, borderColor: colors.accentFg, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2 },
-  badgeText: { color: colors.accentFg, fontSize: 12, fontWeight: '600' },
+  badgeText: { color: colors.accentFg, fontSize: 12, fontFamily: fonts.semibold },
   removeBtn: { paddingLeft: space.sm },
+  directBtn: { paddingHorizontal: space.xs },
   danger: { color: colors.danger, fontSize: 15 },
-  segment: { flexDirection: 'row', gap: space.sm },
-  option: { flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: colors.border },
-  optionOn: { backgroundColor: colors.accent, borderColor: colors.accentFg },
-  optionText: { color: colors.textDim, fontSize: 14 },
-  optionTextOn: { color: colors.text, fontWeight: '600' },
   actions: { marginTop: space.lg, paddingVertical: 0 },
   action: { paddingVertical: space.md },
+  actionRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   separator: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
 });

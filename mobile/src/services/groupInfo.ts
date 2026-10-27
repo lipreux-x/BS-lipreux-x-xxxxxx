@@ -1,5 +1,5 @@
 import { ApiError } from './api';
-import { forgetGroup, type ProfileCache, type Session } from './groups';
+import { forgetGroup, peerOf, type ProfileCache, type Session } from './groups';
 
 export interface GroupInfoMember {
   userId: string;
@@ -14,7 +14,10 @@ export interface GroupInfoMember {
 }
 
 export interface GroupInfo {
+  /** The group's name; for a private conversation, the other person's username. */
   name: string | null;
+  /** A private conversation: no keywords, no code to change, nobody to remove; leaving deletes it for both. */
+  direct: boolean;
   keywords: string[] | null;
   members: GroupInfoMember[]; // admins first, then by username
   myRole: 'admin' | 'member';
@@ -45,8 +48,10 @@ export async function groupInfo(s: Session, profiles: ProfileCache, groupId: str
     unknown: !!meta && !meta.members.includes(m.userId),
   }));
   rows.sort((a, b) => (a.role === b.role ? a.username.localeCompare(b.username) : a.role === 'admin' ? -1 : 1));
+  const peer = meta ? peerOf(meta, s.account.userId) : null;
   return {
-    name: meta?.name ?? null,
+    name: peer ? (rows.find((r) => r.userId === peer)?.username ?? null) : (meta?.name ?? null),
+    direct: g.kind === 'direct',
     keywords: meta?.keywords ?? null,
     members: rows,
     myRole: meta?.admins.includes(s.account.userId) ? 'admin' : 'member',

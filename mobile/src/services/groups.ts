@@ -6,6 +6,7 @@ import {
   decryptGroupMeta,
   decryptMessage,
   deriveGroupSecrets,
+  directWrapKey,
   encodeMessageBody,
   encryptAttachment,
   encryptGroupMeta,
@@ -13,11 +14,13 @@ import {
   generateGroupKey,
   MAX_ATTACHMENT_BYTES,
   openHandout,
+  openHandoutLabel,
   parseMessageBody,
   keyFingerprint,
   parsePublicIdentity,
   sameKeywords,
   sealHandout,
+  sealLabel,
   STORY_TTL_SECONDS,
   type FileBody,
   type GroupMeta,
@@ -62,6 +65,11 @@ import type { StoredGroupSecret, UnlockedVault, Vault } from './vault';
  * - offline: the last group list from the server is kept in the local store
  *   (handouts included), so the list shows and a group unlocks without
  *   network, with the same checks (code, signatures, meta revision).
+ * - private conversation (createDirect): a group of two, opened from a group
+ *   both are in. No code + keywords: its handouts open with the identity
+ *   alone (crypto/group.ts directWrapKey), and each phone locks the key under
+ *   a code of its own, chosen at the first unlock. Nobody joins, leaves or
+ *   rotates; leaving deletes it for both.
  */
 
 /** Group keys by version (messages carry the version they were sent with). */
@@ -82,7 +90,14 @@ export type GroupLockState =
 
 export interface GroupListItem {
   id: string;
-  name: string | null; // null until the group was unlocked once on this phone
+  /** From the meta once the group was unlocked on this phone; before that, the name an admin sealed to us beside the key; null without either. */
+  name: string | null;
+  /**
+   * Without a name: who else is in it (usernames, as the server lists them),
+   * so that locked groups can still be told apart. Null with a name, for a
+   * pending group, or offline.
+   */
+  members: string[] | null;
   keyVersion: number;
   role: 'admin' | 'member';
   state: GroupLockState;
@@ -92,6 +107,18 @@ export interface GroupListItem {
   unread: number;
   /** When the conversation was last on screen on this phone (ms), null if never. */
   openedAt: number | null;
+  /** A private conversation: `name` is the other person's username. */
+  direct: boolean;
+  /** Private conversation: the other person (from the verified meta once opened here, the server's hint before). */
+  peerId: string | null;
+  /** Private conversation: the other person's avatar icon id. */
+  avatar: string | null;
+}
+
+/** The name on a group's plate: its own, or "Avec …" its other members when the phone has none yet; null with neither. */
+export function plateName(item: GroupListItem): string | null {
+  if (item.name) return item.name;
+  return item.members?.length ? `Avec ${item.members.join(', ')}` : null;
 }
 
 /** What the phone keeps of a conversation's reading: the last seq shown, and when it was last on screen. */
@@ -140,7 +167,17 @@ const isActive = (g: GroupSummary | PendingGroupSummary): g is GroupSummary => g
  * request refused) is erased from the phone too: keys, name, counters,
  * messages. Without network: the last list saved on the phone (`offline`).
  */
-export async function listGroups(s: Session): Promise<{ items: GroupListItem[]; offline: boolean }> {
+/**
+ * The last list built for this session, in memory only (gone with the session
+ * when the app locks): a group's screen starts from it at once, then refreshes.
+ */
+const lastListed = new WeakMap<Session, GroupListItem[]>();
+
+export function listedGroups(s: Session): GroupListItem[] | undefined {
+  return lastListed.get(s);
+}
+
+export async function listGroups(s: Session, profiles: ProfileCache): Promise<{ items: GroupListItem[]; offline: boolean }> {
   const { groups, offline } = await fetchGroups(s);
   if (!offline) {
     const alive = new Set(groups.map((g) => g.id));
@@ -153,22 +190,46 @@ export async function listGroups(s: Session): Promise<{ items: GroupListItem[]; 
   const items = await Promise.all(
     groups.map(async (g): Promise<GroupListItem> => {
       const openedAt = seen.get(g.id)?.at ?? null;
-      return isActive(g)
-        ? {
-            id: g.id,
-            name: (await s.vault.meta(g.id, s.masterKey))?.name ?? null,
-            keyVersion: g.currentKeyVersion,
-            role: g.role,
-            state: await lockState(s, g),
-            expiresAt: g.expiresAt ?? null,
-            unread: unread[g.id] ?? 0,
-            openedAt,
-          }
-        : { id: g.id, name: null, keyVersion: 0, role: 'member', state: { kind: 'pending' }, expiresAt: g.expiresAt ?? null, unread: 0, openedAt };
+      if (!isActive(g)) {
+        return {
+          id: g.id,
+          name: null,
+          members: null,
+          keyVersion: 0,
+          role: 'member',
+          state: { kind: 'pending' },
+          expiresAt: g.expiresAt ?? null,
+          unread: 0,
+          openedAt,
+          direct: false,
+          peerId: null,
+          avatar: null,
+        };
+      }
+      const meta = await s.vault.meta(g.id, s.masterKey);
+      const direct = g.kind === 'direct';
+      const peerId = direct ? ((meta && peerOf(meta, s.account.userId)) ?? g.peerId ?? null) : null;
+      const peer = peerId ? (await profiles.get([peerId]).catch(() => new Map<string, KnownProfile>())).get(peerId) : undefined;
+      const name = direct ? (peer?.username ?? (await handoutName(s, profiles, g))) : (meta?.name ?? (await handoutName(s, profiles, g)));
+      return {
+        id: g.id,
+        name,
+        members: name === null && !offline && !direct ? await otherMembers(s, profiles, g.id) : null,
+        keyVersion: g.currentKeyVersion,
+        role: g.role,
+        state: await lockState(s, g),
+        expiresAt: g.expiresAt ?? null,
+        unread: unread[g.id] ?? 0,
+        openedAt,
+        direct,
+        peerId,
+        avatar: peer?.avatar ?? null,
+      };
     }),
   );
   // Opened last on top; never opened after, in the server's order.
   items.sort((a, b) => (b.openedAt ?? 0) - (a.openedAt ?? 0));
+  lastListed.set(s, items);
   return { items, offline };
 }
 
@@ -223,6 +284,51 @@ export async function forgetGroup(s: Session, groupId: string, upTo: number) {
   await s.local.forgetGroup(groupId).catch(() => {});
 }
 
+/**
+ * Before the first unlock on this phone (the meta is still sealed under the
+ * group key): the name an admin sealed to us beside a key, newest version
+ * first, from a signer whose key is pinned. Null without one, or offline
+ * with an unknown signer: the plate then says "Groupe verrouillé".
+ */
+async function handoutName(s: Session, profiles: ProfileCache, g: GroupSummary): Promise<string | null> {
+  const labelled = g.sealedKeys.filter((h) => h.sealedLabel && h.labelSignature).sort((a, b) => b.keyVersion - a.keyVersion);
+  if (!labelled.length) return null;
+  try {
+    const signers = await profiles.trustedKeys([...new Set(labelled.map((h) => h.labelSignerId ?? h.signerId))]);
+    for (const h of labelled) {
+      const signer = signers.get(h.labelSignerId ?? h.signerId);
+      if (!signer) continue;
+      try {
+        return openHandoutLabel(h, signer.signPublicKey, g.id, h.keyVersion, { ...s.identity, userId: s.account.userId });
+      } catch {
+        // Forged or not for us: the next one may do.
+      }
+    }
+  } catch {
+    // Profiles unreachable: no name this time.
+  }
+  return null;
+}
+
+/**
+ * A group with no name on this phone (from before the sealed name, until an
+ * admin opens it): the usernames of the others in it, admins first. Only a
+ * hint to tell plates apart, nothing is verified. Null if unreachable.
+ */
+async function otherMembers(s: Session, profiles: ProfileCache, groupId: string): Promise<string[] | null> {
+  try {
+    const { members } = await s.api.members(groupId);
+    const others = members.filter((m) => m.userId !== s.account.userId).sort((a, b) => (a.role === b.role ? 0 : a.role === 'admin' ? -1 : 1));
+    const known = await profiles.get(others.map((m) => m.userId));
+    return others.flatMap((m) => {
+      const p = known.get(m.userId);
+      return p ? [p.username] : [];
+    });
+  } catch {
+    return null;
+  }
+}
+
 async function lockState(s: Session, g: GroupSummary): Promise<GroupLockState> {
   // An older local key still proves the code after a rotation (see unlockGroup).
   if ((await s.vault.latestGroupKeyVersion(g.id, g.currentKeyVersion)) !== null) {
@@ -230,7 +336,8 @@ async function lockState(s: Session, g: GroupSummary): Promise<GroupLockState> {
     return { kind: 'locked', codeChanged: !!secret && staleCode(secret, g) };
   }
   if (g.sealedKeys.some((k) => k.keyVersion === g.currentKeyVersion)) {
-    return { kind: 'first-unlock', needsKeywords: (await s.vault.groupSecret(g.id, s.masterKey)) === null };
+    // A private conversation has no keywords: its first unlock only chooses this phone's code.
+    return { kind: 'first-unlock', needsKeywords: g.kind !== 'direct' && (await s.vault.groupSecret(g.id, s.masterKey)) === null };
   }
   return { kind: 'waiting-key' };
 }
@@ -255,13 +362,15 @@ export async function createGroup(
   const { joinKey, wrapKey } = await deriveGroupSecrets(groupCode, keywords);
   const meta: GroupMeta = { name, keywords, admins: [me], members: [me], rev: 1 };
   const signed = encryptGroupMeta(meta, id, 1, groupKey, s.identity);
-  const handout = sealHandout(groupKey, wrapKey, id, 1, { userId: me, boxPublicKey: s.identity.boxPublicKey }, s.identity);
+  const handout = sealHandout(groupKey, wrapKey, id, 1, { userId: me, boxPublicKey: s.identity.boxPublicKey }, s.identity, name);
   await s.api.createGroup({
     id,
     ...signed,
     joinKey: b64.encode(joinKey),
     sealedKey: handout.sealedKey,
     keySignature: handout.signature,
+    sealedLabel: handout.sealedLabel,
+    labelSignature: handout.labelSignature,
     ...(expiresAt && { expiresAt: expiresAt.toISOString() }),
   });
   wipe(joinKey);
@@ -287,6 +396,73 @@ export async function joinGroup(s: Session, groupCode: string, keywords: string[
   } finally {
     wipe(joinKey);
   }
+}
+
+// ---- Private conversations ----------------------------------------------------------
+
+/** The other member of a private conversation's meta. */
+export function peerOf(meta: GroupMeta, me: string): string | null {
+  return meta.direct ? (meta.members.find((m) => m !== me) ?? null) : null;
+}
+
+/** What a private conversation's handouts open with: no code, no keywords (crypto/group.ts directWrapKey). */
+const directSecret = (codeVersion: number): StoredGroupSecret => ({ wrapKey: directWrapKey(), keywords: [], codeVersion });
+
+/** How a conversation is called: a group's name, or the other person's username for a private one. */
+export async function conversationName(s: Session, profiles: ProfileCache, meta: GroupMeta): Promise<string> {
+  const peer = peerOf(meta, s.account.userId);
+  if (!peer) return meta.name;
+  return (await profiles.get([peer]).catch(() => new Map<string, KnownProfile>())).get(peer)?.username ?? '';
+}
+
+/** Our private conversation with `peerId`, if there is one (from the server's list, or the one saved offline). */
+export async function directWith(s: Session, peerId: string): Promise<string | null> {
+  const { groups } = await fetchGroups(s);
+  for (const g of groups) {
+    if (!isActive(g) || g.kind !== 'direct') continue;
+    const meta = await s.vault.meta(g.id, s.masterKey);
+    if ((meta ? peerOf(meta, s.account.userId) : g.peerId) === peerId) return g.id;
+  }
+  return null;
+}
+
+/**
+ * Opens a private conversation with someone met in a group: the key is drawn
+ * here, sealed to both of us and signed; the meta lists the two of us as its
+ * only members and admins. `code` locks it on this phone. Each handout carries
+ * the other's username as its sealed label, so the plate names them before the
+ * first unlock. ApiError 409 direct_exists: there is already one (directWith).
+ */
+export async function createDirect(
+  s: Session,
+  profiles: ProfileCache,
+  peerId: string,
+  code: string,
+): Promise<{ id: string; groupKey: Uint8Array; meta: GroupMeta; name: string }> {
+  const me = s.account.userId;
+  const peer = (await profiles.get([peerId])).get(peerId);
+  const pinned = (await profiles.trustedKeys([peerId])).get(peerId);
+  if (!peer || !pinned) throw new KeyChangedError(peerId);
+  const id = randomUUID();
+  const groupKey = generateGroupKey();
+  const wrapKey = directWrapKey();
+  const meta: GroupMeta = { name: '', keywords: [], admins: [me, peerId], members: [me, peerId], rev: 1, direct: true };
+  const mine = sealHandout(groupKey, wrapKey, id, 1, { userId: me, boxPublicKey: s.identity.boxPublicKey }, s.identity, peer.username);
+  const theirs = sealHandout(groupKey, wrapKey, id, 1, { userId: peerId, boxPublicKey: pinned.boxPublicKey }, s.identity, s.account.username);
+  await s.api.createDirect({
+    id,
+    peerId,
+    ...encryptGroupMeta(meta, id, 1, groupKey, s.identity),
+    keys: [
+      { userId: me, ...mine },
+      { userId: peerId, ...theirs },
+    ],
+  });
+  await s.vault.saveGroupSecret(id, { wrapKey, keywords: [], codeVersion: 1 }, s.masterKey);
+  await s.vault.saveGroupKey(id, 1, groupKey, code, s.masterKey);
+  await s.vault.saveMeta(id, meta, 1, s.masterKey);
+  await s.vault.setCodeVersion(id, 1);
+  return { id, groupKey, meta, name: peer.username };
 }
 
 // ---- Verifying what the server returns -------------------------------------------
@@ -332,6 +508,8 @@ async function verifyGroup(
   if (!current || !metaSigner) throw new ApiError(409, 'stale_key_version');
   const meta = decryptGroupMeta(g, metaSigner.signPublicKey, g.id, v, current);
   const giver = givers.get(v);
+  // A group passed off as a private conversation (or the other way round): the signed meta says which.
+  if (!!meta.direct !== (g.kind === 'direct')) throw new GroupTamperedError('untrusted_signer');
 
   const trusted = await s.vault.metaRecord(g.id, s.masterKey);
   let adminChanged = false;
@@ -359,6 +537,8 @@ export interface OpenedGroup {
   keys: GroupKeys;
   keyVersion: number;
   meta: GroupMeta;
+  /** What to call it: the group's name, or the other person's for a private conversation. */
+  name: string;
   /** The admin changed the code since this phone stored it: ask for the new one (relockGroup). */
   codeChanged: boolean;
   /** Someone became admin since the meta this phone last verified (shown to the user). */
@@ -410,7 +590,11 @@ export async function unlockGroup(
     known.set(local, await s.vault.openGroupKey(groupId, local, groupCode, s.masterKey));
   } else {
     if (!g.sealedKeys.some((h) => h.keyVersion === v)) return null;
-    secret = await s.vault.checkGroupCode(groupId, () => firstUnlockSecret(s, profiles, g, groupCode, secret, keywords));
+    // A private conversation's first unlock chooses this phone's code: nothing to check it against.
+    secret =
+      g.kind === 'direct'
+        ? directSecret(g.codeVersion)
+        : await s.vault.checkGroupCode(groupId, () => firstUnlockSecret(s, profiles, g, groupCode, secret, keywords));
   }
   if (!secret) throw new ApiError(409, 'no_group_secret');
 
@@ -422,7 +606,7 @@ export async function unlockGroup(
     // The code changed and a newer key is wrapped under it: the local key still opens what we had.
     if (!(codeChanged && e instanceof ApiError && e.status === 409 && local !== null)) throw e;
     const meta = (await s.vault.meta(groupId, s.masterKey))!;
-    return { groupKey: known.get(local)!, keys: known, keyVersion: local, meta, codeChanged, adminChanged: false };
+    return { groupKey: known.get(local)!, keys: known, keyVersion: local, meta, name: await conversationName(s, profiles, meta), codeChanged, adminChanged: false };
   }
   const groupKey = opened.keys.get(v)!;
   if (local !== v || tookNewCode) {
@@ -434,7 +618,29 @@ export async function unlockGroup(
     await s.vault.saveGroupSecret(groupId, { ...secret, codeVersion: g.codeVersion }, s.masterKey);
     await s.vault.setCodeVersion(groupId, g.codeVersion);
   }
-  return { groupKey, keys: opened.keys, keyVersion: v, meta: opened.meta, codeChanged, adminChanged: opened.adminChanged };
+  // Admin: handouts from before the sealed name get it now, in the background (best effort).
+  // (A private conversation's handouts carry the other's name from the start.)
+  if (g.role === 'admin' && !opened.meta.direct && opened.meta.admins.includes(s.account.userId)) void labelHandouts(s, profiles, groupId, opened.meta).catch(() => {});
+  const name = await conversationName(s, profiles, opened.meta);
+  return { groupKey, keys: opened.keys, keyVersion: v, meta: opened.meta, name, codeChanged, adminChanged: opened.adminChanged };
+}
+
+/**
+ * Admin: every handout of the group without the group's name sealed beside
+ * the key (from before it) gets one, sealed to its member and signed by us,
+ * so that their locked plate names the group. How many were filled in.
+ */
+export async function labelHandouts(s: Session, profiles: ProfileCache, groupId: string, meta: GroupMeta): Promise<number> {
+  const { members } = await s.api.members(groupId);
+  const todo = members.flatMap((m) => (m.unlabelledKeyVersions ?? []).map((keyVersion) => ({ userId: m.userId, keyVersion })));
+  if (!todo.length) return 0;
+  const pinned = await profiles.trustedKeys([...new Set(todo.map((t) => t.userId))]);
+  const keys = todo.flatMap(({ userId, keyVersion }) => {
+    const p = pinned.get(userId);
+    return p ? [{ userId, keyVersion, ...sealLabel(meta.name, groupId, keyVersion, { userId, boxPublicKey: p.boxPublicKey }, s.identity) }] : [];
+  });
+  if (!keys.length) return 0;
+  return (await s.api.labelKeys(groupId, { keys })).labelled;
 }
 
 /**
@@ -488,7 +694,7 @@ export async function relockGroup(s: Session, profiles: ProfileCache, groupId: s
   await s.vault.saveGroupKey(groupId, v, opened.keys.get(v)!, newCode, s.masterKey);
   for (let x = v - 1; x >= 1; x--) if (await s.vault.hasGroupKey(groupId, x)) await s.vault.deleteGroupKey(groupId, x);
   await s.vault.setCodeVersion(groupId, g.codeVersion);
-  return { ...opened, keyVersion: v };
+  return { ...opened, keyVersion: v, name: await conversationName(s, profiles, opened.meta) };
 }
 
 // ---- Keeping an open group up to date ------------------------------------------------
@@ -503,7 +709,7 @@ export async function syncGroup(
   profiles: ProfileCache,
   groupId: string,
   keys: GroupKeys,
-): Promise<{ summary: GroupSummary; keys: GroupKeys; keyVersion: number; meta: GroupMeta; adminChanged: boolean }> {
+): Promise<{ summary: GroupSummary; keys: GroupKeys; keyVersion: number; meta: GroupMeta; name: string; adminChanged: boolean }> {
   let g = await summary(s, groupId);
   const secret = await s.vault.groupSecret(groupId, s.masterKey);
   if (!secret) throw new ApiError(409, 'no_group_secret');
@@ -526,7 +732,8 @@ export async function syncGroup(
     g = await summary(s, groupId);
     opened = await verifyGroup(s, profiles, g, secret, opened.keys);
   }
-  return { summary: g, keys: opened.keys, keyVersion: g.currentKeyVersion, meta: opened.meta, adminChanged: opened.adminChanged };
+  const name = await conversationName(s, profiles, opened.meta);
+  return { summary: g, keys: opened.keys, keyVersion: g.currentKeyVersion, meta: opened.meta, name, adminChanged: opened.adminChanged };
 }
 
 /**
@@ -547,7 +754,7 @@ async function rotateKey(s: Session, profiles: ProfileCache, g: GroupSummary, me
   const handouts = ids.map((userId) => {
     const p = pinned.get(userId);
     if (!p) throw new KeyChangedError(userId);
-    return { userId, ...sealHandout(groupKey, secret.wrapKey, g.id, v, { userId, boxPublicKey: p.boxPublicKey }, s.identity) };
+    return { userId, ...sealHandout(groupKey, secret.wrapKey, g.id, v, { userId, boxPublicKey: p.boxPublicKey }, s.identity, next.name) };
   });
   await s.api.rotateKey(g.id, {
     fromKeyVersion: g.currentKeyVersion,
@@ -614,11 +821,13 @@ export async function approveMember(s: Session, profiles: ProfileCache, groupId:
   const pinned = (await profiles.trustedKeys([userId])).get(userId);
   if (!pinned) throw new KeyChangedError(userId);
   const next: GroupMeta = { ...meta, members: [...meta.members.filter((m) => m !== userId), userId], rev: meta.rev + 1 };
-  const handout = sealHandout(all.get(v)!, secret.wrapKey, groupId, v, { userId, boxPublicKey: pinned.boxPublicKey }, s.identity);
+  const handout = sealHandout(all.get(v)!, secret.wrapKey, groupId, v, { userId, boxPublicKey: pinned.boxPublicKey }, s.identity, next.name);
   await s.api.approveMember(groupId, userId, {
     keyVersion: v,
     sealedKey: handout.sealedKey,
     keySignature: handout.signature,
+    sealedLabel: handout.sealedLabel,
+    labelSignature: handout.labelSignature,
     ...encryptGroupMeta(next, groupId, v, all.get(v)!, s.identity),
   });
   await s.vault.saveMeta(groupId, next, v, s.masterKey);
@@ -664,7 +873,7 @@ export async function changeGroupCode(s: Session, profiles: ProfileCache, groupI
       const key = all.get(kv);
       const p = pinned.get(m.userId);
       if (!key || !p) return [];
-      return [{ userId: m.userId, keyVersion: kv, ...sealHandout(key, wrapKey, groupId, kv, { userId: m.userId, boxPublicKey: p.boxPublicKey }, s.identity) }];
+      return [{ userId: m.userId, keyVersion: kv, ...sealHandout(key, wrapKey, groupId, kv, { userId: m.userId, boxPublicKey: p.boxPublicKey }, s.identity, meta.name) }];
     }),
   );
   const next: GroupMeta = { ...meta, keywords, rev: meta.rev + 1 };

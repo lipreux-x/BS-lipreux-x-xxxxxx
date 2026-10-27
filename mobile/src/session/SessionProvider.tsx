@@ -47,7 +47,10 @@ export type Status =
 export interface OpenGroup {
   keys: GroupKeys; // every version we can read; keyVersion is the one to send with
   keyVersion: number;
+  /** The group's name, or the other person's for a private conversation. */
   name: string;
+  /** A private conversation between two people. */
+  direct?: boolean;
 }
 
 interface SessionContextValue {
