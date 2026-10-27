@@ -2,8 +2,8 @@ import { BlurView } from 'expo-blur';
 import { useEffect, useState } from 'react';
 import { AppState, Platform, StyleSheet, View } from 'react-native';
 import { systemUiOpen } from '@/session/autoLock';
+import { Logo } from './Logo';
 import { colors } from './theme';
-import { Wordmark } from './Wordmark';
 
 /**
  * Hides the screen as soon as the app leaves the foreground, so the recent
@@ -18,6 +18,8 @@ import { Wordmark } from './Wordmark';
  * A system prompt over the app (Touch ID, permissions) only makes it
  * 'inactive': the app stays visible under it, so the fingerprint pad keeps
  * showing its scan. Leaving the app ('background') always covers it.
+ *
+ * The cover shows the blade alone, never the app's name.
  */
 export function PrivacyCover() {
   const [hidden, setHidden] = useState(AppState.currentState !== 'active');
@@ -28,7 +30,7 @@ export function PrivacyCover() {
     return () => sub.remove();
   }, []);
   if (!hidden) return null;
-  const mark = <Wordmark />;
+  const mark = <Logo width={120} />;
   return Platform.OS === 'ios' ? (
     <BlurView intensity={100} tint="dark" style={styles.cover} pointerEvents="none">
       {mark}

@@ -55,9 +55,9 @@ import { checkLockout, FREE_ATTEMPTS, parseLockout, registerFailure, type Lockou
  * the user cancels, fails, or the copy was invalidated.
  */
 export interface BiometricStore {
-  /** A fingerprint sensor with a finger enrolled. */
+  /** A strong biometric enrolled (a finger, or a face the system trusts as much). */
   available(): Promise<boolean>;
-  /** Saving already asks for the finger (Android), so it proves the finger works. */
+  /** Saving already asks for the biometric (Android), so it proves it works. */
   readonly saveAsksFinger?: boolean;
   save(value: string): Promise<void>;
   load(): Promise<string | null>;
