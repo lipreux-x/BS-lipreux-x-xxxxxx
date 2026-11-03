@@ -51,6 +51,8 @@ export interface OpenGroup {
   name: string;
   /** A private conversation between two people. */
   direct?: boolean;
+  /** A group without a code (entered by links). */
+  link?: boolean;
 }
 
 interface SessionContextValue {

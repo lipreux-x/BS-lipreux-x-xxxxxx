@@ -64,10 +64,12 @@ export const groups = pgTable(
     // 'group': entered with its code + keywords. 'direct': a private
     // conversation between two people who share a group, opened by one of
     // them; no code on the server (each locks it on their phone with their own).
-    kind: text('kind', { enum: ['group', 'direct'] }).notNull().default('group'),
+    // 'link': a group without a code, entered with a single-use link from an
+    // admin (group_links); the app code alone opens it on the phone.
+    kind: text('kind', { enum: ['group', 'direct', 'link'] }).notNull().default('group'),
     // HMAC(GROUP_CODE_PEPPER, joinKey): joinKey is derived on the phone from
     // the group code + keywords, which the server never sees (lib/crypto.ts).
-    // Null for a direct conversation: nobody joins it.
+    // Null for a direct conversation or a group without a code: nobody joins it by code.
     joinLookup: text('join_lookup').unique(),
     // Direct conversation: its two user ids, sorted, joined by ':'. One per pair.
     directPair: text('direct_pair').unique(),
@@ -86,6 +88,28 @@ export const groups = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index('groups_expires_idx').on(t.expiresAt).where(sql`${t.expiresAt} is not null`)],
+);
+
+/**
+ * Single-use invitation links to a group without a code (kind 'link'), made
+ * by an admin. Using one files a join request (an admin still approves it from
+ * their phone, which hands over the key) and burns the link: refused or
+ * failed, the admin sends a new one.
+ */
+export const groupLinks = pgTable(
+  'group_links',
+  {
+    codeHash: text('code_hash').primaryKey(), // SHA-256 of a high-entropy code, like invites
+    groupId: uuid('group_id')
+      .notNull()
+      .references(() => groups.id, { onDelete: 'cascade' }),
+    createdBy: uuid('created_by').references(() => profiles.id, { onDelete: 'set null' }),
+    usedBy: uuid('used_by').references(() => profiles.id, { onDelete: 'set null' }),
+    usedAt: timestamp('used_at', { withTimezone: true }),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('group_links_group_idx').on(t.groupId)],
 );
 
 export const groupMembers = pgTable(

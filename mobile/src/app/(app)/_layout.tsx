@@ -1,6 +1,7 @@
 import { router, Stack } from 'expo-router';
 import { useEffect } from 'react';
 import { View } from 'react-native';
+import { takePendingLink } from '@/services/groupLink';
 import { onPendingGroup, takePendingGroup } from '@/services/push';
 import { PrivacyCover } from '@/ui/PrivacyCover';
 import { colors, fonts } from '@/ui/theme';
@@ -14,6 +15,13 @@ export default function AppLayout() {
     };
     go();
     return onPendingGroup(go);
+  }, []);
+
+  // A group invitation tapped while the app was locked (app/+native-intent.tsx): its join screen once
+  // the app is open. When it was open, the router went there by itself and the screen took the code.
+  useEffect(() => {
+    const invite = takePendingLink();
+    if (invite) router.navigate({ pathname: '/group/join', params: { invite } });
   }, []);
 
   return (

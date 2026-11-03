@@ -70,6 +70,12 @@ import type { StoredGroupSecret, UnlockedVault, Vault } from './vault';
  *   alone (crypto/group.ts directWrapKey), and each phone locks the key under
  *   a code of its own, chosen at the first unlock. Nobody joins, leaves or
  *   rotates; leaving deletes it for both.
+ * - group without a code (createGroup with a null code, kind 'link'): its
+ *   handouts open with the identity alone, like a private conversation's, and
+ *   the phone keeps the key under the master key only (the app code opens
+ *   it). Newcomers come in with a single-use link an admin sends them
+ *   (createGroupLink, joinWithLink): it files a join request, approved from
+ *   an admin's phone as usual, and is burnt whatever the answer.
  */
 
 /** Group keys by version (messages carry the version they were sent with). */
@@ -113,6 +119,8 @@ export interface GroupListItem {
   peerId: string | null;
   /** Private conversation: the other person's avatar icon id. */
   avatar: string | null;
+  /** A group without a code: the app code alone opens it, newcomers come in with a link. */
+  link: boolean;
 }
 
 /** The name on a group's plate: its own, or "Avec …" its other members when the phone has none yet; null with neither. */
@@ -204,6 +212,7 @@ export async function listGroups(s: Session, profiles: ProfileCache): Promise<{ 
           direct: false,
           peerId: null,
           avatar: null,
+          link: false,
         };
       }
       const meta = await s.vault.meta(g.id, s.masterKey);
@@ -224,6 +233,7 @@ export async function listGroups(s: Session, profiles: ProfileCache): Promise<{ 
         direct,
         peerId,
         avatar: peer?.avatar ?? null,
+        link: g.kind === 'link',
       };
     }),
   );
@@ -336,8 +346,8 @@ async function lockState(s: Session, g: GroupSummary): Promise<GroupLockState> {
     return { kind: 'locked', codeChanged: !!secret && staleCode(secret, g) };
   }
   if (g.sealedKeys.some((k) => k.keyVersion === g.currentKeyVersion)) {
-    // A private conversation has no keywords: its first unlock only chooses this phone's code.
-    return { kind: 'first-unlock', needsKeywords: g.kind !== 'direct' && (await s.vault.groupSecret(g.id, s.masterKey)) === null };
+    // A private conversation has no keywords (its first unlock only chooses this phone's code); a group without a code neither.
+    return { kind: 'first-unlock', needsKeywords: hasCode(g) && (await s.vault.groupSecret(g.id, s.masterKey)) === null };
   }
   return { kind: 'waiting-key' };
 }
@@ -348,34 +358,43 @@ async function summary(s: Session, groupId: string): Promise<GroupSummary> {
   return g;
 }
 
-/** `expiresAt`: self-destruct date (the group and everything in it is deleted for everyone), or null. */
+/** A group entered with its code + keywords (not a private conversation, nor a group without a code). */
+const hasCode = (g: GroupSummary) => (g.kind ?? 'group') === 'group';
+
+/**
+ * `groupCode` null: a group without a code (no keywords either), entered with
+ * an admin's single-use link, opened on the phone by the app code alone.
+ * `expiresAt`: self-destruct date (the group and everything in it is deleted for everyone), or null.
+ */
 export async function createGroup(
   s: Session,
   name: string,
-  groupCode: string,
+  groupCode: string | null,
   keywords: string[],
   expiresAt: Date | null = null,
 ): Promise<{ id: string; groupKey: Uint8Array; meta: GroupMeta }> {
   const id = randomUUID();
   const me = s.account.userId;
   const groupKey = generateGroupKey();
-  const { joinKey, wrapKey } = await deriveGroupSecrets(groupCode, keywords);
-  const meta: GroupMeta = { name, keywords, admins: [me], members: [me], rev: 1 };
+  const { joinKey, wrapKey } = groupCode === null ? { joinKey: null, wrapKey: directWrapKey() } : await deriveGroupSecrets(groupCode, keywords);
+  const meta: GroupMeta =
+    groupCode === null ? { name, keywords: [], admins: [me], members: [me], rev: 1, link: true } : { name, keywords, admins: [me], members: [me], rev: 1 };
   const signed = encryptGroupMeta(meta, id, 1, groupKey, s.identity);
   const handout = sealHandout(groupKey, wrapKey, id, 1, { userId: me, boxPublicKey: s.identity.boxPublicKey }, s.identity, name);
   await s.api.createGroup({
     id,
     ...signed,
-    joinKey: b64.encode(joinKey),
+    ...(joinKey ? { joinKey: b64.encode(joinKey) } : { kind: 'link' as const }),
     sealedKey: handout.sealedKey,
     keySignature: handout.signature,
     sealedLabel: handout.sealedLabel,
     labelSignature: handout.labelSignature,
     ...(expiresAt && { expiresAt: expiresAt.toISOString() }),
   });
-  wipe(joinKey);
-  await s.vault.saveGroupSecret(id, { wrapKey, keywords, codeVersion: 1 }, s.masterKey);
-  await s.vault.saveGroupKey(id, 1, groupKey, groupCode, s.masterKey);
+  if (joinKey) wipe(joinKey);
+  await s.vault.saveGroupSecret(id, { wrapKey, keywords: meta.keywords, codeVersion: 1 }, s.masterKey);
+  if (groupCode === null) await s.vault.saveGroupKeyNoCode(id, 1, groupKey, s.masterKey);
+  else await s.vault.saveGroupKey(id, 1, groupKey, groupCode, s.masterKey);
   await s.vault.saveMeta(id, meta, 1, s.masterKey);
   await s.vault.setCodeVersion(id, 1);
   return { id, groupKey, meta };
@@ -398,6 +417,29 @@ export async function joinGroup(s: Session, groupCode: string, keywords: string[
   }
 }
 
+/**
+ * Asks to join a group without a code with the link (or the code under it)
+ * an admin sent. Returns the group id; the request waits for an admin. The
+ * link is burnt by this request: refused, the admin sends a new one.
+ * ApiError 403 invalid_link: wrong, already used, expired or revoked.
+ */
+export async function joinWithLink(s: Session, code: string): Promise<string> {
+  const { groupId } = await s.api.joinWithLink(code);
+  // codeVersion 0: not known until approved, like a join by code.
+  await s.vault.saveGroupSecret(groupId, noCodeSecret(0), s.masterKey);
+  return groupId;
+}
+
+/** Admin of a group without a code: a new single-use link to send to one person (valid 24 h). */
+export async function createGroupLink(s: Session, groupId: string): Promise<{ code: string; expiresAt: string }> {
+  return s.api.createGroupLink(groupId);
+}
+
+/** Admin: the links sent and not used yet stop working. How many. */
+export async function revokeGroupLinks(s: Session, groupId: string): Promise<number> {
+  return (await s.api.revokeGroupLinks(groupId)).revoked;
+}
+
 // ---- Private conversations ----------------------------------------------------------
 
 /** The other member of a private conversation's meta. */
@@ -405,8 +447,8 @@ export function peerOf(meta: GroupMeta, me: string): string | null {
   return meta.direct ? (meta.members.find((m) => m !== me) ?? null) : null;
 }
 
-/** What a private conversation's handouts open with: no code, no keywords (crypto/group.ts directWrapKey). */
-const directSecret = (codeVersion: number): StoredGroupSecret => ({ wrapKey: directWrapKey(), keywords: [], codeVersion });
+/** What the handouts of a private conversation or a group without a code open with: no code, no keywords (crypto/group.ts directWrapKey). */
+const noCodeSecret = (codeVersion: number): StoredGroupSecret => ({ wrapKey: directWrapKey(), keywords: [], codeVersion });
 
 /** How a conversation is called: a group's name, or the other person's username for a private one. */
 export async function conversationName(s: Session, profiles: ProfileCache, meta: GroupMeta): Promise<string> {
@@ -508,8 +550,8 @@ async function verifyGroup(
   if (!current || !metaSigner) throw new ApiError(409, 'stale_key_version');
   const meta = decryptGroupMeta(g, metaSigner.signPublicKey, g.id, v, current);
   const giver = givers.get(v);
-  // A group passed off as a private conversation (or the other way round): the signed meta says which.
-  if (!!meta.direct !== (g.kind === 'direct')) throw new GroupTamperedError('untrusted_signer');
+  // A group passed off as a private conversation or as a group without a code (or the other way round): the signed meta says which.
+  if (!!meta.direct !== (g.kind === 'direct') || !!meta.link !== (g.kind === 'link')) throw new GroupTamperedError('untrusted_signer');
 
   const trusted = await s.vault.metaRecord(g.id, s.masterKey);
   let adminChanged = false;
@@ -549,6 +591,7 @@ export interface OpenedGroup {
  * Unlocks a group with its code (+ keywords the first time on a phone that
  * does not know them). Returns null if no key was handed to us yet. Wrong
  * codes throw WrongCodeError / LockedOutError and count toward the lockout.
+ * A group without a code: `groupCode` is ignored (pass ''), the master key opens it.
  */
 export async function unlockGroup(
   s: Session,
@@ -564,10 +607,16 @@ export async function unlockGroup(
   const local = await s.vault.latestGroupKeyVersion(groupId, v);
   const known: GroupKeys = new Map();
   let secret = await s.vault.groupSecret(groupId, s.masterKey);
+  const noCode = g.kind === 'link';
 
   // Re-locked under the code typed now: it is the admin's new code.
   let tookNewCode = false;
-  if (local !== null && secret && staleCode(secret, g) && g.sealedKeys.some((h) => h.keyVersion === v)) {
+  if (noCode) {
+    if (local !== null) known.set(local, await s.vault.openGroupKeyNoCode(groupId, local, s.masterKey));
+    else if (!g.sealedKeys.some((h) => h.keyVersion === v)) return null;
+    // Signed in again on this phone: nothing kept, nothing to type either.
+    secret ??= noCodeSecret(g.codeVersion);
+  } else if (local !== null && secret && staleCode(secret, g) && g.sealedKeys.some((h) => h.keyVersion === v)) {
     // The admin changed the code (maybe more than once) since this phone locked its key: the old code
     // still opens that key, the new one our handout (re-wrapped under it, with the keywords as they are
     // now: the ones typed, else the ones we know). Either works; one attempt is counted.
@@ -593,7 +642,7 @@ export async function unlockGroup(
     // A private conversation's first unlock chooses this phone's code: nothing to check it against.
     secret =
       g.kind === 'direct'
-        ? directSecret(g.codeVersion)
+        ? noCodeSecret(g.codeVersion)
         : await s.vault.checkGroupCode(groupId, () => firstUnlockSecret(s, profiles, g, groupCode, secret, keywords));
   }
   if (!secret) throw new ApiError(409, 'no_group_secret');
@@ -610,8 +659,9 @@ export async function unlockGroup(
   }
   const groupKey = opened.keys.get(v)!;
   if (local !== v || tookNewCode) {
-    // First unlock, a rotation, or the new code: lock the current key under this code.
-    await s.vault.saveGroupKey(groupId, v, groupKey, groupCode, s.masterKey);
+    // First unlock, a rotation, or the new code: lock the current key under this code (the master key alone without one).
+    if (noCode) await s.vault.saveGroupKeyNoCode(groupId, v, groupKey, s.masterKey);
+    else await s.vault.saveGroupKey(groupId, v, groupKey, groupCode, s.masterKey);
     if (local !== null && local !== v) await s.vault.deleteGroupKey(groupId, local);
   }
   if (secret.codeVersion === 0 || local === null || tookNewCode) {
@@ -860,6 +910,7 @@ export async function setAdmins(s: Session, profiles: ProfileCache, groupId: str
  */
 export async function changeGroupCode(s: Session, profiles: ProfileCache, groupId: string, keys: GroupKeys, groupCode: string, keywords: string[]) {
   const g = await summary(s, groupId);
+  if (!hasCode(g)) throw new ApiError(400, 'no_group_code');
   const secret = await s.vault.groupSecret(groupId, s.masterKey);
   if (!secret) throw new ApiError(409, 'no_group_secret');
   const { keys: all, meta } = await verifyGroup(s, profiles, g, secret, keys);

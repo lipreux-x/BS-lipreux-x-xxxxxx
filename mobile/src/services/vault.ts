@@ -415,6 +415,22 @@ export class Vault {
   }
 
   /**
+   * A group without a code: its key under the master key alone (the app code
+   * opens it), in the same slot as a coded group's, so versions, rotation and
+   * forgetting work the same.
+   */
+  async saveGroupKeyNoCode(groupId: string, keyVersion: number, groupKey: Uint8Array, masterKey: Uint8Array) {
+    await this.store.set(K.group(groupId, keyVersion), sealLocal({ k: b64.encode(groupKey) }, `gkey/${groupId}/${keyVersion}`, masterKey));
+    await this.remember(groupId, keyVersion);
+  }
+
+  async openGroupKeyNoCode(groupId: string, keyVersion: number, masterKey: Uint8Array): Promise<Uint8Array> {
+    const raw = await this.store.get(K.group(groupId, keyVersion));
+    if (!raw) throw new Error('no_group_key');
+    return b64.decode(openLocal<{ k: string }>(raw, `gkey/${groupId}/${keyVersion}`, masterKey).k);
+  }
+
+  /**
    * Counts a group code attempt that was checked some other way (deriving the
    * group secret on a first unlock): same counter and delays as a local key.
    */

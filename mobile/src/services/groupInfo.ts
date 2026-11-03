@@ -18,6 +18,8 @@ export interface GroupInfo {
   name: string | null;
   /** A private conversation: no keywords, no code to change, nobody to remove; leaving deletes it for both. */
   direct: boolean;
+  /** A group without a code: no keywords, no code to change; admins invite with single-use links. */
+  link: boolean;
   keywords: string[] | null;
   members: GroupInfoMember[]; // admins first, then by username
   myRole: 'admin' | 'member';
@@ -52,6 +54,7 @@ export async function groupInfo(s: Session, profiles: ProfileCache, groupId: str
   return {
     name: peer ? (rows.find((r) => r.userId === peer)?.username ?? null) : (meta?.name ?? null),
     direct: g.kind === 'direct',
+    link: g.kind === 'link',
     keywords: meta?.keywords ?? null,
     members: rows,
     myRole: meta?.admins.includes(s.account.userId) ? 'admin' : 'member',

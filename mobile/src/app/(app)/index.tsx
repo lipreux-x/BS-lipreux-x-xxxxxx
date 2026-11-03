@@ -249,9 +249,9 @@ function stateOf(item: GroupListItem, open: boolean): { word: string; hint?: str
     case 'first-unlock':
       return item.direct
         ? { word: 'Nouvelle', hint: 'choisis ton code', led: 'busy' }
-        : { word: 'Clé reçue', hint: 'tape le code du groupe', led: 'busy' };
+        : { word: 'Clé reçue', hint: item.link ? 's’ouvre sans code' : 'tape le code du groupe', led: 'busy' };
     default:
-      return { word: 'Fermé', led: 'error', lit: 'error' };
+      return { word: 'Fermé', ...(item.link && { hint: 'sans code' }), led: 'error', lit: 'error' };
   }
 }
 

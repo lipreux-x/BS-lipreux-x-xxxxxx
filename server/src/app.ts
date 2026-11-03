@@ -9,6 +9,7 @@ import {
   attachments,
   groupBans,
   groupKeys,
+  groupLinks,
   groupMembers,
   groupPurges,
   groups,
@@ -44,6 +45,8 @@ import { realtime } from './realtime';
 type Env = { Variables: { userId: string; tokenExpiresAt: number } };
 
 const INVITE_TTL_MS = 2 * 3_600_000; // an invite is handed over in person, right away
+const GROUP_LINK_TTL_MS = 24 * 3_600_000; // a link to a group without a code: sent by message, opened within the day
+const OPEN_LINKS_PER_GROUP = 20; // unused and unexpired
 const JOIN_ATTEMPTS_PER_HOUR = 5; // SPEC §4.4: per user, all groups combined
 const GROUP_JOIN_ATTEMPTS_PER_HOUR = 20; // SPEC §4.5: per group, all users combined (many accounts, one group)
 const LOGIN_FAILURES_PER_HOUR = 5; // failed password sign-ins, per username
@@ -450,6 +453,9 @@ app.get('/profiles', async (c) => {
  * - the meta (name, keywords, admins, members) is encrypted under the group
  *   key and signed by an admin;
  * - a newcomer gets a key only when an admin approves them on their phone.
+ * A group without a code (kind 'link') has no code + keywords: its handouts
+ * are only sealed to each member and signed, like a private conversation's;
+ * the single-use links below only file requests, the approval is the gate.
  * The checks below keep honest clients consistent and abusers out; the
  * phones verify everything that matters.
  */
@@ -534,7 +540,9 @@ app.post('/groups', async (c) => {
       id: z.uuid(), // generated on the phone: bound into the meta and key handouts
       encryptedMeta,
       metaSignature: signature,
-      joinKey: b64Key,
+      // 'link': no code, so no joinKey; newcomers come in with single-use links (POST /groups/:id/links).
+      kind: z.enum(['group', 'link']).optional(),
+      joinKey: b64Key.optional(),
       sealedKey,
       keySignature: signature,
       sealedLabel,
@@ -550,17 +558,22 @@ app.post('/groups', async (c) => {
     const ms = expiresAt.getTime() - Date.now();
     if (ms < MIN_GROUP_LIFETIME_MS || ms > MAX_GROUP_LIFETIME_DAYS * 86_400_000) throw new HTTPException(400, { message: 'invalid_expiry' });
   }
+  const kind = input.kind ?? 'group';
+  if ((kind === 'group') !== !!input.joinKey) throw new HTTPException(400, { message: 'invalid_body' });
   // Each creation can tell whether a code + keywords pair is in use: a guess, so a quota.
-  await spendQuota(me, 'group_code', GROUP_CODES_PER_DAY);
-  const lookup = joinLookup(fromB64(input.joinKey)!);
+  if (kind === 'group') await spendQuota(me, 'group_code', GROUP_CODES_PER_DAY);
+  const lookup = input.joinKey ? joinLookup(fromB64(input.joinKey)!) : null;
   await db.transaction(async (tx) => {
     // Unique, so the code + keywords identify the group to join.
-    const [taken] = await tx.select({ id: groups.id }).from(groups).where(eq(groups.joinLookup, lookup));
-    if (taken) throw new HTTPException(409, { message: 'code_taken' });
+    if (lookup) {
+      const [taken] = await tx.select({ id: groups.id }).from(groups).where(eq(groups.joinLookup, lookup));
+      if (taken) throw new HTTPException(409, { message: 'code_taken' });
+    }
     const inserted = await tx
       .insert(groups)
       .values({
         id: input.id,
+        kind,
         encryptedMeta: input.encryptedMeta,
         metaSignerId: me,
         metaSignature: input.metaSignature,
@@ -614,7 +627,7 @@ app.post('/groups/direct', async (c) => {
       join ${groupMembers} b on b.group_id = a.group_id
       join ${groups} g on g.id = a.group_id
      where a.user_id = ${me} and b.user_id = ${peer} and a.status = 'active' and b.status = 'active'
-       and g.kind = 'group' and (g.expires_at is null or g.expires_at > now())
+       and g.kind <> 'direct' and (g.expires_at is null or g.expires_at > now())
      limit 1`);
   if (!shared.rows.length) throw new HTTPException(404, { message: 'not_found' });
   await spendQuota(me, 'direct', DIRECTS_PER_DAY);
@@ -695,6 +708,85 @@ app.post('/groups/join', async (c) => {
   // A new request: the admins have someone to let in (asking again does not ring twice).
   if (filed.length) await notifyAction(group.id, 'join_request', 'admins', me);
   return c.json({ groupId: group.id, status: row!.status });
+});
+
+/**
+ * Admin of a group without a code: a single-use link for one newcomer. Only
+ * its SHA-256 is kept. Using it files a join request, still approved by an
+ * admin from their phone (which hands over the key): a link that leaks lets
+ * someone knock, not read.
+ */
+app.post('/groups/:groupId/links', async (c) => {
+  const groupId = groupIdParam(c);
+  const me = c.get('userId');
+  if ((await requireAdmin(groupId, me)).kind !== 'link') throw new HTTPException(400, { message: 'not_a_link_group' });
+  const [{ open } = { open: 0 }] = await db
+    .select({ open: sql<number>`count(*)::int` })
+    .from(groupLinks)
+    .where(and(eq(groupLinks.groupId, groupId), isNull(groupLinks.usedBy), gt(groupLinks.expiresAt, sql`now()`)));
+  if (open >= OPEN_LINKS_PER_GROUP) throw new HTTPException(429, { message: 'too_many_links' });
+  const code = generateInviteCode();
+  const expiresAt = new Date(Date.now() + GROUP_LINK_TTL_MS);
+  await db.insert(groupLinks).values({ codeHash: sha256Hex(normalizeInviteCode(code)), groupId, createdBy: me, expiresAt });
+  return c.json({ code, expiresAt: expiresAt.toISOString() }, 201);
+});
+
+/** Admin: every unused link of the group stops working. */
+app.delete('/groups/:groupId/links', async (c) => {
+  const groupId = groupIdParam(c);
+  await requireAdmin(groupId, c.get('userId'));
+  const gone = await db
+    .delete(groupLinks)
+    .where(and(eq(groupLinks.groupId, groupId), isNull(groupLinks.usedBy)))
+    .returning({ codeHash: groupLinks.codeHash });
+  return c.json({ revoked: gone.length });
+});
+
+/**
+ * Asks to join a group without a code with a link from its admin. The link is
+ * burnt by this request, whatever the admin then decides: refused, or lost on
+ * the way, the admin sends a new one. Already in (or asked): the link is kept.
+ * A wrong, used, expired or revoked link, or a ban: the same answer.
+ */
+app.post('/groups/join-link', async (c) => {
+  const input = await body(c, z.object({ code: z.string().min(1).max(64) }));
+  const me = c.get('userId');
+  // Same per-user limit as joining by code: links are long, this only keeps a script from hammering.
+  await db.insert(joinAttempts).values({ userId: me, groupId: null });
+  const [{ mine } = { mine: 0 }] = await db
+    .select({ mine: sql<number>`count(*)::int` })
+    .from(joinAttempts)
+    .where(and(eq(joinAttempts.userId, me), gt(joinAttempts.attemptedAt, sql`now() - interval '1 hour'`)));
+  if (mine > JOIN_ATTEMPTS_PER_HOUR) {
+    c.header('Retry-After', '3600');
+    throw new HTTPException(429, { message: 'too_many_attempts' });
+  }
+  const result = await db.transaction(async (tx) => {
+    const [link] = await tx
+      .select({ codeHash: groupLinks.codeHash, groupId: groupLinks.groupId, usedBy: groupLinks.usedBy, expiresAt: groupLinks.expiresAt })
+      .from(groupLinks)
+      .innerJoin(groups, eq(groups.id, groupLinks.groupId))
+      .where(and(eq(groupLinks.codeHash, sha256Hex(normalizeInviteCode(input.code))), eq(groups.kind, 'link'), groupAlive))
+      .for('update');
+    if (!link) return null;
+    const [already] = await tx
+      .select({ status: groupMembers.status })
+      .from(groupMembers)
+      .where(and(eq(groupMembers.groupId, link.groupId), eq(groupMembers.userId, me)));
+    if (already) return { groupId: link.groupId, status: already.status, filed: false };
+    if (link.usedBy || link.expiresAt < new Date()) return null;
+    const [banned] = await tx
+      .select({ userId: groupBans.userId })
+      .from(groupBans)
+      .where(and(eq(groupBans.groupId, link.groupId), eq(groupBans.userId, me)));
+    if (banned) return null;
+    await tx.update(groupLinks).set({ usedBy: me, usedAt: sql`now()` }).where(eq(groupLinks.codeHash, link.codeHash));
+    await tx.insert(groupMembers).values({ groupId: link.groupId, userId: me, role: 'member', status: 'pending' });
+    return { groupId: link.groupId, status: 'pending' as const, filed: true };
+  });
+  if (!result) throw new HTTPException(403, { message: 'invalid_link' });
+  if (result.filed) await notifyAction(result.groupId, 'join_request', 'admins', me);
+  return c.json({ groupId: result.groupId, status: result.status });
 });
 
 /** Active members, with the key versions each one holds (for rotation and code changes), and pending requests. */
@@ -843,8 +935,8 @@ async function deleteConversation(groupId: string) {
   realtime.nudge();
 }
 
-/** What only a group with a code has (members coming and going, a code to change): refused for a private conversation. */
-function requireGroupKind(kind: 'group' | 'direct') {
+/** What only a group has (members coming and going, admins to name): refused for a private conversation. */
+function requireGroupKind(kind: 'group' | 'direct' | 'link') {
   if (kind === 'direct') throw new HTTPException(400, { message: 'direct_conversation' });
 }
 
@@ -1007,7 +1099,8 @@ app.put('/groups/:groupId/code', async (c) => {
       keys: z.array(z.object({ userId: z.uuid(), keyVersion, sealedKey, signature, sealedLabel, labelSignature })).max(5000),
     }),
   );
-  requireGroupKind((await requireAdmin(groupId, me)).kind);
+  // A group without a code has none to change; a private conversation neither.
+  if ((await requireAdmin(groupId, me)).kind !== 'group') throw new HTTPException(400, { message: 'no_group_code' });
   await spendQuota(me, 'group_code', GROUP_CODES_PER_DAY);
   const lookup = joinLookup(fromB64(input.joinKey)!);
   const codeVersion = await db.transaction(async (tx) => {

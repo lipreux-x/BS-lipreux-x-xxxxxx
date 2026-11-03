@@ -20,6 +20,10 @@ import { sodium } from './sodium';
  *   public value, so they open with the member's identity alone (still sealed
  *   to them and signed by the one who opened the conversation). Each phone
  *   then locks the key under a code of its own (vault), like a group's.
+ * - Group without a code (entered by an admin's single-use link): handouts
+ *   wrapped under directWrapKey() as well, so they open with the identity
+ *   alone; no keywords. The phone keeps the key under the master key only:
+ *   the app code opens it.
  * - Messages: XChaCha20-Poly1305 under the group key, then signed (Ed25519) by
  *   the sender. The associated data binds each ciphertext to its group,
  *   sender, client_id and key version, so the server cannot move a message
@@ -242,6 +246,8 @@ export interface GroupMeta {
   rev: number;
   /** A private conversation: exactly two members, both admins, no keywords. */
   direct?: true;
+  /** A group without a code, entered by an admin's link: no keywords. */
+  link?: true;
 }
 
 export interface SignedMeta {
@@ -285,13 +291,15 @@ export function decryptGroupMeta(
   const json = aead.open(groupKey, blob, metaAd(groupId, keyVersion));
   const o = attempt('DECRYPT_FAILED', () => JSON.parse(utf8.decode(json)) as Partial<GroupMeta>);
   const direct = o.direct === true;
+  const link = o.link === true;
   const ok =
     typeof o.name === 'string' && o.name.length <= 200 &&
     (o.avatar === undefined || (typeof o.avatar === 'string' && o.avatar.length <= 40)) &&
-    Array.isArray(o.keywords) && o.keywords.length === (direct ? 0 : 3) && o.keywords.every((w) => typeof w === 'string' && w.length <= 40) &&
+    Array.isArray(o.keywords) && o.keywords.length === (direct || link ? 0 : 3) && o.keywords.every((w) => typeof w === 'string' && w.length <= 40) &&
     isIdList(o.admins) && isIdList(o.members) && o.admins.every((a) => o.members!.includes(a)) &&
     // A private conversation: the two of them, both admins, nobody else ever.
     (o.direct === undefined || (direct && o.members!.length === 2 && o.admins!.length === 2)) &&
+    (o.link === undefined || (link && !direct)) &&
     Number.isInteger(o.rev) && o.rev! >= 1;
   if (!ok) throw new CryptoError('DECRYPT_FAILED');
   return {
@@ -302,5 +310,6 @@ export function decryptGroupMeta(
     members: o.members!,
     rev: o.rev!,
     ...(direct && { direct: true as const }),
+    ...(link && { link: true as const }),
   };
 }

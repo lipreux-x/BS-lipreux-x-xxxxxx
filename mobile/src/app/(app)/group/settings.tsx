@@ -1,15 +1,27 @@
+import Constants from 'expo-constants';
 import { router, Stack, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { LockKeyhole, MessageSquareLock } from 'lucide-react-native';
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GROUP_CODE_LENGTH } from '@/crypto';
 import { wipe } from '@/crypto/encoding';
 import { useUnlocked } from '@/session/SessionProvider';
 import { useInsideGroup } from '@/session/useInsideGroup';
 import { ApiError, NetworkError } from '@/services/api';
+import { copySensitive } from '@/services/clipboard';
+import { groupLinkUrl } from '@/services/groupLink';
 import { groupInfo, leaveGroup, type GroupInfo, type GroupInfoMember } from '@/services/groupInfo';
-import { CodeChangedError, fingerprintOf, GroupTamperedError, KeyChangedError, rotateNow, setAdmins } from '@/services/groups';
+import {
+  CodeChangedError,
+  createGroupLink,
+  fingerprintOf,
+  GroupTamperedError,
+  KeyChangedError,
+  revokeGroupLinks,
+  rotateNow,
+  setAdmins,
+} from '@/services/groups';
 import { records } from '@/services/localStore';
 import { LockedOutError, WrongCodeError } from '@/services/vault';
 import { Avatar, isAvatarId } from '@/ui/avatars';
@@ -17,6 +29,7 @@ import { CHAT_LOOKS, chatLook, type ChatLook } from '@/ui/chat/look';
 import { countdownLabel, dateTimeLabel } from '@/ui/chat/timeline';
 import { CodeEntry } from '@/ui/CodeEntry';
 import { useDialog } from '@/ui/Dialog';
+import { InviteCodeDisplay } from '@/ui/InviteCode';
 import { Key } from '@/ui/Key';
 import { Label } from '@/ui/Label';
 import { panelStyle } from '@/ui/Panel';
@@ -24,6 +37,9 @@ import { screenStyle } from '@/ui/Screen';
 import { Segment } from '@/ui/Segment';
 import { Working } from '@/ui/Working';
 import { colors, fonts, lcd, mono, neon, space, type } from '@/ui/theme';
+
+/** This build's URL scheme, for the links it makes (the development build has its own). */
+const SCHEME = [Constants.expoConfig?.scheme].flat()[0] ?? 'basesecrete';
 
 const EPHEMERAL: { label: string; seconds: number | null }[] = [
   { label: 'Désactivés', seconds: null },
@@ -40,6 +56,9 @@ const EPHEMERAL: { label: string; seconds: number | null }[] = [
  * group/direct). A private conversation's own sheet has no keywords, no code
  * to change and nobody to remove: the other person (their safety number),
  * the same settings, and « Supprimer la discussion », for both.
+ *
+ * A group without a code has no keywords and no code to change either: its
+ * admins send single-use links instead (« Inviter par lien »).
  */
 export default function GroupSettings() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -56,6 +75,8 @@ export default function GroupSettings() {
   const [keywordsShown, setKeywordsShown] = useState<'hidden' | 'asking' | 'shown'>('hidden');
   const [lockedFor, setLockedFor] = useState(0);
   useEffect(() => () => setKeywordsShown('hidden'), []);
+  // The last link made here (group without a code): until it is used, or the screen is left.
+  const [link, setLink] = useState<{ code: string; expiresAt: string } | null>(null);
   // The look of the conversation: this phone's own choice, sealed in its local store (undefined: not read yet).
   const [look, setLook] = useState<ChatLook | undefined>(undefined);
   useEffect(() => {
@@ -113,10 +134,40 @@ export default function GroupSettings() {
     }
   }
 
+  /** One link for one person: the previous one shown here stays valid until used or revoked. */
+  function makeLink() {
+    void run(async () => setLink(await createGroupLink(session, id)), 'Impossible de créer le lien');
+  }
+
+  function shareLink(code: string) {
+    // The link last: pasted whole into « Rejoindre un groupe », the field keeps the last 16 characters, its code.
+    void Share.share({
+      message: `Invitation à un groupe BaseSecrète, valable une seule fois pendant 24 h. Si le lien ne s’ouvre pas, dans l’app : Rejoindre un groupe › Lien d’invitation, et colle ce message.\n${groupLinkUrl(code, SCHEME)}`,
+    }).catch(() => {});
+  }
+
+  function revokeLinks() {
+    dialog('Annuler les liens envoyés ?', 'Les liens pas encore utilisés ne marcheront plus. Les demandes déjà reçues restent à accepter ou refuser.', [
+      { text: 'Retour', style: 'cancel' },
+      {
+        text: 'Annuler les liens',
+        style: 'destructive',
+        onPress: () =>
+          void run(async () => {
+            const n = await revokeGroupLinks(session, id);
+            setLink(null);
+            dialog(n ? (n === 1 ? '1 lien annulé' : `${n} liens annulés`) : 'Aucun lien en cours');
+          }, 'Impossible d’annuler les liens'),
+      },
+    ]);
+  }
+
   function remove(m: GroupInfoMember) {
     dialog(
       `Retirer ${m.username} ?`,
-      'Une nouvelle clé sera créée tout de suite : il ne pourra plus lire les nouveaux messages, ni revenir avec le code. Change aussi le code et les mots-clés s’il pourrait les avoir donnés à quelqu’un.',
+      info?.link
+        ? 'Une nouvelle clé sera créée tout de suite : il ne pourra plus lire les nouveaux messages, ni revenir, même avec un nouveau lien.'
+        : 'Une nouvelle clé sera créée tout de suite : il ne pourra plus lire les nouveaux messages, ni revenir avec le code. Change aussi le code et les mots-clés s’il pourrait les avoir donnés à quelqu’un.',
       [
         { text: 'Annuler', style: 'cancel' },
         {
@@ -129,7 +180,7 @@ export default function GroupSettings() {
               const open = openGroups.get(id);
               if (open) {
                 const r = await rotateNow(session, profiles, id, open.keys);
-                openGroups.set(id, { keys: r.keys, keyVersion: r.keyVersion, name: r.name });
+                openGroups.set(id, { keys: r.keys, keyVersion: r.keyVersion, name: r.name, link: !!r.meta.link });
               }
               load();
             }, 'Impossible de retirer ce membre'),
@@ -176,11 +227,10 @@ export default function GroupSettings() {
   function leave(i: GroupInfo) {
     const others = i.members.filter((m) => !m.me && !m.unknown);
     const lastAdmin = i.myRole === 'admin' && i.members.filter((m) => m.role === 'admin').length === 1 && others.length > 0;
+    const back = i.link ? 'Tu ne pourras revenir qu’avec un nouveau lien d’un admin, et son accord.' : 'Tu ne pourras revenir qu’avec le code, les mots-clés et l’accord d’un admin.';
     dialog(
       'Quitter le groupe ?',
-      lastAdmin
-        ? 'Tu es le seul admin : le membre le plus ancien le deviendra. Tu ne pourras revenir qu’avec le code, les mots-clés et l’accord d’un admin.'
-        : 'Tu ne pourras revenir qu’avec le code, les mots-clés et l’accord d’un admin.',
+      lastAdmin ? `Tu es le seul admin : le membre le plus ancien le deviendra. ${back}` : back,
       [
         { text: 'Annuler', style: 'cancel' },
         {
@@ -233,7 +283,37 @@ export default function GroupSettings() {
       {info.name ? <Stack.Screen options={{ title: info.name }} /> : null}
       {dialogView}
 
-      {direct ? null : (
+      {info.link ? (
+        <>
+          <Label style={styles.section}>Inviter par lien</Label>
+          <View style={styles.card}>
+            {admin ? (
+              <>
+                <Text style={type.dim}>
+                  Un lien par personne, valable une seule fois pendant 24 h. Elle demande à entrer en l’ouvrant, puis tu acceptes sa demande dans la
+                  discussion, après avoir comparé son numéro de sécurité. Refusée ou ratée : crée-lui un nouveau lien.
+                </Text>
+                {link ? (
+                  <View style={styles.linkBox}>
+                    <InviteCodeDisplay code={link.code} />
+                    <Text style={styles.linkExpiry}>Valable jusqu’à {dateTimeLabel(new Date(link.expiresAt), new Date())}, une seule fois</Text>
+                    <View style={styles.linkKeys}>
+                      <Key size="sm" tone="cold" label="Partager" onPress={() => shareLink(link.code)} />
+                      <Key size="sm" tone="cold" label="Copier le lien" onPress={() => void copySensitive(groupLinkUrl(link.code, SCHEME))} />
+                    </View>
+                  </View>
+                ) : null}
+                <Key size="sm" tone="cold" label={link ? 'Nouveau lien' : 'Créer un lien'} style={styles.reveal} disabled={busy} onPress={makeLink} />
+                <Pressable accessibilityRole="button" onPress={revokeLinks} disabled={busy} hitSlop={8} style={styles.revoke}>
+                  <Text style={styles.linkText}>Annuler les liens envoyés</Text>
+                </Pressable>
+              </>
+            ) : (
+              <Text style={type.dim}>Groupe sans code : un admin invite chaque nouveau membre avec un lien à usage unique.</Text>
+            )}
+          </View>
+        </>
+      ) : direct ? null : (
         <>
         <Label style={styles.section}>Mots-clés pour rejoindre</Label>
         <View style={styles.card}>
@@ -374,9 +454,9 @@ export default function GroupSettings() {
             <LockKeyhole size={16} color={colors.accentFg} />
             <Text style={type.body}>Fermer le coffre</Text>
           </View>
-          <Text style={type.dim}>Le code sera redemandé pour rouvrir la discussion.</Text>
+          <Text style={type.dim}>{info.link ? 'Ses clés quittent la mémoire. Groupe sans code : il se rouvre d’un geste.' : 'Le code sera redemandé pour rouvrir la discussion.'}</Text>
         </Pressable>
-        {admin && !direct ? (
+        {admin && !direct && !info.link ? (
           <Pressable
             disabled={busy}
             onPress={() => router.push({ pathname: '/group/code', params: { id } })}
@@ -419,6 +499,10 @@ const styles = StyleSheet.create({
   reveal: { marginTop: space.md, alignSelf: 'flex-start' },
   link: { marginTop: space.sm, alignSelf: 'center', paddingVertical: space.sm, paddingHorizontal: space.md },
   linkText: { color: colors.textDim, fontSize: 15 },
+  linkBox: { gap: space.sm, marginTop: space.md },
+  linkExpiry: { ...type.dim, fontSize: 13, textAlign: 'center' },
+  linkKeys: { flexDirection: 'row', gap: space.sm, justifyContent: 'center' },
+  revoke: { marginTop: space.md, alignSelf: 'flex-start', paddingVertical: space.xs },
   note: { marginTop: space.md, fontSize: 13 },
   row: { flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingVertical: space.sm },
   divider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },

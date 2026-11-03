@@ -78,8 +78,12 @@ export interface GroupSummary {
   expiresAt: string | null;
   role: 'admin' | 'member';
   sealedKeys: WireHandout[];
-  /** 'direct': a private conversation between two people (absent from an older server: a group). */
-  kind?: 'group' | 'direct';
+  /**
+   * 'direct': a private conversation between two people. 'link': a group
+   * without a code, entered by an admin's single-use link. Absent from an
+   * older server: a group.
+   */
+  kind?: 'group' | 'direct' | 'link';
   /** Private conversation: the other person, as the server says (a hint; the signed meta decides). */
   peerId?: string;
 }
@@ -288,12 +292,16 @@ export class Api {
     return this.request<Record<string, number>>('/groups/unread', { method: 'POST', json: { cursors } });
   }
 
-  /** The creator's own handout and the signed meta go up with the group. `joinKey` comes from the code + keywords. */
+  /**
+   * The creator's own handout and the signed meta go up with the group. `joinKey` comes from the code + keywords;
+   * a group without a code (kind 'link') has none.
+   */
   createGroup(input: {
     id: string;
     encryptedMeta: string;
     metaSignature: string;
-    joinKey: string;
+    kind?: 'group' | 'link';
+    joinKey?: string;
     sealedKey: string;
     keySignature: string;
     sealedLabel?: string;
@@ -322,6 +330,21 @@ export class Api {
   /** Asks to join: pending until an admin approves. The code and keywords never leave the phone, only `joinKey`. */
   joinGroup(joinKey: string) {
     return this.request<{ groupId: string; status: 'pending' | 'active' }>('/groups/join', { method: 'POST', json: { joinKey } });
+  }
+
+  /** Asks to join a group without a code with an admin's link: pending until an admin approves. 403 invalid_link: wrong, used or expired. */
+  joinWithLink(code: string) {
+    return this.request<{ groupId: string; status: 'pending' | 'active' }>('/groups/join-link', { method: 'POST', json: { code } });
+  }
+
+  /** Admin of a group without a code: a new single-use link. */
+  createGroupLink(groupId: string) {
+    return this.request<{ code: string; expiresAt: string }>(`/groups/${id(groupId)}/links`, { method: 'POST' });
+  }
+
+  /** Admin: the group's unused links stop working. */
+  revokeGroupLinks(groupId: string) {
+    return this.request<{ revoked: number }>(`/groups/${id(groupId)}/links`, { method: 'DELETE' });
   }
 
   /** Active members, and the pending requests (only an admin gets those). */

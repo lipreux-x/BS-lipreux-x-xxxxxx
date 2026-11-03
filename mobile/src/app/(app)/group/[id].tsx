@@ -74,6 +74,7 @@ import { quoteResolver, replyRefFor, resolveQuote, type Quote } from '@/ui/chat/
 import { SwipeToReply } from '@/ui/chat/SwipeToReply';
 import { SwipeBack } from '@/ui/SwipeBack';
 import { buildTimeline, countdownLabel, dateTimeLabel, dayLabel, dayRange, timeLabel } from '@/ui/chat/timeline';
+import { Button } from '@/ui/Button';
 import { CodeEntry, type CodeResult } from '@/ui/CodeEntry';
 import { NamePlate } from '@/ui/InviteCode';
 import { useDialog } from '@/ui/Dialog';
@@ -199,6 +200,8 @@ function GroupUnlock({ groupId, onOpen }: { groupId: string; onOpen(g: OpenGroup
   const [newWords, setNewWords] = useState(false);
   // A private conversation: no keywords, its first code is chosen here.
   const [direct, setDirect] = useState(listed?.direct ?? false);
+  // A group without a code: the app code (already typed) opens it, nothing is asked here.
+  const [link, setLink] = useState(listed?.link ?? false);
 
   // The header of a locked group: its name beside a red LED when this phone knows
   // it (closed after being opened once, or sealed to us by an admin beside the
@@ -227,6 +230,7 @@ function GroupUnlock({ groupId, onOpen }: { groupId: string; onOpen(g: OpenGroup
         if (!g) setGone(true);
         setName(g ? plateName(g) : null);
         setDirect(!!g?.direct);
+        setLink(!!g?.link);
         setState(g?.state ?? { kind: 'locked', codeChanged: false });
       })
       .catch(() => setState({ kind: 'locked', codeChanged: false }));
@@ -239,7 +243,7 @@ function GroupUnlock({ groupId, onOpen }: { groupId: string; onOpen(g: OpenGroup
         setState({ kind: 'waiting-key' });
         return null;
       }
-      const group = { keys: res.keys, keyVersion: res.keyVersion, name: res.name, direct: !!res.meta.direct };
+      const group = { keys: res.keys, keyVersion: res.keyVersion, name: res.name, direct: !!res.meta.direct, link: !!res.meta.link };
       if (res.codeChanged) {
         setRelock({ group, first: null, mismatch: false });
         return null;
@@ -318,7 +322,7 @@ function GroupUnlock({ groupId, onOpen }: { groupId: string; onOpen(g: OpenGroup
               try {
                 // The new code must open the key the admin re-wrapped with it: a wrong one is refused here.
                 const r = await relockGroup(session, profiles, groupId, group.keys, code, keywords ?? undefined);
-                const opened = { keys: r.keys, keyVersion: r.keyVersion, name: r.name, direct: !!r.meta.direct };
+                const opened = { keys: r.keys, keyVersion: r.keyVersion, name: r.name, direct: !!r.meta.direct, link: !!r.meta.link };
                 return () => onOpen(opened);
               } catch (e) {
                 if (e instanceof WrongCodeError) {
@@ -369,6 +373,15 @@ function GroupUnlock({ groupId, onOpen }: { groupId: string; onOpen(g: OpenGroup
         <Text style={[type.dim, { textAlign: 'center' }]}>
           Tu es membre. La nouvelle clé du groupe arrivera chiffrée pour toi dès qu’un admin ouvrira le groupe sur son téléphone.
         </Text>
+      </View>
+    );
+  }
+
+  if (link) {
+    return (
+      <View style={styles.center}>
+        <Stack.Screen options={lockedHeader} />
+        <OpenWithoutCode open={() => attempt('')} />
       </View>
     );
   }
@@ -453,6 +466,38 @@ function GroupUnlock({ groupId, onOpen }: { groupId: string; onOpen(g: OpenGroup
         busyLabel={DECRYPTING}
       />
       {codeChanged ? wordsLink : null}
+    </View>
+  );
+}
+
+/** A group without a code: its key opens at once (master key), the blade turning meanwhile; on a failure, why, and a retry. */
+function OpenWithoutCode({ open }: { open(): Promise<CodeResult> }) {
+  const [error, setError] = useState<string | null>(null);
+  const [tries, setTries] = useState(0);
+  // The first one: it only reads the session and the group's id, which do not change here.
+  const [run] = useState(() => open);
+  useEffect(() => {
+    let alive = true;
+    void run().then((r) => {
+      if (!alive) return;
+      if (typeof r === 'string') setError(r);
+      else r?.();
+    });
+    return () => {
+      alive = false;
+    };
+  }, [run, tries]);
+  if (!error) return <Working label={DECRYPTING} />;
+  return (
+    <View style={{ padding: space.lg, gap: space.md, alignItems: 'center' }}>
+      <Text style={[type.dim, { textAlign: 'center' }]}>{error}</Text>
+      <Button
+        title="Réessayer"
+        onPress={() => {
+          setError(null);
+          setTries((n) => n + 1);
+        }}
+      />
     </View>
   );
 }
@@ -588,7 +633,7 @@ function Chat({
       setExpiresAt(r.summary.expiresAt ? new Date(r.summary.expiresAt) : null);
       if (r.adminChanged) setNewAdmin(true);
       setAlert(null);
-      const g = { keys: r.keys, keyVersion: r.keyVersion, name: r.name, direct: !!r.meta.direct };
+      const g = { keys: r.keys, keyVersion: r.keyVersion, name: r.name, direct: !!r.meta.direct, link: !!r.meta.link };
       current.current = g;
       onUpdate(g);
       setRequests(admin ? await joinRequests(session, profiles, groupId).catch(() => []) : []);
@@ -1194,8 +1239,11 @@ function Chat({
           <View style={styles.sheet}>
             <Text style={type.heading}>Demandes d’accès</Text>
             <Text style={type.dim}>
-              Ces personnes ont donné le bon code et les bons mots-clés. Accepter leur envoie la clé du groupe. Pour être sûr que c’est bien elles,
-              compare en vrai ce numéro de sécurité avec celui affiché sur leur téléphone (Réglages) : les chiffres doivent être identiques.
+              {group.link
+                ? 'Ces personnes ont ouvert un lien d’invitation du groupe. Une demande refusée ne revient pas : il faudra un nouveau lien. '
+                : 'Ces personnes ont donné le bon code et les bons mots-clés. '}
+              Accepter leur envoie la clé du groupe. Pour être sûr que c’est bien elles, compare en vrai ce numéro de sécurité avec celui affiché sur
+              leur téléphone (Réglages) : les chiffres doivent être identiques.
             </Text>
             {requests.map((r) => (
               <View key={r.userId} style={styles.request}>
