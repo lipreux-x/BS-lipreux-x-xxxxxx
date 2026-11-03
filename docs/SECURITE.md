@@ -146,7 +146,7 @@ Trois audits ont été menés en parallèle : le serveur et l'API, le chiffremen
 11. **Android 12 et moins.** L'aperçu dans les apps récentes peut être capturé avant que le cache noir s'affiche. Seul `FLAG_SECURE` l'empêche, mais il bloque aussi les captures d'écran : depuis le 20/10, c'est une option dans les Réglages (« Captures d'écran : bloquées »), désactivée par défaut.
 12. **Clavier.** Le champ de message laisse le clavier apprendre les mots tapés : c'est un compromis entre confort et discrétion.
 13. **Mémoire.** En JavaScript, certaines valeurs secrètes (chaînes de caractères) ne peuvent pas être effacées de la mémoire. Le verrouillage est donc un verrou d'interface, pas un nettoyage garanti de la mémoire.
-14. **Codes de groupe courts.** 6 chiffres, c'est peu ; les mots-clés apportent l'essentiel de la protection. On pourrait encourager les codes plus longs.
+14. **Codes de groupe courts.** 4 chiffres (10 000 combinaisons), c'est peu, par choix : le code se tape à chaque ouverture. Les mots-clés apportent l'essentiel de la protection ; sur le téléphone, la clé du groupe est en plus enfermée sous la clé maître.
 15. **Historique après un changement de code.** Une version de clé que l'admin ne détient pas est supprimée du serveur. Un membre qui se reconnecte sur un nouveau téléphone perd alors ces anciens messages.
 
 ### Organisation

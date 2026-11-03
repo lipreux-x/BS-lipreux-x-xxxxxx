@@ -180,7 +180,7 @@ Le serveur n'envoie jamais le nom d'un groupe ni un mot d'un message : seulement
 - **Un téléphone piraté** (logiciel espion) ou **déverrouillé entre de mauvaises mains** voit ce que voit son propriétaire. Aucune messagerie ne protège contre ça.
 - **Les métadonnées** : le serveur sait qui est dans quel groupe, quand les messages passent, et leur taille approximative (voir §5).
 - **Un membre peut toujours copier** : capture d'écran (bloquable sur son propre téléphone, en option), photo de l'écran, copie du texte.
-- **Le code de groupe à 6 chiffres est court** : l'essentiel de la protection vient des mots-clés. Mieux vaut des mots-clés peu devinables.
+- **Le code de groupe à 4 chiffres est court** : l'essentiel de la protection vient des mots-clés. Mieux vaut des mots-clés peu devinables.
 - **Pas encore d'audit indépendant.** Les audits faits jusqu'ici (voir [SECURITE.md](SECURITE.md)) sont internes. Un audit par un cabinet spécialisé serait l'étape suivante avant un usage à grande échelle.
 
 ### En résumé

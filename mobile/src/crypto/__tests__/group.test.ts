@@ -60,29 +60,29 @@ const MALLORY = '0b0e7a52-0000-4000-8000-00000000ba0d';
 
 describe('group secret (code + keywords)', () => {
   it('same code and keywords give the same keys, whatever the case, accents and order', async () => {
-    const a = await deriveGroupSecrets('482913', ['Été', 'plage', 'Soleil']);
-    const b = await deriveGroupSecrets('482913', ['soleil', 'ete', '  PLAGE ']);
+    const a = await deriveGroupSecrets('4829', ['Été', 'plage', 'Soleil']);
+    const b = await deriveGroupSecrets('4829', ['soleil', 'ete', '  PLAGE ']);
     expect(b.joinKey).toEqual(a.joinKey);
     expect(b.wrapKey).toEqual(a.wrapKey);
     expect(sameKeywords(['Été', 'plage', 'Soleil'], ['soleil', 'ete', 'PLAGE'])).toBe(true);
   });
 
   it('the key sent to the server says nothing of the one that stays on the phone', async () => {
-    const { joinKey, wrapKey } = await deriveGroupSecrets('482913', ['été', 'plage', 'soleil']);
+    const { joinKey, wrapKey } = await deriveGroupSecrets('4829', ['été', 'plage', 'soleil']);
     expect(joinKey).not.toEqual(wrapKey);
   });
 
   it('another code or another keyword gives other keys', async () => {
-    const a = await deriveGroupSecrets('482913', ['été', 'plage', 'soleil']);
-    const b = await deriveGroupSecrets('482914', ['été', 'plage', 'soleil']);
-    const c = await deriveGroupSecrets('482913', ['été', 'plage', 'lune']);
+    const a = await deriveGroupSecrets('4829', ['été', 'plage', 'soleil']);
+    const b = await deriveGroupSecrets('4828', ['été', 'plage', 'soleil']);
+    const c = await deriveGroupSecrets('4829', ['été', 'plage', 'lune']);
     expect(b.wrapKey).not.toEqual(a.wrapKey);
     expect(c.wrapKey).not.toEqual(a.wrapKey);
   });
 
   it('refuses invalid input', async () => {
     await expect(deriveGroupSecrets('123', ['a', 'b', 'c'])).rejects.toThrow(CryptoError);
-    await expect(deriveGroupSecrets('482913', ['a', 'A', 'c'])).rejects.toThrow(CryptoError);
+    await expect(deriveGroupSecrets('4829', ['a', 'A', 'c'])).rejects.toThrow(CryptoError);
   });
 });
 
@@ -90,7 +90,7 @@ describe('key handouts', () => {
   let wrapKey: Uint8Array;
   const bobMe = () => ({ ...bob, userId: BOB });
   beforeAll(async () => {
-    wrapKey = (await deriveGroupSecrets('482913', ['été', 'plage', 'soleil'])).wrapKey;
+    wrapKey = (await deriveGroupSecrets('4829', ['été', 'plage', 'soleil'])).wrapKey;
   });
 
   it('the member opens the key an admin handed to them', () => {
@@ -100,7 +100,7 @@ describe('key handouts', () => {
 
   it('needs the group code: the account identity alone does not open it', async () => {
     const h = sealHandout(groupKey, wrapKey, ctx.groupId, 1, { userId: BOB, boxPublicKey: bob.boxPublicKey }, alice);
-    const wrongCode = (await deriveGroupSecrets('000000', ['été', 'plage', 'soleil'])).wrapKey;
+    const wrongCode = (await deriveGroupSecrets('0000', ['été', 'plage', 'soleil'])).wrapKey;
     expectCryptoError(() => openHandout(h, alice.signPublicKey, wrongCode, ctx.groupId, 1, bobMe()), 'DECRYPT_FAILED');
   });
 
@@ -226,7 +226,7 @@ describe('handout labels (the group name sealed beside the key)', () => {
   let wrapKey: Uint8Array;
   const bobMe = () => ({ ...bob, userId: BOB });
   beforeAll(async () => {
-    wrapKey = (await deriveGroupSecrets('482913', ['été', 'plage', 'soleil'])).wrapKey;
+    wrapKey = (await deriveGroupSecrets('4829', ['été', 'plage', 'soleil'])).wrapKey;
   });
 
   it('opens with the identity alone, before the code; the key still needs the code', () => {

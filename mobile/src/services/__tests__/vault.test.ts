@@ -101,12 +101,12 @@ describe('vault', () => {
     const vault = new Vault(store);
     const { masterKey } = await vault.create(account, generateIdentity(), '482913');
     const groupKey = generateGroupKey();
-    await vault.saveGroupKey('g1', 1, groupKey, '777111', masterKey);
+    await vault.saveGroupKey('g1', 1, groupKey, '7711', masterKey);
 
     expect(await vault.hasGroupKey('g1', 1)).toBe(true);
-    await expect(vault.openGroupKey('g1', 1, '777112', masterKey)).rejects.toBeInstanceOf(WrongCodeError);
+    await expect(vault.openGroupKey('g1', 1, '7712', masterKey)).rejects.toBeInstanceOf(WrongCodeError);
     expect((await vault.appLockout()).failures).toBe(0);
-    expect(await vault.openGroupKey('g1', 1, '777111', masterKey)).toEqual(groupKey);
+    expect(await vault.openGroupKey('g1', 1, '7711', masterKey)).toEqual(groupKey);
   });
 
   it('changes the app code', async () => {
@@ -162,7 +162,7 @@ describe('vault', () => {
     const store = memoryStore();
     const vault = new Vault(store);
     const { masterKey } = await vault.create(account, generateIdentity(), '482913');
-    await vault.saveGroupKey('g1', 1, generateGroupKey(), '777111', masterKey);
+    await vault.saveGroupKey('g1', 1, generateGroupKey(), '7711', masterKey);
     await vault.saveGroupSecret('g1', { wrapKey: generateGroupKey(), keywords: ['a', 'b', 'c'], codeVersion: 1 }, masterKey);
     await vault.wipeAll();
     expect(await vault.account()).toBeNull();

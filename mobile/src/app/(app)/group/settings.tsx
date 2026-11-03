@@ -3,6 +3,7 @@ import { LockKeyhole, MessageSquareLock } from 'lucide-react-native';
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { GROUP_CODE_LENGTH } from '@/crypto';
 import { wipe } from '@/crypto/encoding';
 import { useUnlocked } from '@/session/SessionProvider';
 import { useInsideGroup } from '@/session/useInsideGroup';
@@ -250,7 +251,7 @@ export default function GroupSettings() {
             </>
           ) : keywordsShown === 'asking' ? (
             <>
-              <CodeEntry title="Code du groupe" subtitle="Pour afficher les mots-clés." onComplete={revealKeywords} lockedForMs={lockedFor} />
+              <CodeEntry length={GROUP_CODE_LENGTH} title="Code du groupe" subtitle="Pour afficher les mots-clés." onComplete={revealKeywords} lockedForMs={lockedFor} />
               <Pressable accessibilityRole="button" onPress={() => setKeywordsShown('hidden')} hitSlop={8} style={styles.link}>
                 <Text style={styles.linkText}>Annuler</Text>
               </Pressable>

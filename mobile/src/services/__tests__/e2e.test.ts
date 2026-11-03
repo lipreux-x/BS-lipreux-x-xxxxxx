@@ -65,7 +65,9 @@ async function onboard(name: string, invite: string, appCode: string): Promise<S
 }
 
 // Letter codes: never collide with a real (digit) group code on the branch.
-const randomCode = () => `ZZ${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+const randomCode = () => String(Math.floor(Math.random() * 10_000)).padStart(4, '0');
+// Any other code than this one.
+const otherCode = (code: string) => String((Number(code) + 1) % 10_000).padStart(4, '0');
 
 run('app services against the API', () => {
   // The server refuses backups weaker than production: same cost as the app.
@@ -113,7 +115,7 @@ run('app services against the API', () => {
 
     // Bob's first unlock: his handout opens with the code he joined with, then is locked under it.
     expect((await listGroups(bob, bob.profiles)).items[0]!.state).toEqual({ kind: 'first-unlock', needsKeywords: false });
-    await expect(unlockGroup(bob, bob.profiles, groupId, 'ZZWRONG1')).rejects.toBeInstanceOf(WrongCodeError);
+    await expect(unlockGroup(bob, bob.profiles, groupId, otherCode(groupCode))).rejects.toBeInstanceOf(WrongCodeError);
     const bobOpen = (await unlockGroup(bob, bob.profiles, groupId, groupCode))!;
     expect(bobOpen.meta.members).toEqual([alice.account.userId, bob.account.userId]);
     expect((await listGroups(bob, bob.profiles)).items[0]).toMatchObject({ name: 'Les Potes', state: { kind: 'locked' } });
@@ -207,13 +209,13 @@ run('app services against the API', () => {
     ]);
 
     // Alice changes code + keywords on her first phone: the old code opens nothing anymore.
-    const newCode = randomCode();
+    const newCode = otherCode(groupCode);
     await changeGroupCode(alice, alice.profiles, groupId, rotated.keys, newCode, ['lune', 'mer', 'vent']);
     await expect(unlockGroup(alice, alice.profiles, groupId, groupCode)).rejects.toBeInstanceOf(WrongCodeError);
     expect(await unlockGroup(alice, alice.profiles, groupId, newCode)).toMatchObject({ codeChanged: false, meta: { keywords: ['lune', 'mer', 'vent'] } });
     // Her second phone is asked for the new code, which must open the re-wrapped key.
     expect((await unlockGroup(alice2, profiles2, groupId, groupCode))!.codeChanged).toBe(true);
-    await expect(relockGroup(alice2, profiles2, groupId, again.keys, 'ZZWRONG2')).rejects.toBeInstanceOf(WrongCodeError);
+    await expect(relockGroup(alice2, profiles2, groupId, again.keys, otherCode(newCode))).rejects.toBeInstanceOf(WrongCodeError);
     await relockGroup(alice2, profiles2, groupId, again.keys, newCode);
     expect(await unlockGroup(alice2, profiles2, groupId, newCode)).toMatchObject({ codeChanged: false });
     // Nobody can join with the old code + keywords.

@@ -1,6 +1,7 @@
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
+import { GROUP_CODE_LENGTH } from '@/crypto';
 import { useUnlocked } from '@/session/SessionProvider';
 import { ApiError, NetworkError } from '@/services/api';
 import { createGroup } from '@/services/groups';
@@ -66,10 +67,11 @@ export default function NewGroup() {
     return (
       <View style={styles.center}>
         <CodeEntry
+          length={GROUP_CODE_LENGTH}
           key="code"
           initialError={step.notice}
           title="Code du groupe"
-          subtitle="6 chiffres à partager à l’oral avec les membres."
+          subtitle="4 chiffres à partager à l’oral avec les membres."
           onComplete={async (code) => {
             setStep({ kind: 'confirm', code });
             return null;
@@ -83,6 +85,7 @@ export default function NewGroup() {
     return (
       <View style={styles.center}>
         <CodeEntry
+          length={GROUP_CODE_LENGTH}
           key="confirm"
           title="Confirme le code"
           onComplete={async (code) => {

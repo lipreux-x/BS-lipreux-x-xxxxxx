@@ -38,8 +38,8 @@ export interface WrappedKey {
 }
 
 export const APP_CODE_PATTERN = /^\d{6}$/;
-// 6+ characters; longer alphanumeric codes are accepted too.
-export const GROUP_CODE_PATTERN = /^[0-9A-Za-z]{6,64}$/;
+export const GROUP_CODE_LENGTH = 4;
+export const GROUP_CODE_PATTERN = /^\d{4}$/;
 
 export function isValidAppCode(code: string): boolean {
   return APP_CODE_PATTERN.test(code);

@@ -28,10 +28,10 @@ describe('code validation', () => {
     for (const bad of ['12345', '1234567', '12345a', '', ' 123456']) expect(isValidAppCode(bad)).toBe(false);
   });
 
-  it('group code is 6+ alphanumerics', () => {
-    expect(isValidGroupCode('000000')).toBe(true);
-    expect(isValidGroupCode('BaseSecrete2026')).toBe(true);
-    for (const bad of ['12345', '12 3456', 'abc-def']) expect(isValidGroupCode(bad)).toBe(false);
+  it('group code is exactly 4 digits', () => {
+    expect(isValidGroupCode('0000')).toBe(true);
+    expect(isValidGroupCode('4829')).toBe(true);
+    for (const bad of ['123', '12345', '482913', '12 3', 'abcd', '']) expect(isValidGroupCode(bad)).toBe(false);
   });
 });
 
@@ -85,26 +85,26 @@ describe('group key (group code + master key)', () => {
   it('right group code + right master key unlocks', async () => {
     const master = generateMasterKey();
     const groupKey = generateGroupKey();
-    const locked = await lockGroupKey(groupKey, '777111', master, groupId, 1);
-    expect(await unlockGroupKey(locked, '777111', master, groupId, 1)).toEqual(groupKey);
+    const locked = await lockGroupKey(groupKey, '7711', master, groupId, 1);
+    expect(await unlockGroupKey(locked, '7711', master, groupId, 1)).toEqual(groupKey);
   });
 
   it('wrong group code fails', async () => {
     const master = generateMasterKey();
-    const locked = await lockGroupKey(generateGroupKey(), '777111', master, groupId, 1);
-    await expectDecryptFailed(unlockGroupKey(locked, '777112', master, groupId, 1));
+    const locked = await lockGroupKey(generateGroupKey(), '7711', master, groupId, 1);
+    await expectDecryptFailed(unlockGroupKey(locked, '7712', master, groupId, 1));
   });
 
   it('right group code without the master key fails', async () => {
-    const locked = await lockGroupKey(generateGroupKey(), '777111', generateMasterKey(), groupId, 1);
-    await expectDecryptFailed(unlockGroupKey(locked, '777111', generateMasterKey(), groupId, 1));
+    const locked = await lockGroupKey(generateGroupKey(), '7711', generateMasterKey(), groupId, 1);
+    await expectDecryptFailed(unlockGroupKey(locked, '7711', generateMasterKey(), groupId, 1));
   });
 
   it('a locked key cannot be swapped onto another group or key version', async () => {
     const master = generateMasterKey();
-    const locked = await lockGroupKey(generateGroupKey(), '777111', master, groupId, 1);
-    await expectDecryptFailed(unlockGroupKey(locked, '777111', master, 'group-2', 1));
-    await expectDecryptFailed(unlockGroupKey(locked, '777111', master, groupId, 2));
+    const locked = await lockGroupKey(generateGroupKey(), '7711', master, groupId, 1);
+    await expectDecryptFailed(unlockGroupKey(locked, '7711', master, 'group-2', 1));
+    await expectDecryptFailed(unlockGroupKey(locked, '7711', master, groupId, 2));
   });
 });
 

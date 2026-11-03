@@ -19,7 +19,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { API_URL } from '@/config';
-import type { FileBody, ImageBody, ReactionId, ReplyRef, VoiceBody } from '@/crypto';
+import { GROUP_CODE_LENGTH, type FileBody, type ImageBody, type ReactionId, type ReplyRef, type VoiceBody } from '@/crypto';
 import { wipe } from '@/crypto/encoding';
 import { useUnlocked, type OpenGroup } from '@/session/SessionProvider';
 import { useInsideGroup } from '@/session/useInsideGroup';
@@ -293,6 +293,7 @@ function GroupUnlock({ groupId, onOpen }: { groupId: string; onOpen(g: OpenGroup
         <Stack.Screen options={{ title: 'Nouveau code' }} />
         {relock.first === null ? (
           <CodeEntry
+            length={GROUP_CODE_LENGTH}
             key="new"
             title="Le code du groupe a changé"
             subtitle="Entre le nouveau code, donné en vrai par l’admin."
@@ -304,6 +305,7 @@ function GroupUnlock({ groupId, onOpen }: { groupId: string; onOpen(g: OpenGroup
           />
         ) : (
           <CodeEntry
+            length={GROUP_CODE_LENGTH}
             key="confirm-new"
             holdOnSuccess
             busyLabel={DECRYPTING}
@@ -396,6 +398,7 @@ function GroupUnlock({ groupId, onOpen }: { groupId: string; onOpen(g: OpenGroup
         <Stack.Screen options={lockedHeader} />
         {firstCode === null ? (
           <CodeEntry
+            length={GROUP_CODE_LENGTH}
             key="code"
             initialError={mismatch ? 'Les codes ne correspondent pas' : undefined}
             header={codeHeader}
@@ -412,6 +415,7 @@ function GroupUnlock({ groupId, onOpen }: { groupId: string; onOpen(g: OpenGroup
           />
         ) : (
           <CodeEntry
+            length={GROUP_CODE_LENGTH}
             key="confirm"
             holdOnSuccess
             busyLabel={DECRYPTING}
@@ -439,6 +443,7 @@ function GroupUnlock({ groupId, onOpen }: { groupId: string; onOpen(g: OpenGroup
     <View style={styles.center}>
       <Stack.Screen options={lockedHeader} />
       <CodeEntry
+        length={GROUP_CODE_LENGTH}
         header={codeHeader}
         title={codeTitle}
         subtitle={codeChanged ? (keywords ? 'Nouveaux mots-clés notés : tape le nouveau code.' : 'L’admin a changé le code : tape le nouveau.') : undefined}

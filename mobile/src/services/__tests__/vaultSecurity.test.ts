@@ -37,7 +37,7 @@ describe('self-destruct after wrong app codes (SPEC §4.5)', () => {
     let now = 0;
     const vault = new Vault(store, () => now);
     const { masterKey } = await vault.create(account, generateIdentity(), '482913');
-    await vault.saveGroupKey('g1', 1, generateGroupKey(), '777111', masterKey);
+    await vault.saveGroupKey('g1', 1, generateGroupKey(), '7711', masterKey);
     await vault.setWipeAfter(10);
 
     for (let i = 1; i < 10; i++) {

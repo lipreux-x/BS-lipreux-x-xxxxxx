@@ -1,6 +1,7 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
+import { GROUP_CODE_LENGTH } from '@/crypto';
 import { useUnlocked } from '@/session/SessionProvider';
 import { useInsideGroup } from '@/session/useInsideGroup';
 import { ApiError, NetworkError } from '@/services/api';
@@ -66,6 +67,7 @@ export default function ChangeGroupCode() {
     return (
       <View style={styles.center}>
         <CodeEntry
+          length={GROUP_CODE_LENGTH}
           key="code"
           initialError={step.notice}
           title="Nouveau code du groupe"
@@ -82,6 +84,7 @@ export default function ChangeGroupCode() {
   return (
     <View style={styles.center}>
       <CodeEntry
+        length={GROUP_CODE_LENGTH}
         key="confirm"
         title="Confirme le nouveau code"
         onComplete={async (code) => {

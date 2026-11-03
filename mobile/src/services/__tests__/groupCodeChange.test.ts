@@ -214,14 +214,14 @@ const WORDS = ['lune', 'mer', 'vent'];
 /** Admin creates the group, each member asks to join with the code and is approved, then unlocks it once. */
 async function groupWith(server: FakeServer, n: number) {
   const admin = await phone(server, 'admin');
-  const { id, groupKey } = await createGroup(admin, 'Les Potes', '111111', WORDS);
+  const { id, groupKey } = await createGroup(admin, 'Les Potes', '1111', WORDS);
   const keys: GroupKeys = new Map([[1, groupKey]]);
   const members: Phone[] = [];
   for (let i = 0; i < n; i++) {
     const m = await phone(server, `m${i}`);
-    await joinGroup(m, '111111', WORDS);
+    await joinGroup(m, '1111', WORDS);
     await approveMember(admin, admin.profiles, id, keys, m.account.userId);
-    expect(await unlockGroup(m, m.profiles, id, '111111')).toMatchObject({ codeChanged: false });
+    expect(await unlockGroup(m, m.profiles, id, '1111')).toMatchObject({ codeChanged: false });
     members.push(m);
   }
   return { admin, id, keys, members };
@@ -233,33 +233,33 @@ describe('group code changes', () => {
   it('two code changes: the newest code opens the group directly, the old one still leads to it', async () => {
     const server = new FakeServer();
     const { admin, id, keys, members } = await groupWith(server, 2);
-    await changeGroupCode(admin, admin.profiles, id, keys, '222222', WORDS);
-    await changeGroupCode(admin, admin.profiles, id, keys, '333333', WORDS);
+    await changeGroupCode(admin, admin.profiles, id, keys, '2222', WORDS);
+    await changeGroupCode(admin, admin.profiles, id, keys, '3333', WORDS);
     const [a, b] = members as [Phone, Phone];
 
     expect((await listGroups(a, a.profiles)).items[0]!.state).toEqual({ kind: 'locked', codeChanged: true });
     // The code in between opens nothing.
-    await expect(unlockGroup(a, a.profiles, id, '222222')).rejects.toBeInstanceOf(WrongCodeError);
+    await expect(unlockGroup(a, a.profiles, id, '2222')).rejects.toBeInstanceOf(WrongCodeError);
     // The newest one does, and from then on it is the code of this phone.
-    expect(await unlockGroup(a, a.profiles, id, '333333')).toMatchObject({ codeChanged: false, keyVersion: 1 });
+    expect(await unlockGroup(a, a.profiles, id, '3333')).toMatchObject({ codeChanged: false, keyVersion: 1 });
     expect((await listGroups(a, a.profiles)).items[0]!.state).toEqual({ kind: 'locked', codeChanged: false });
-    expect(await unlockGroup(a, a.profiles, id, '333333')).toMatchObject({ codeChanged: false });
-    await expect(unlockGroup(a, a.profiles, id, '111111')).rejects.toBeInstanceOf(WrongCodeError);
+    expect(await unlockGroup(a, a.profiles, id, '3333')).toMatchObject({ codeChanged: false });
+    await expect(unlockGroup(a, a.profiles, id, '1111')).rejects.toBeInstanceOf(WrongCodeError);
 
     // The very first code still works once, then asks for the new one (relock).
-    const old = await unlockGroup(b, b.profiles, id, '111111');
+    const old = await unlockGroup(b, b.profiles, id, '1111');
     expect(old).toMatchObject({ codeChanged: true });
-    await relockGroup(b, b.profiles, id, old!.keys, '333333');
-    expect(await unlockGroup(b, b.profiles, id, '333333')).toMatchObject({ codeChanged: false });
+    await relockGroup(b, b.profiles, id, old!.keys, '3333');
+    expect(await unlockGroup(b, b.profiles, id, '3333')).toMatchObject({ codeChanged: false });
   });
 
   it('new keywords too: the new code with the old keywords fails, with the new ones it opens', async () => {
     const server = new FakeServer();
     const { admin, id, keys, members } = await groupWith(server, 1);
-    await changeGroupCode(admin, admin.profiles, id, keys, '444444', ['soleil', 'pluie', 'neige']);
+    await changeGroupCode(admin, admin.profiles, id, keys, '4444', ['soleil', 'pluie', 'neige']);
     const [a] = members as [Phone];
-    await expect(unlockGroup(a, a.profiles, id, '444444')).rejects.toBeInstanceOf(WrongCodeError);
-    expect(await unlockGroup(a, a.profiles, id, '444444', ['soleil', 'pluie', 'neige'])).toMatchObject({
+    await expect(unlockGroup(a, a.profiles, id, '4444')).rejects.toBeInstanceOf(WrongCodeError);
+    expect(await unlockGroup(a, a.profiles, id, '4444', ['soleil', 'pluie', 'neige'])).toMatchObject({
       codeChanged: false,
       meta: { keywords: ['soleil', 'pluie', 'neige'] },
     });
@@ -269,20 +269,20 @@ describe('group code changes', () => {
     const server = new FakeServer();
     const { admin, id, keys, members } = await groupWith(server, 2);
     const [a, gone] = members as [Phone, Phone];
-    const openKeys = (await unlockGroup(a, a.profiles, id, '111111'))!.keys;
-    await changeGroupCode(admin, admin.profiles, id, keys, '555555', ['soleil', 'pluie', 'neige']);
+    const openKeys = (await unlockGroup(a, a.profiles, id, '1111'))!.keys;
+    await changeGroupCode(admin, admin.profiles, id, keys, '5555', ['soleil', 'pluie', 'neige']);
     // Someone is removed: the admin rotates under the new code.
     await admin.api.removeMember(id, gone.account.userId);
     await rotateNow(admin, admin.profiles, id, keys);
 
     await expect(syncGroup(a, a.profiles, id, openKeys)).rejects.toBeInstanceOf(CodeChangedError);
     // Old code: the kept key opens, then the relock needs the new keywords (the verified meta is older).
-    const old = await unlockGroup(a, a.profiles, id, '111111');
+    const old = await unlockGroup(a, a.profiles, id, '1111');
     expect(old).toMatchObject({ codeChanged: true, keyVersion: 1 });
-    await expect(relockGroup(a, a.profiles, id, old!.keys, '555555')).rejects.toBeInstanceOf(WrongCodeError);
-    const r = await relockGroup(a, a.profiles, id, old!.keys, '555555', ['soleil', 'pluie', 'neige']);
+    await expect(relockGroup(a, a.profiles, id, old!.keys, '5555')).rejects.toBeInstanceOf(WrongCodeError);
+    const r = await relockGroup(a, a.profiles, id, old!.keys, '5555', ['soleil', 'pluie', 'neige']);
     expect(r.keyVersion).toBe(2);
-    expect(await unlockGroup(a, a.profiles, id, '555555')).toMatchObject({ codeChanged: false, keyVersion: 2 });
+    expect(await unlockGroup(a, a.profiles, id, '5555')).toMatchObject({ codeChanged: false, keyVersion: 2 });
   });
 
   it('a second admin still on the old code neither rotates nor approves under it', async () => {
@@ -290,9 +290,9 @@ describe('group code changes', () => {
     const { admin, id, keys, members } = await groupWith(server, 2);
     const [admin2, leaver] = members as [Phone, Phone];
     await setAdmins(admin, admin.profiles, id, keys, [admin.account.userId, admin2.account.userId]);
-    const open2 = (await unlockGroup(admin2, admin2.profiles, id, '111111'))!.keys;
+    const open2 = (await unlockGroup(admin2, admin2.profiles, id, '1111'))!.keys;
 
-    await changeGroupCode(admin, admin.profiles, id, keys, '666666', WORDS);
+    await changeGroupCode(admin, admin.profiles, id, keys, '6666', WORDS);
     await admin.api.removeMember(id, leaver.account.userId);
     // admin2's phone, open with the old code: no rotation from it (the others could not open that key).
     await syncGroup(admin2, admin2.profiles, id, open2);
@@ -301,37 +301,37 @@ describe('group code changes', () => {
 
     // A newcomer who knows only the new code: admin2 must not approve with the old one.
     const newcomer = await phone(server, 'newcomer');
-    await joinGroup(newcomer, '666666', WORDS);
+    await joinGroup(newcomer, '6666', WORDS);
     await expect(approveMember(admin2, admin2.profiles, id, open2, newcomer.account.userId)).rejects.toBeInstanceOf(CodeChangedError);
     // The first admin rotates and approves: the newcomer opens with the new code.
     const now = await syncGroup(admin, admin.profiles, id, keys);
     await approveMember(admin, admin.profiles, id, now.keys, newcomer.account.userId);
-    expect(await unlockGroup(newcomer, newcomer.profiles, id, '666666')).toMatchObject({ codeChanged: false });
+    expect(await unlockGroup(newcomer, newcomer.profiles, id, '6666')).toMatchObject({ codeChanged: false });
   });
 
   it('asked to join before a code change: the old code is a wrong code, the new one opens', async () => {
     const server = new FakeServer();
     const { admin, id, keys } = await groupWith(server, 0);
     const late = await phone(server, 'late');
-    await joinGroup(late, '111111', WORDS);
-    await changeGroupCode(admin, admin.profiles, id, keys, '777777', WORDS);
+    await joinGroup(late, '1111', WORDS);
+    await changeGroupCode(admin, admin.profiles, id, keys, '7777', WORDS);
     await approveMember(admin, admin.profiles, id, keys, late.account.userId);
 
     // Named before the first unlock: the admin sealed the name to them beside the key.
     expect((await listGroups(late, late.profiles)).items[0]).toMatchObject({ name: 'Les Potes', state: { kind: 'first-unlock', needsKeywords: false } });
-    await expect(unlockGroup(late, late.profiles, id, '111111')).rejects.toBeInstanceOf(WrongCodeError);
-    expect(await unlockGroup(late, late.profiles, id, '777777')).toMatchObject({ codeChanged: false });
+    await expect(unlockGroup(late, late.profiles, id, '1111')).rejects.toBeInstanceOf(WrongCodeError);
+    expect(await unlockGroup(late, late.profiles, id, '7777')).toMatchObject({ codeChanged: false });
   });
 
   it('a wrong code counts once, whichever way it was tried', async () => {
     const server = new FakeServer();
     const { admin, id, keys, members } = await groupWith(server, 1);
-    await changeGroupCode(admin, admin.profiles, id, keys, '888888', WORDS);
+    await changeGroupCode(admin, admin.profiles, id, keys, '8888', WORDS);
     const [a] = members as [Phone];
-    const err = await unlockGroup(a, a.profiles, id, '999999').catch((e: unknown) => e);
+    const err = await unlockGroup(a, a.profiles, id, '9999').catch((e: unknown) => e);
     expect(err).toBeInstanceOf(WrongCodeError);
     const first = (err as WrongCodeError).attemptsBeforeDelay;
-    const err2 = (await unlockGroup(a, a.profiles, id, '999998').catch((e: unknown) => e)) as WrongCodeError;
+    const err2 = (await unlockGroup(a, a.profiles, id, '9998').catch((e: unknown) => e)) as WrongCodeError;
     expect(err2.attemptsBeforeDelay).toBe(first - 1);
   });
 });
@@ -341,7 +341,7 @@ describe('the group name sealed beside the key', () => {
     const server = new FakeServer();
     const { admin, id, keys } = await groupWith(server, 0);
     const late = await phone(server, 'late');
-    await joinGroup(late, '111111', WORDS);
+    await joinGroup(late, '1111', WORDS);
     await approveMember(admin, admin.profiles, id, keys, late.account.userId);
     // Handouts written before the sealed name existed.
     for (const k of server.groups.get(id)!.keys) {

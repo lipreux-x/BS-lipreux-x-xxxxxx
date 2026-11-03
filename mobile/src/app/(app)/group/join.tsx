@@ -1,7 +1,7 @@
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { NativeCryptoMissingError } from '@/crypto';
+import { GROUP_CODE_LENGTH, NativeCryptoMissingError } from '@/crypto';
 import { useUnlocked } from '@/session/SessionProvider';
 import { ApiError, NetworkError } from '@/services/api';
 import { joinGroup } from '@/services/groups';
@@ -43,6 +43,7 @@ export default function JoinGroup() {
   return (
     <View style={styles.center}>
       <CodeEntry
+        length={GROUP_CODE_LENGTH}
         title="Code du groupe"
         subtitle="Demande-le à un membre, en vrai, avec les 3 mots-clés."
         onComplete={async (code) => {

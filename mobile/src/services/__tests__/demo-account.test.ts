@@ -59,7 +59,7 @@ run('App Review demo account', () => {
     const review = await onboard('apple_review', password, INVITE!);
     const camille = await onboard('camille_demo', randomPassword(), (await review.api.createInvite()).code);
 
-    const groupCode = String(randomInt(100000, 999999));
+    const groupCode = String(randomInt(1000, 10_000));
     const keywords = ['sun', 'beach', 'summer'];
     const { id: groupId } = await createGroup(review, 'Demo group', groupCode, keywords);
     const reviewOpen = (await unlockGroup(review, review.profiles, groupId, groupCode))!;

@@ -1,6 +1,7 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
+import { GROUP_CODE_LENGTH } from '@/crypto';
 import { useUnlocked } from '@/session/SessionProvider';
 import { ApiError, NetworkError } from '@/services/api';
 import { createDirect, directWith, KeyChangedError } from '@/services/groups';
@@ -68,6 +69,7 @@ export default function NewDirect() {
     return (
       <View style={styles.center}>
         <CodeEntry
+          length={GROUP_CODE_LENGTH}
           key="code"
           header={header}
           initialError={step.notice}
@@ -84,6 +86,7 @@ export default function NewDirect() {
   return (
     <View style={styles.center}>
       <CodeEntry
+        length={GROUP_CODE_LENGTH}
         key="confirm"
         header={header}
         title="Confirme le code"

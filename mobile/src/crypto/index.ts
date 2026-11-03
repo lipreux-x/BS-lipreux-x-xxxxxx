@@ -18,6 +18,7 @@ export {
   unlockGroupKey,
   isValidAppCode,
   isValidGroupCode,
+  GROUP_CODE_LENGTH,
   type WrappedKey,
 } from './keywrap';
 export {

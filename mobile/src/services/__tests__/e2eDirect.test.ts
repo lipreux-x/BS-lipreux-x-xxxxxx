@@ -68,7 +68,7 @@ run('private conversations against the API', () => {
     const B = bob.account.userId;
 
     // Carol shares no group with Alice: no conversation with her (and her profile is not even visible).
-    await expect(createDirect(alice, alice.profiles, carol.account.userId, '111111')).rejects.toBeTruthy();
+    await expect(createDirect(alice, alice.profiles, carol.account.userId, '1111')).rejects.toBeTruthy();
 
     // Alice and Bob share a group.
     const code = randomCode();
@@ -80,11 +80,11 @@ run('private conversations against the API', () => {
     await unlockGroup(bob, bob.profiles, groupId, code);
 
     // Alice opens a private conversation with Bob, locked on her phone with 424242.
-    const dm = await createDirect(alice, alice.profiles, B, '424242');
+    const dm = await createDirect(alice, alice.profiles, B, '4242');
     expect(dm.meta).toMatchObject({ direct: true, keywords: [], members: [A, B], admins: [A, B] });
     expect(dm.name).toBe(bob.account.username);
     // One per pair, whoever opens it.
-    await expect(createDirect(bob, bob.profiles, A, '000000')).rejects.toMatchObject({ code: 'direct_exists' });
+    await expect(createDirect(bob, bob.profiles, A, '0000')).rejects.toMatchObject({ code: 'direct_exists' });
     expect(await directWith(alice, B)).toBe(dm.id);
     expect(await directWith(bob, A)).toBe(dm.id);
 
@@ -96,12 +96,12 @@ run('private conversations against the API', () => {
     // Bob's list: under Alice's name (sealed to him beside the key) before any code; his first unlock chooses his own.
     const bobItem = (await listGroups(bob, bob.profiles)).items.find((g) => g.id === dm.id)!;
     expect(bobItem).toMatchObject({ direct: true, name: alice.account.username, state: { kind: 'first-unlock', needsKeywords: false } });
-    const bobDm = (await unlockGroup(bob, bob.profiles, dm.id, '777777'))!;
+    const bobDm = (await unlockGroup(bob, bob.profiles, dm.id, '7777'))!;
     expect(bobDm).toMatchObject({ name: alice.account.username, meta: { direct: true } });
     // From then on, his code (not Alice's) opens it on his phone.
-    await expect(unlockGroup(bob, bob.profiles, dm.id, '424242')).rejects.toBeInstanceOf(WrongCodeError);
-    expect((await unlockGroup(bob, bob.profiles, dm.id, '777777'))!.keyVersion).toBe(1);
-    await expect(unlockGroup(alice, alice.profiles, dm.id, '777777')).rejects.toBeInstanceOf(WrongCodeError);
+    await expect(unlockGroup(bob, bob.profiles, dm.id, '4242')).rejects.toBeInstanceOf(WrongCodeError);
+    expect((await unlockGroup(bob, bob.profiles, dm.id, '7777'))!.keyVersion).toBe(1);
+    await expect(unlockGroup(alice, alice.profiles, dm.id, '7777')).rejects.toBeInstanceOf(WrongCodeError);
 
     // Messages, both ways.
     await sendText(alice, dm.id, dm.groupKey, 1, 'en privé 🔒', newClientId());
