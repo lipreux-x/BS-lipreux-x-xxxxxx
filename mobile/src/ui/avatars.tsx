@@ -14,6 +14,7 @@ import {
   type LucideIcon,
 } from 'lucide-react-native';
 import { StyleSheet, View } from 'react-native';
+import { accountColor } from './accountColors';
 import { colors, steel } from './theme';
 
 /*
@@ -60,9 +61,11 @@ export const isAvatarId = (v: unknown): v is AvatarId => typeof v === 'string' &
 
 /**
  * Round badge with a bevelled metal ring (light on top, dark below, as on
- * the keypad keys) and the outline icon inside.
+ * the keypad keys) and the outline icon inside, drawn in the account's color
+ * (`color`, its id; none chosen: the cold sky blue). Only the stroke takes
+ * it: the ring stays steel, beside a message plate already tinted.
  */
-export function Avatar({ id, size = 40, selected }: { id: AvatarId | null | undefined; size?: number; selected?: boolean }) {
+export function Avatar({ id, size = 40, selected, color }: { id: AvatarId | null | undefined; size?: number; selected?: boolean; color?: string | null }) {
   const known = isAvatarId(id) ? id : null;
   const Icon = ICONS[known ?? 'default'];
   return (
@@ -70,7 +73,7 @@ export function Avatar({ id, size = 40, selected }: { id: AvatarId | null | unde
       accessibilityLabel={`Avatar : ${AVATAR_LABELS[known ?? 'default']}`}
       style={[styles.ring, { width: size, height: size, borderRadius: size / 2 }, selected && styles.selected]}
     >
-      <Icon size={size * 0.55} color={selected ? colors.text : colors.accentFg} strokeWidth={1.75} />
+      <Icon size={size * 0.55} color={selected ? colors.text : (accountColor(color) ?? colors.accentFg)} strokeWidth={1.75} />
     </View>
   );
 }

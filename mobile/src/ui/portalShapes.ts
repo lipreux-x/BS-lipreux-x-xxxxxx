@@ -68,7 +68,7 @@ function strokes(seed: number, count: number, r0: number, r1: number, turns: num
 
 /** Wide dark currents, the body of the swirl. */
 export const DARK_STROKES = strokes(7, 5, 42, 6, 0.85, 12);
-/** Mid-green currents between them. */
+/** Mid-tone currents between them. */
 export const MID_STROKES = strokes(21, 5, 41, 9, 0.8, 8);
 /** Thin bright streaks on top. */
 export const LIGHT_STROKES = strokes(42, 6, 43, 12, 0.75, 3.2);

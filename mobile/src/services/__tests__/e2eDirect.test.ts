@@ -51,7 +51,7 @@ async function onboard(name: string, invite: string, appCode: string): Promise<S
   return { ...s, profiles: new ProfileCache(s.api, vault, unlocked.masterKey, local) };
 }
 
-const randomCode = () => `ZZ${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+const randomCode = () => String(Math.floor(Math.random() * 10_000)).padStart(4, '0');
 
 run('private conversations against the API', () => {
   beforeAll(async () => {

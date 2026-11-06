@@ -1,4 +1,5 @@
-import { Api, ApiError, NetworkError } from '../api';
+import type { Identity } from '@/crypto';
+import { AccountGoneError, Api, ApiError, NetworkError } from '../api';
 
 /** Answers every request with this status and raw body. */
 function serve(status: number, body: string) {
@@ -33,5 +34,28 @@ describe('Api responses', () => {
     const e = await call();
     expect(e).toBeInstanceOf(ApiError);
     expect(e).toMatchObject({ status: 404, code: 'http_404' });
+  });
+});
+
+describe('Api sign-in', () => {
+  // Never signs anything: every case stops at the challenge.
+  const credentials = { userId: '00000000-0000-4000-8000-000000000000', identity: {} as Identity };
+
+  it('reports an account the server no longer knows (deleted), once per answer', async () => {
+    serve(404, '{"error":"not_found"}');
+    const onGone = jest.fn();
+    const e = await new Api('https://api.test', credentials, undefined, onGone).groups().catch((x: unknown) => x);
+    expect(e).toBeInstanceOf(AccountGoneError);
+    expect(e).toMatchObject({ status: 404, code: 'account_gone' });
+    expect(onGone).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not take a proxy page or an outage for a deleted account', async () => {
+    const onGone = jest.fn();
+    serve(404, '<html>Not Found</html>');
+    expect(await new Api('https://api.test', credentials, undefined, onGone).groups().catch((x: unknown) => x)).toMatchObject({ code: 'http_404' });
+    serve(503, 'upstream connect error');
+    expect(await new Api('https://api.test', credentials, undefined, onGone).groups().catch((x: unknown) => x)).toBeInstanceOf(NetworkError);
+    expect(onGone).not.toHaveBeenCalled();
   });
 });

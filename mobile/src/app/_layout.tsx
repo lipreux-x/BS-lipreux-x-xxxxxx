@@ -6,6 +6,7 @@ import {
   useFonts,
 } from '@expo-google-fonts/space-grotesk';
 import { Stack } from 'expo-router';
+import { useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { Text, View } from 'react-native';
 import { SessionProvider, useSession } from '@/session/SessionProvider';
@@ -13,6 +14,30 @@ import { Button } from '@/ui/Button';
 import { PrivacyCover } from '@/ui/PrivacyCover';
 import { Working } from '@/ui/Working';
 import { colors, fonts, space, type } from '@/ui/theme';
+
+/** The server no longer knows this account: erase the phone (or try again, for a server that answered wrong). */
+function AccountGone({ username, retry }: { username: string; retry(): void }) {
+  const { forgetAccount } = useSession();
+  const [busy, setBusy] = useState(false);
+  return (
+    <View style={{ flex: 1, backgroundColor: colors.bg, justifyContent: 'center', padding: space.lg, gap: space.md }}>
+      <Text style={type.heading}>Ce compte n’existe plus</Text>
+      <Text style={type.dim}>
+        Le serveur ne connaît plus « {username} » : le compte a été supprimé, depuis ce téléphone ou un autre. Les clés gardées ici n’ouvrent plus aucun
+        coffre. Efface-les pour créer un nouveau compte ou te reconnecter avec un autre.
+      </Text>
+      <Button
+        title="Effacer ce téléphone"
+        busy={busy}
+        onPress={() => {
+          setBusy(true);
+          void forgetAccount().catch(() => setBusy(false));
+        }}
+      />
+      <Button title="Réessayer" variant="ghost" disabled={busy} onPress={retry} />
+    </View>
+  );
+}
 
 function RootStack() {
   const { status } = useSession();
@@ -32,6 +57,7 @@ function RootStack() {
       </View>
     );
   }
+  if (status.kind === 'gone') return <AccountGone username={status.username} retry={status.retry} />;
   if (status.kind === 'loading' || (!fontsLoaded && !fontError)) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.bg }}>

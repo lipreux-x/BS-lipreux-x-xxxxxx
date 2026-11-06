@@ -3,11 +3,12 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { bevel, blade, colors, neon, space, steel } from './theme';
 
 /*
- * Each account picks its color (Settings, beside the avatar): in the chats,
- * its name is lit in it and its messages are tinted with it (a dark shade, so
- * the white text stays readable), for every member. The id is all the server stores (same list in server/src/app.ts). No red: it
- * stays for errors and what is shut. Null: the default, the terminal's green
- * for mine and the sky blue for the others'.
+ * Each member picks their color in each group (the group's settings,
+ * services/groupColors.ts): there, their name and avatar are lit in it and
+ * their messages are tinted with it (a dark shade, so the white text stays
+ * readable), for every member. The id is all the server stores (same list in server/src/app.ts). No red: it
+ * is the default for mine and stays for errors and what is shut. Null: the
+ * default, the blade's red for mine and the sky blue for the others'.
  */
 
 export const ACCOUNT_COLORS = ['sky', 'phosphor', 'cyan', 'violet', 'rose', 'amber', 'orange', 'gold'] as const;
@@ -15,7 +16,7 @@ export type AccountColorId = (typeof ACCOUNT_COLORS)[number];
 
 const HEX: Record<AccountColorId, string> = {
   sky: blade.sky,
-  phosphor: blade.neon,
+  phosphor: '#33FF33',
   cyan: '#2EF2D0',
   violet: '#B48CFF',
   rose: '#FF6FB5',
@@ -77,7 +78,7 @@ const CHOICES: (AccountColorId | null)[] = [null, ...ACCOUNT_COLORS];
 
 /**
  * The colors as small steel keys, 3 per row, each a lamp over its name:
- * "Par défaut" shows its two lights, green and sky blue. The chosen key is
+ * "Par défaut" shows its two lights, red and sky blue. The chosen key is
  * edged in white, its lamp glowing.
  */
 export function AccountColorPicker({

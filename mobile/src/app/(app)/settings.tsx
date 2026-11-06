@@ -1,5 +1,5 @@
 import { router, useFocusEffect } from 'expo-router';
-import { Bell, Bomb, CameraOff, FingerprintPattern, Lock, ScanFace, ShieldCheck, type LucideIcon, User, UserPlus } from 'lucide-react-native';
+import { Ban, Bell, Bomb, CameraOff, FingerprintPattern, Lock, ScanFace, ShieldCheck, type LucideIcon, Trash2, User, UserPlus } from 'lucide-react-native';
 import { useCallback, useEffect, useState } from 'react';
 import { AppState, Linking, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -7,23 +7,24 @@ import { keyFingerprint } from '@/crypto';
 import { useUnlocked } from '@/session/SessionProvider';
 import { copySensitive } from '@/services/clipboard';
 import { ApiError, NetworkError } from '@/services/api';
+import { blockedUsers, unblock, type BlockedUsers } from '@/services/blocked';
 import { biometricKind, biometricName, biometricWord, type BiometricKind } from '@/services/biometrics';
 import { registerPush, type PushStatus } from '@/services/push';
 import { WIPE_AFTER_CHOICES } from '@/services/vault';
 import { Avatar, isAvatarId, type AvatarId } from '@/ui/avatars';
 import { AvatarPicker } from '@/ui/AvatarPicker';
-import { AccountColorPicker, accountColor, isAccountColorId, type AccountColorId } from '@/ui/accountColors';
 import { Button } from '@/ui/Button';
 import { timeLabel } from '@/ui/chat/timeline';
 import { useDialog } from '@/ui/Dialog';
 import { InviteCodeDisplay } from '@/ui/InviteCode';
+import { Key } from '@/ui/Key';
 import { Panel } from '@/ui/Panel';
 import { Screen } from '@/ui/Screen';
 import { Segment } from '@/ui/Segment';
 import { colors, fonts, lcd, mono, neon, space, type } from '@/ui/theme';
 
 export default function Settings() {
-  const { session, profiles, vault, lock, setScreenshotsBlocked } = useUnlocked();
+  const { session, profiles, vault, lock, setScreenshotsBlocked, deleteAccount } = useUnlocked();
   const insets = useSafeAreaInsets();
   const [dialog, dialogView] = useDialog();
   // Per-phone security options, read from the Secure Store (undefined until then).
@@ -72,37 +73,15 @@ export default function Settings() {
   // undefined: not loaded yet (the server holds the choice, shared with group mates).
   const [avatar, setAvatar] = useState<AvatarId | null | undefined>(undefined);
   const [avatarError, setAvatarError] = useState<string | null>(null);
-  // Same for the color of my name and messages in the chats.
-  const [color, setColor] = useState<AccountColorId | null | undefined>(undefined);
-  const [colorError, setColorError] = useState<string | null>(null);
 
   useEffect(() => {
     session.api
       .me()
       .then((me) => {
         setAvatar(isAvatarId(me.avatar) ? me.avatar : null);
-        setColor(isAccountColorId(me.color) ? me.color : null);
       })
-      .catch(() => {
-        setAvatarError('Avatar indisponible hors ligne.');
-        setColorError('Couleur indisponible hors ligne.');
-      });
+      .catch(() => setAvatarError('Avatar indisponible hors ligne.'));
   }, [session]);
-
-  const myLit = accountColor(color);
-
-  async function chooseColor(next: AccountColorId | null) {
-    const previous = color ?? null;
-    setColor(next); // shown at once, put back if the server refuses
-    setColorError(null);
-    try {
-      await session.api.setColor(next);
-      profiles.setColor(session.account.userId, next);
-    } catch (e) {
-      setColor(previous);
-      setColorError(e instanceof NetworkError ? 'Pas de réseau.' : 'Impossible de changer la couleur.');
-    }
-  }
 
   async function chooseAvatar(next: AvatarId | null) {
     const previous = avatar ?? null;
@@ -116,6 +95,46 @@ export default function Settings() {
       setAvatarError(e instanceof NetworkError ? 'Pas de réseau.' : 'Impossible de changer l’avatar.');
     }
   }
+  // Members blocked on this phone (long press on one of their messages), read again on coming back.
+  const [blocked, setBlocked] = useState<BlockedUsers>({});
+  useFocusEffect(
+    useCallback(() => {
+      void blockedUsers(session.local)
+        .then(setBlocked)
+        .catch(() => {});
+    }, [session]),
+  );
+
+  const [deleting, setDeleting] = useState(false);
+  function confirmDelete() {
+    dialog(
+      'Supprimer ton compte ?',
+      'Tu quittes tous tes groupes, et tes tête-à-tête sont supprimés pour les deux. Tes messages, photos et vocaux sont effacés du serveur, ton pseudo et ton mot de passe ne servent plus à rien, et tout ce que l’app garde sur ce téléphone est effacé. C’est définitif.',
+      [
+        { text: 'Annuler', style: 'cancel' },
+        { text: 'Supprimer', style: 'destructive', onPress: () => void removeAccount(false) },
+      ],
+    );
+  }
+  async function removeAccount(force: boolean) {
+    setDeleting(true);
+    try {
+      await deleteAccount(force); // back to the welcome screen
+    } catch (e) {
+      setDeleting(false);
+      if (e instanceof ApiError && e.code === 'handover_required') {
+        dialog(
+          'Tu es le seul admin',
+          'Dans au moins un groupe où d’autres restent, tu es le seul admin. Nomme un autre admin dans les réglages du groupe avant de partir : sinon plus personne ne pourra y faire entrer quelqu’un.',
+          [
+            { text: 'Annuler', style: 'cancel' },
+            { text: 'Supprimer quand même', style: 'destructive', onPress: () => void removeAccount(true) },
+          ],
+        );
+      } else dialog('Suppression impossible', e instanceof NetworkError ? 'Pas de réseau.' : 'Réessaie plus tard.');
+    }
+  }
+
   const [invite, setInvite] = useState<{ code: string; expiresAt: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -140,7 +159,7 @@ export default function Settings() {
         <View style={styles.profile}>
           <Avatar id={avatar ?? null} size={64} />
           <View style={{ flex: 1, gap: 2 }}>
-            <Text style={[type.heading, myLit && { color: myLit }]}>{session.account.username}</Text>
+            <Text style={type.heading}>{session.account.username}</Text>
             <Text style={type.dim}>Visible par les membres de tes groupes.</Text>
           </View>
         </View>
@@ -148,9 +167,10 @@ export default function Settings() {
         <AvatarPicker value={avatar ?? null} onChange={(id) => void chooseAvatar(id)} disabled={avatar === undefined} />
         {avatarError ? <Text style={styles.error}>{avatarError}</Text> : null}
         <Text style={[styles.subTitle, styles.subTitleRow]}>Couleur dans les discussions</Text>
-        <Text style={type.dim}>Ton nom et tes messages prennent cette couleur, pour tous les membres.</Text>
-        <AccountColorPicker value={color ?? null} onChange={(id) => void chooseColor(id)} disabled={color === undefined} />
-        {colorError ? <Text style={styles.error}>{colorError}</Text> : null}
+        <Text style={type.dim}>
+          Une par groupe : dans un groupe ou un tête-à-tête, ouvre ses réglages puis « Ta couleur dans ce groupe ». Ton nom, ton avatar et tes messages
+          la prennent là, pour tous les membres.
+        </Text>
       </Section>
 
       <Section title="Inviter un pote" icon={UserPlus}>
@@ -239,6 +259,26 @@ export default function Settings() {
           onChange={chooseWipeAfter}
         />
       </Section>
+
+      {Object.keys(blocked).length ? (
+        <Section title="Membres bloqués" icon={Ban}>
+          <Text style={type.dim}>Sur ce téléphone, tu ne vois plus leurs messages, leurs réactions ni leurs stories. Ils n’en savent rien.</Text>
+          {Object.entries(blocked).map(([id, name]) => (
+            <View key={id} style={styles.blockedRow}>
+              <Text style={[type.body, styles.flex]}>{name}</Text>
+              <Button title="Débloquer" variant="ghost" onPress={() => void unblock(session.local, id).then(setBlocked)} />
+            </View>
+          ))}
+        </Section>
+      ) : null}
+
+      <Section title="Compte" icon={Trash2}>
+        <Text style={type.dim}>
+          Supprime ton compte et tout ce qui va avec, sur le serveur et sur ce téléphone. Pour signaler un membre ou un message : appui long sur le
+          message.
+        </Text>
+        <Key size="lg" label="Supprimer mon compte" variant="steel" tone="alert" busy={deleting} onPress={confirmDelete} />
+      </Section>
     </ScrollView>
   );
 }
@@ -280,6 +320,8 @@ const styles = StyleSheet.create({
   inviteBox: { gap: space.sm, paddingVertical: space.sm },
   inviteExpiry: { ...type.dim, fontSize: 13, textAlign: 'center' },
   error: { color: colors.danger },
+  blockedRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  flex: { flex: 1 },
   // The safety number on the safe's screen: lit characters, as a code.
   fingerprintScreen: { paddingVertical: space.sm, paddingHorizontal: space.md },
   fingerprint: { color: lcd.on, fontSize: 18, fontFamily: mono, letterSpacing: 1, textAlign: 'center', lineHeight: 28, ...neon.text(lcd.on, 6) },

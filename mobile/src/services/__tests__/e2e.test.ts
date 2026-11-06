@@ -124,7 +124,7 @@ run('app services against the API', () => {
     expect(await joinGroup(mallory, groupCode, keywords)).toBe(groupId);
     expect((await joinRequests(alice, alice.profiles, groupId)).map((r) => r.userId)).toEqual([mallory.account.userId]);
     await alice.api.rejectMember(groupId, mallory.account.userId);
-    expect(await listGroups(mallory, mallory.profiles)).toEqual([]);
+    expect((await listGroups(mallory, mallory.profiles)).items).toEqual([]);
 
     // Chat: Bob sends, Alice reads (live over the WebSocket when available).
     const clientId = newClientId();

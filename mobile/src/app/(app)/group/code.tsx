@@ -54,6 +54,7 @@ export default function ChangeGroupCode() {
         hint="Les 3 mots-clés à donner avec le nouveau code pour rejoindre le groupe. Garde les mêmes ou changes-en."
         submitTitle="Continuer"
         initial={keywords.length ? keywords : (current ?? undefined)}
+        choose
         onSubmit={async (words) => {
           setKeywords(words);
           setStep({ kind: 'code' });

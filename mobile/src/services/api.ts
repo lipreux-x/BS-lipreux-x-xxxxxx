@@ -25,6 +25,14 @@ export class ApiError extends Error {
   }
 }
 
+/** The server has no account for this phone's any more (deleted, from here or another phone): its keys open nothing. */
+export class AccountGoneError extends ApiError {
+  constructor() {
+    super(404, 'account_gone');
+    this.name = 'AccountGoneError';
+  }
+}
+
 export class NetworkError extends Error {
   constructor() {
     super('network');
@@ -32,12 +40,15 @@ export class NetworkError extends Error {
   }
 }
 
+/** Why a member or a message is reported (POST /groups/:id/reports). */
+export type ReportReason = 'abuse' | 'spam' | 'illegal' | 'other';
+
 export interface Profile extends PublicIdentity {
   id: string;
   username: string;
   /** Drawn avatar id (ui/avatars.tsx); null or absent: the default silhouette. */
   avatar?: string | null;
-  /** Account color id (ui/accountColors.tsx); null or absent: the default. */
+  /** Older apps' one color for every group (ui/accountColors.tsx), kept for someone who left one; null or absent: the default. */
   color?: string | null;
 }
 
@@ -70,8 +81,10 @@ export interface GroupSummary {
   metaSignature: string;
   currentKeyVersion: number;
   ephemeralSeconds: number | null;
-  /** A member left or was removed: the next member who opens the group rotates the key. */
+  /** A member who held the key left or was removed: nothing new is sent until an admin's phone rotates it. */
   rotationPending: boolean;
+  /** When the current key was drawn (ISO; absent from an older server): an admin's phone rotates it after a week. */
+  keySince?: string;
   /** Bumped when the admin changes the code. */
   codeVersion: number;
   /** Self-destruct date (ISO): the group and everything in it is then deleted. */
@@ -91,6 +104,8 @@ export interface GroupSummary {
 export interface Member {
   userId: string;
   role: 'admin' | 'member';
+  /** Their color in this group (ui/accountColors.tsx); null: the default; absent on an older server. */
+  color?: string | null;
   /** Key versions the server holds a handout of for this member. */
   keyVersions: number[];
   /** Among them, the handouts without the group's name sealed beside the key (absent on an older server). */
@@ -149,6 +164,8 @@ export class Api {
     readonly baseUrl: string,
     private readonly credentials: Credentials | null = null,
     private readonly binaryFetch: BinaryFetch = fetch as unknown as BinaryFetch,
+    /** Signing in found no account for these credentials (AccountGoneError). */
+    private readonly onAccountGone?: () => void,
   ) {}
 
   // ---- transport -------------------------------------------------------------
@@ -207,10 +224,11 @@ export class Api {
   }
 
   private async login({ userId, identity }: Credentials): Promise<string> {
-    const { challenge } = await this.request<{ challenge: string }>('/auth/challenge', {
-      method: 'POST',
-      json: { userId },
-      auth: false,
+    // Our API's JSON 404 (not a proxy's page, http_404): no live account under this id, it was deleted.
+    const { challenge } = await this.request<{ challenge: string }>('/auth/challenge', { method: 'POST', json: { userId }, auth: false }).catch((e) => {
+      if (!(e instanceof ApiError && e.status === 404 && e.code === 'not_found')) throw e;
+      this.onAccountGone?.();
+      throw new AccountGoneError();
     });
     const { accessToken } = await this.request<{ accessToken: string }>('/auth/token', {
       method: 'POST',
@@ -258,9 +276,12 @@ export class Api {
     return this.request<{ avatar: string | null }>('/me/avatar', { method: 'PUT', json: { avatar } });
   }
 
-  /** One of the account colors, or null for the default. */
-  setColor(color: string | null) {
-    return this.request<{ color: string | null }>('/me/color', { method: 'PUT', json: { color } });
+  /**
+   * Deletes the account on the server: out of every group, messages and files gone, no sign-in any more.
+   * 409 handover_required: the only admin of a group others stay in (`force` deletes anyway).
+   */
+  deleteAccount(force = false) {
+    return this.request<{ deleted: true }>('/me', { method: 'DELETE', json: { force } });
   }
 
   /** This phone's Expo push token and platform (what the server sends it: services/push.ts). */
@@ -268,9 +289,12 @@ export class Api {
     return this.request<{ ok: true }>('/me/push-token', { method: 'PUT', json: { token, platform: platform ?? undefined } });
   }
 
-  /** The app is open here (renewed every 30 s): no "new message" push meanwhile. `false` withdraws it. */
-  presence(awake: boolean) {
-    return this.request<{ ok: true }>('/me/presence', { method: awake ? 'PUT' : 'DELETE' });
+  /**
+   * The app is open here (renewed every 30 s): no "new message" push meanwhile. `false` withdraws it;
+   * with this phone's `cursors` (as for `unread`), the server also counts what waits: the app icon's badge.
+   */
+  presence(awake: boolean, cursors?: Record<string, number>) {
+    return this.request<{ ok: true; badge?: number }>('/me/presence', { method: awake ? 'PUT' : 'DELETE', json: cursors && { cursors } });
   }
 
   createInvite() {
@@ -347,6 +371,11 @@ export class Api {
     return this.request<{ revoked: number }>(`/groups/${id(groupId)}/links`, { method: 'DELETE' });
   }
 
+  /** My color in this group (name, avatar, messages, for every member), or null for the default. */
+  setGroupColor(groupId: string, color: string | null) {
+    return this.request<{ color: string | null }>(`/groups/${id(groupId)}/color`, { method: 'PUT', json: { color } });
+  }
+
   /** Active members, and the pending requests (only an admin gets those). */
   members(groupId: string) {
     return this.request<{ currentKeyVersion: number; members: Member[]; pending: JoinRequest[] }>(`/groups/${id(groupId)}/members`);
@@ -396,6 +425,11 @@ export class Api {
 
   removeMember(groupId: string, userId: string) {
     return this.request<{ removed: true }>(`/groups/${id(groupId)}/members/${id(userId)}/remove`, { method: 'POST' });
+  }
+
+  /** Reports a member, or one of their messages. `excerpt`: what the reporter chose to hand over, decrypted here. */
+  report(groupId: string, input: { userId: string; messageId?: string; reason: ReportReason; excerpt?: string }) {
+    return this.request<{ reported: true }>(`/groups/${id(groupId)}/reports`, { method: 'POST', json: input });
   }
 
   /** Admin: new join key, new meta, and every handout on the server re-wrapped under the new code. */

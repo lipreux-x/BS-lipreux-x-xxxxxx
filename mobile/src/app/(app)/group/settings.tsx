@@ -24,6 +24,7 @@ import {
 } from '@/services/groups';
 import { records } from '@/services/localStore';
 import { LockedOutError, WrongCodeError } from '@/services/vault';
+import { AccountColorPicker, accountColor, isAccountColorId, type AccountColorId } from '@/ui/accountColors';
 import { Avatar, isAvatarId } from '@/ui/avatars';
 import { CHAT_LOOKS, chatLook, type ChatLook } from '@/ui/chat/look';
 import { countdownLabel, dateTimeLabel } from '@/ui/chat/timeline';
@@ -48,8 +49,8 @@ const EPHEMERAL: { label: string; seconds: number | null }[] = [
 ];
 
 /**
- * Group settings (SPEC §7): keywords, members (admin first), disappearing
- * messages, the look of the conversation on this phone, leave. Admins also remove members (the key is rotated right
+ * Group settings (SPEC §7): keywords, members (admin first), my color in
+ * this group, disappearing messages, the look of the conversation on this phone, leave. Admins also remove members (the key is rotated right
  * away) and change the code. Only reachable from an open group.
  *
  * Each other member can be written to in private (a conversation of two,
@@ -88,6 +89,21 @@ export default function GroupSettings() {
   function chooseLook(next: ChatLook) {
     setLook(next);
     session.local.setRecord(records.look(id), { look: next }).catch(() => {});
+  }
+
+  // My color in this group (name, avatar, messages): held by the server, seen by every member.
+  const [colorError, setColorError] = useState<string | null>(null);
+  async function chooseColor(next: AccountColorId | null) {
+    const previous = info?.members.find((m) => m.me)?.color ?? null;
+    const mineIn = (color: string | null) => (i: GroupInfo | null) => i && { ...i, members: i.members.map((m) => (m.me ? { ...m, color } : m)) };
+    setInfo(mineIn(next)); // shown at once, put back if the server refuses
+    setColorError(null);
+    try {
+      await session.api.setGroupColor(id, next);
+    } catch (e) {
+      setInfo(mineIn(previous));
+      setColorError(e instanceof NetworkError ? 'Pas de réseau.' : 'Impossible de changer la couleur.');
+    }
   }
 
   /** The group code against the key locked on this phone: a wrong one counts as an attempt, like at the door. */
@@ -277,6 +293,9 @@ export default function GroupSettings() {
   const direct = info.direct;
   // In a private conversation, only the other person is listed.
   const shown = direct ? info.members.filter((m) => !m.me) : info.members;
+  const mine = info.members.find((m) => m.me);
+  const myColor = isAccountColorId(mine?.color) ? mine.color : null;
+  const myLit = accountColor(myColor);
   return (
     // Edge to edge: "Quitter le groupe" stays above the navigation bar / home indicator.
     <ScrollView style={styles.screen} contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + space.xl }]}>
@@ -357,7 +376,7 @@ export default function GroupSettings() {
       <View style={styles.card}>
         {shown.map((m, i) => (
           <View key={m.userId} style={[styles.row, i > 0 && styles.divider]}>
-            <Avatar id={isAvatarId(m.avatar) ? m.avatar : null} size={36} />
+            <Avatar id={isAvatarId(m.avatar) ? m.avatar : null} size={36} color={m.color} />
             <Pressable style={{ flex: 1 }} disabled={m.me} onPress={() => void showFingerprint(m)} accessibilityRole="button">
               <Text style={type.body}>
                 {m.username}
@@ -392,6 +411,24 @@ export default function GroupSettings() {
             ) : null}
           </View>
         ))}
+      </View>
+
+      <Label style={styles.section}>{direct ? 'Ta couleur dans ce tête-à-tête' : 'Ta couleur dans ce groupe'}</Label>
+      <View style={styles.card}>
+        {mine ? (
+          <View style={[styles.row, styles.preview]}>
+            <Avatar id={isAvatarId(mine.avatar) ? mine.avatar : null} size={36} color={myColor} />
+            <Text style={[type.body, myLit && { color: myLit }]}>{mine.username}</Text>
+          </View>
+        ) : null}
+        <AccountColorPicker value={myColor} onChange={(c) => void chooseColor(c)} disabled={!mine} />
+        {colorError ? <Text style={[styles.error, styles.note]}>{colorError}</Text> : null}
+        <Text style={[type.dim, styles.note]}>
+          {direct
+            ? 'Ton nom, ton avatar et tes messages prennent cette couleur ici, pour vous deux.'
+            : 'Ton nom, ton avatar et tes messages prennent cette couleur ici, pour tous les membres.'}{' '}
+          Chaque groupe et chaque tête-à-tête a la sienne.
+        </Text>
       </View>
 
       <Label style={styles.section}>Affichage de la discussion</Label>
@@ -505,6 +542,7 @@ const styles = StyleSheet.create({
   revoke: { marginTop: space.md, alignSelf: 'flex-start', paddingVertical: space.xs },
   note: { marginTop: space.md, fontSize: 13 },
   row: { flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingVertical: space.sm },
+  preview: { paddingTop: 0, marginBottom: space.sm },
   divider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
   badge: { borderWidth: 1, borderColor: colors.accentFg, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2 },
   badgeText: { color: colors.accentFg, fontSize: 12, fontFamily: fonts.semibold },

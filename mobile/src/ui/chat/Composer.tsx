@@ -3,7 +3,7 @@ import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Key } from '../Key';
 import { Led } from '../Led';
 import { screenStyle } from '../Screen';
-import { blade, colors, fonts, led, mono, steel } from '../theme';
+import { blade, colors, fonts, lcd, led, mono, steel } from '../theme';
 import { QuoteExcerpt } from './MessageBubble';
 import type { Quote } from './replies';
 import { durationLabel } from './waveform';
@@ -101,8 +101,8 @@ export function Composer({
                 onChangeText={onChange}
                 placeholder="Message chiffré"
                 placeholderTextColor={steel.engraving}
-                selectionColor={blade.neon}
-                cursorColor={blade.neon}
+                selectionColor={blade.sky}
+                cursorColor={blade.sky}
                 multiline
                 maxLength={MAX_LENGTH}
                 style={styles.input}
@@ -162,8 +162,9 @@ const styles = StyleSheet.create({
   replyEdge: { width: 3, alignSelf: 'stretch', borderRadius: 2, backgroundColor: colors.accentFg },
   replyTitle: { color: colors.text, fontSize: 13, fontFamily: fonts.semibold },
   replyText: { color: colors.textDim, fontSize: 13 },
-  // The prompt and what is typed, in the terminal's font and light.
+  // The prompt and what is typed, in the terminal's font, lit like the code
+  // display (the cold light): in the bar, only the send key is hot.
   promptRow: { flexDirection: 'row', alignItems: 'flex-start' },
-  prompt: { fontFamily: mono, fontSize: 15, color: blade.neon, paddingLeft: 12, paddingTop: 11 },
-  input: { flex: 1, color: colors.hot, fontFamily: mono, fontSize: 15, paddingLeft: 8, paddingRight: 12, paddingTop: 10, paddingBottom: 10, maxHeight: 136 },
+  prompt: { fontFamily: mono, fontSize: 15, color: blade.sky, paddingLeft: 12, paddingTop: 11 },
+  input: { flex: 1, color: lcd.on, fontFamily: mono, fontSize: 15, paddingLeft: 8, paddingRight: 12, paddingTop: 10, paddingBottom: 10, maxHeight: 136 },
 });

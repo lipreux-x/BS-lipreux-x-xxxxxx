@@ -25,6 +25,8 @@ export function MessageActions({
   onReact,
   onReorder,
   onReply,
+  onReport,
+  onBlock,
   onClose,
   onHidden,
 }: {
@@ -38,6 +40,9 @@ export function MessageActions({
   /** A key dragged to a new place (long press, then slide). */
   onReorder?(order: ReactionId[]): void;
   onReply(): void;
+  /** Someone else's message: report it, or block its sender (the panel closes first). */
+  onReport?(): void;
+  onBlock?(): void;
   onClose(): void;
   /** The panel is gone (see `ActionSheet`): the keyboard can come up for a reply. */
   onHidden?(): void;
@@ -68,6 +73,26 @@ export function MessageActions({
           label="Copier le texte"
           onPress={() => {
             void copySensitive(target.text!);
+            onClose();
+          }}
+        />
+      ) : null}
+      {onReport ? (
+        <ActionKey
+          label="Signaler"
+          danger
+          onPress={() => {
+            onReport();
+            onClose();
+          }}
+        />
+      ) : null}
+      {onBlock ? (
+        <ActionKey
+          label="Bloquer ce membre"
+          danger
+          onPress={() => {
+            onBlock();
             onClose();
           }}
         />

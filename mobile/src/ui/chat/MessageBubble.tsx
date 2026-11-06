@@ -30,8 +30,8 @@ const PROMPT = '❯';
 /**
  * The conversation as a terminal session: every message is an entry in the
  * monospace font, under a prompt line `❯ author [time]`. Mine sit on the
- * right, lit in the hot green of the terminal; the others' on the left, in
- * the cold sky blue, each on a faint wash of its own light (green, blue).
+ * right, lit in the hot red of the blade; the others' on the left, in the
+ * cold sky blue, each on a faint wash of its own light (red, blue).
  * The text of every entry is the same white, indented under its prompt.
  * No plates, no avatars. An author who picked a color (Settings) has their
  * prompt and name lit in it, and their entries washed with it.
@@ -40,7 +40,7 @@ const PROMPT = '❯';
  * while sending, blue once stored on the server, red failed).
  *
  * `look: 'plates'` (chosen per group): the message on a small plate of the
- * safe instead, bevelled like the keypad keys, green-tinted steel for mine,
+ * safe instead, bevelled like the keypad keys, red-tinted steel for mine,
  * dark metal for the others'. Theirs have the sender's avatar in a column on
  * the left and their name above the plate, on every message; the time and
  * the LED sit in the plate's footer. The corner on the sender's side is
@@ -163,7 +163,7 @@ export function MessageBubble({
     if (mine) return <View style={plates.rowMine}>{column}</View>;
     return (
       <View style={plates.rowTheirs}>
-        <Avatar id={isAvatarId(avatar) ? avatar : null} size={AVATAR} />
+        <Avatar id={isAvatarId(avatar) ? avatar : null} size={AVATAR} color={color} />
         {column}
       </View>
     );

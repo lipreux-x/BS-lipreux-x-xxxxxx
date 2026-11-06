@@ -1,7 +1,7 @@
 import { Text, type TextStyle } from 'react-native';
 import { blade, colors, fonts, glow, neon } from './theme';
 
-/** "BaseSecrète": "Base" in white, "Secrète" in the terminal's green, crisp, with a tight halo. */
+/** "BaseSecrète": "Base" in white, "Secrète" in the blade's neon red, crisp, with a tight halo. */
 export function Wordmark({ size = 28, style }: { size?: number; style?: TextStyle }) {
   return (
     <Text

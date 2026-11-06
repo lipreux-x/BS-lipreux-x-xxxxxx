@@ -75,6 +75,7 @@ export default function NewGroup() {
         hint="3 mots-clés à donner en vrai avec le code : il faudra les deux pour rejoindre le groupe. Les membres les retrouvent dans la fiche du groupe."
         submitTitle="Continuer"
         initial={keywords}
+        choose
         onSubmit={async (words) => {
           setKeywords(words);
           setStep({ kind: 'lifetime' });

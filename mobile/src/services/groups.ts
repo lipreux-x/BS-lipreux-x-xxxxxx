@@ -243,6 +243,19 @@ export async function listGroups(s: Session, profiles: ProfileCache): Promise<{ 
   return { items, offline };
 }
 
+/**
+ * Where this phone stands in each group (group id -> last seq shown here), for
+ * the server to count what waits as the app goes to the background: the app
+ * icon's badge. The groups of the last list, or those this phone keeps keys for.
+ */
+export async function readCursors(s: Session): Promise<Record<string, number>> {
+  const ids = lastListed.get(s)?.filter((g) => g.state.kind !== 'pending').map((g) => g.id) ?? Object.keys(await s.vault.knownGroups());
+  const entries = await Promise.all(
+    ids.slice(0, 200).map(async (id) => [id, (await s.local.getRecord<SeenRecord>(records.seen(id)).catch(() => null))?.seq ?? 0] as const),
+  );
+  return Object.fromEntries(entries);
+}
+
 /** Best effort: without an answer (old server, outage) nothing waits anywhere. */
 async function unreadCounts(s: Session, cursors: (readonly [string, number])[]): Promise<Record<string, number>> {
   if (!cursors.length) return {};
@@ -772,7 +785,7 @@ export async function syncGroup(
     throw e;
   }
   // Under an old code the new key would be wrapped where the others can no longer open it: rotate once relocked.
-  if (g.rotationPending && g.role === 'admin' && opened.meta.admins.includes(s.account.userId) && !staleCode(secret, g)) {
+  if (!staleCode(secret, g) && (await rotationDue(s, g, opened.meta))) {
     try {
       await rotateKey(s, profiles, g, opened.meta, secret);
     } catch (e) {
@@ -784,6 +797,28 @@ export async function syncGroup(
   }
   const name = await conversationName(s, profiles, opened.meta);
   return { summary: g, keys: opened.keys, keyVersion: g.currentKeyVersion, meta: opened.meta, name, adminChanged: opened.adminChanged };
+}
+
+/** A key older than this is replaced by the next admin who opens the group: a key that leaks opens a week at most. */
+export const KEY_LIFETIME_MS = 7 * 86_400_000;
+
+/**
+ * Whether this phone draws the next key now:
+ * - an admin, when someone who held the key left, or once the key is a week
+ *   old (not in a private conversation: nobody ever leaves one, it is deleted);
+ * - any member, when someone left and no admin is left to do it (the last
+ *   one deleted their account): the server refuses messages until then, and
+ *   the member's phone names itself admin in the new meta.
+ */
+async function rotationDue(s: Session, g: GroupSummary, meta: GroupMeta): Promise<boolean> {
+  const me = s.account.userId;
+  if (g.role === 'admin' && meta.admins.includes(me)) {
+    if (g.rotationPending) return true;
+    return g.kind !== 'direct' && !!g.keySince && Date.now() - Date.parse(g.keySince) > KEY_LIFETIME_MS;
+  }
+  if (!g.rotationPending || g.kind === 'direct') return false;
+  const { members } = await s.api.members(g.id);
+  return members.every((m) => m.role !== 'admin');
 }
 
 /**
@@ -1014,12 +1049,6 @@ export class ProfileCache {
   setAvatar(id: string, avatar: string | null) {
     const p = this.byId.get(id);
     if (p) this.byId.set(id, { ...p, avatar });
-  }
-
-  /** After changing our own color: the same. */
-  setColor(id: string, color: string | null) {
-    const p = this.byId.get(id);
-    if (p) this.byId.set(id, { ...p, color });
   }
 }
 

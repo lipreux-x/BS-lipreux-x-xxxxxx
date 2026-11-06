@@ -7,10 +7,10 @@ import { backupKeys, createKeyBackup, deleteDeviceKey, generateIdentity, initCry
 import { wipe } from '@/crypto/encoding';
 import { Api, type BinaryFetch } from '@/services/api';
 import { biometricStore } from '@/services/biometrics';
-import { ProfileCache, type GroupKeys, type Session } from '@/services/groups';
+import { ProfileCache, readCursors, type GroupKeys, type Session } from '@/services/groups';
 import { imageCache } from '@/services/images';
 import { deleteLocalDb, openLocalStore } from '@/services/localDb';
-import { registerPush, setupNotifications, unregisterPush } from '@/services/push';
+import { registerPush, setAppBadge, setupNotifications, unregisterPush } from '@/services/push';
 import type { LocalStore } from '@/services/localStore';
 import { voiceCache } from '@/services/voice';
 import { secureStore } from '@/services/secureStore';
@@ -41,6 +41,8 @@ export type Status =
   | { kind: 'no-account' }
   | { kind: 'locked'; username: string }
   | { kind: 'unlocked' }
+  /** The server no longer knows this account (deleted, here or from another phone): `forgetAccount` erases the phone, `retry` locks it again. */
+  | { kind: 'gone'; username: string; retry(): void }
   /** Startup threw (secure storage, crypto): `retry` runs it again (an interrupted wipe resumes). */
   | { kind: 'failed'; retry(): void };
 
@@ -67,6 +69,8 @@ interface SessionContextValue {
   groupsVersion: number;
   /** A screen of this group is on screen (call `leave` when it is not anymore). */
   enterGroup(groupId: string): () => void;
+  /** Swiped shut: the group closes as soon as its screen is gone, not 10 min later. */
+  closeGroup(groupId: string): void;
   /**
    * Checks the code; resolves with `enter`, which opens the app (so the UI can show success first).
    * Throws WipedError when too many wrong codes erased the phone (status is then 'no-account').
@@ -85,6 +89,13 @@ interface SessionContextValue {
   /** Saves a recovered account on this phone under a new app code; resolves with `enter`, like `register`. */
   restore(account: RecoveredAccount, appCode: string): Promise<() => void>;
   lock(): void;
+  /**
+   * Deletes the account on the server, then everything on this phone: back to onboarding.
+   * ApiError 409 handover_required: the only admin of a group others stay in (`force` deletes anyway).
+   */
+  deleteAccount(force?: boolean): Promise<void>;
+  /** The account is gone from the server: everything on this phone too, back to onboarding. */
+  forgetAccount(): Promise<void>;
 }
 
 /** An account fetched back with its password, not saved on the phone yet. */
@@ -114,6 +125,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   // Screens of each group on screen, and when the last one left.
   const inside = useRef(new Map<string, number>()).current;
   const leftAt = useRef(new Map<string, number>()).current;
+  const closing = useRef(new Set<string>()).current;
 
   useEffect(() => {
     setupNotifications();
@@ -169,10 +181,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     for (const g of openGroups.values()) for (const k of g.keys.values()) wipe(k);
     openGroups.clear();
     leftAt.clear();
+    closing.clear();
     imageCache.clear();
     voiceCache.clear();
     dropOpenedDocuments();
-  }, [openGroups, leftAt]);
+  }, [openGroups, leftAt, closing]);
 
   /** Closes the groups left more than 10 min ago (keys and decrypted media out of memory). */
   const expireGroups = useCallback(() => {
@@ -199,16 +212,28 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       expireGroups(); // left too long ago: closed before it shows again
       inside.set(groupId, (inside.get(groupId) ?? 0) + 1);
       leftAt.delete(groupId);
+      closing.delete(groupId);
       return () => {
         const n = (inside.get(groupId) ?? 1) - 1;
         if (n > 0) inside.set(groupId, n);
         else {
           inside.delete(groupId);
-          leftAt.set(groupId, clock());
+          if (closing.delete(groupId)) {
+            // Swiped shut: as if left long ago, it closes now.
+            leftAt.set(groupId, -Infinity);
+            expireGroups();
+          } else leftAt.set(groupId, clock());
         }
       };
     },
-    [expireGroups, inside, leftAt],
+    [expireGroups, inside, leftAt, closing],
+  );
+
+  const closeGroup = useCallback(
+    (groupId: string) => {
+      closing.add(groupId);
+    },
+    [closing],
   );
 
   // Groups left behind close while the app is in use.
@@ -245,12 +270,24 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     };
   }, [lock, expireGroups]);
 
-  const start = useCallback((u: UnlockedVault, local: LocalStore) => {
-    // expo/fetch: sends and reads raw bytes (encrypted images), which RN's fetch cannot.
-    const api = new Api(API_URL, { userId: u.account.userId, identity: u.identity }, expoFetch as unknown as BinaryFetch);
-    setSession({ ...u, api, vault, local });
-    setStatus({ kind: 'unlocked' });
-  }, []);
+  // Nothing is erased on the server's word alone: the screen asks first (and can try again).
+  const gone = useCallback(() => {
+    const s = sessionRef.current;
+    if (!s) return;
+    lock();
+    const { username } = s.account;
+    setStatus({ kind: 'gone', username, retry: () => setStatus({ kind: 'locked', username }) });
+  }, [lock]);
+
+  const start = useCallback(
+    (u: UnlockedVault, local: LocalStore) => {
+      // expo/fetch: sends and reads raw bytes (encrypted images), which RN's fetch cannot.
+      const api = new Api(API_URL, { userId: u.account.userId, identity: u.identity }, expoFetch as unknown as BinaryFetch, gone);
+      setSession({ ...u, api, vault, local });
+      setStatus({ kind: 'unlocked' });
+    },
+    [gone],
+  );
 
   /** Too many wrong codes erased the vault: the hardware key and the local database go too, back to onboarding. */
   const wiped = useCallback(async () => {
@@ -263,6 +300,22 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setStatus({ kind: 'no-account' });
   }, [lock]);
 
+  const deleteAccount = useCallback(
+    async (force = false) => {
+      const s = sessionRef.current;
+      if (!s) return;
+      await s.api.deleteAccount(force);
+      await vault.wipeAll();
+      await wiped();
+    },
+    [wiped],
+  );
+
+  const forgetAccount = useCallback(async () => {
+    await vault.wipeAll();
+    await wiped();
+  }, [wiped]);
+
   // Once unlocked: this phone's push token goes to the server (permission asked the first time).
   useEffect(() => {
     if (session) void registerPush(session.api);
@@ -272,21 +325,27 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   // message" push (the open app shows them): renewed every 30 s, withdrawn
   // when the app goes to the background or locks. A system screen opened from
   // the app (photo picker) counts as away: a push during it is no harm.
+  // Going away, the phone says where it stands in each group: the server
+  // counts what waits unread, the app icon's badge, here and in the pushes after.
   useEffect(() => {
     if (!session) return;
     const { api } = session;
     let timer: ReturnType<typeof setInterval> | undefined;
-    const tell = (awake: boolean) => api.presence(awake).catch(() => {});
     const wake = () => {
       if (timer) return;
-      void tell(true);
-      timer = setInterval(() => void tell(true), PRESENCE_EVERY_MS);
+      void api.presence(true).catch(() => {});
+      timer = setInterval(() => void api.presence(true).catch(() => {}), PRESENCE_EVERY_MS);
+    };
+    const away = async () => {
+      const cursors = await readCursors(session).catch(() => undefined);
+      const res = await api.presence(false, cursors).catch(() => null);
+      if (res?.badge !== undefined) await setAppBadge(res.badge);
     };
     const sleep = () => {
       if (!timer) return;
       clearInterval(timer);
       timer = undefined;
-      void tell(false);
+      void away();
     };
     if (AppState.currentState !== 'background') wake();
     const sub = AppState.addEventListener('change', (state) => (state === 'active' ? wake() : state === 'background' ? sleep() : undefined));
@@ -383,6 +442,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       openGroups,
       groupsVersion,
       enterGroup,
+      closeGroup,
       unlock,
       unlockWithBiometrics,
       enableBiometrics,
@@ -391,8 +451,28 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       recover,
       restore,
       lock,
+      deleteAccount,
+      forgetAccount,
     }),
-    [status, session, profiles, openGroups, groupsVersion, enterGroup, unlock, unlockWithBiometrics, enableBiometrics, setScreenshotsBlocked, register, recover, restore, lock],
+    [
+      status,
+      session,
+      profiles,
+      openGroups,
+      groupsVersion,
+      enterGroup,
+      closeGroup,
+      unlock,
+      unlockWithBiometrics,
+      enableBiometrics,
+      setScreenshotsBlocked,
+      register,
+      recover,
+      restore,
+      lock,
+      deleteAccount,
+      forgetAccount,
+    ],
   );
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 }

@@ -21,6 +21,11 @@ import { secureStore } from './secureStore';
  * - iOS: the push is visible, with a plain line and no group name (the app
  *   cannot rewrite it there).
  *
+ * The app icon's badge counts the messages waiting unread, as the server
+ * counts them (lib/push.ts): set by iOS from the push itself, here from the
+ * push's payload on Android, and from the server's answer when the app goes
+ * to the background (session/SessionProvider.tsx).
+ *
  * While the app is open, "message" pushes are not shown at all (the server
  * does not even send them, see PUT /me/presence); the other kinds show as a
  * banner. Opening a conversation takes its notification down.
@@ -75,6 +80,8 @@ const ACTION_BODY: Record<Exclude<PushKind, 'message'>, string> = {
 interface Push {
   groupId: string;
   kind: PushKind;
+  /** The app icon's badge, when the server knows it. */
+  badge?: number;
 }
 
 // ---- background task (Android) ----------------------------------------------------
@@ -89,6 +96,7 @@ try {
     // The app is on screen: the conversation shows the message, the banner handler the rest.
     if (AppState.currentState === 'active') return;
     await show(push);
+    if (push.badge !== undefined) await setAppBadge(push.badge);
   });
 } catch {
   // A task already defined (a reload): nothing to do.
@@ -106,9 +114,9 @@ function parsePush(data: Record<string, unknown> | undefined): Push | null {
     }
   }
   if (!raw || typeof raw !== 'object') return null;
-  const { groupId, kind } = raw as { groupId?: unknown; kind?: unknown };
+  const { groupId, kind, badge } = raw as { groupId?: unknown; kind?: unknown; badge?: unknown };
   if (typeof groupId !== 'string' || !UUID.test(groupId) || !isKind(kind)) return null;
-  return { groupId, kind };
+  return { groupId, kind, ...(Number.isInteger(badge) && (badge as number) >= 0 && { badge: badge as number }) };
 }
 
 /** Shows (or replaces) the group's notification. */
@@ -129,6 +137,11 @@ async function show({ groupId, kind }: Push) {
     content: { title: name ?? 'BaseSecrète', body: name ? body : `${body} · groupe verrouillé`, data: { groupId, kind }, sound: 'default' },
     trigger: null,
   });
+}
+
+/** The number on the app icon (0 takes it away). Some Android launchers show none, or only a dot. */
+export async function setAppBadge(n: number) {
+  await Notifications?.setBadgeCountAsync(n).catch(() => false);
 }
 
 /** One notification per group for messages, one per group and kind for the rest: a new one replaces it. */
@@ -271,5 +284,6 @@ export async function registerPush(api: Api, { ask = true } = {}): Promise<PushS
 export async function unregisterPush() {
   await Notifications?.unregisterForNotificationsAsync().catch(() => {});
   await Notifications?.dismissAllNotificationsAsync().catch(() => {});
+  await setAppBadge(0);
   await secureStore.delete(STORE_KEY).catch(() => {});
 }

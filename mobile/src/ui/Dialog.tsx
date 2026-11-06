@@ -21,7 +21,7 @@ interface Shown {
 
 /**
  * The app's own Alert.alert: a screwed panel of the safe, its keys as metal
- * keys (cancel steel, the action the hot green key; what cannot be undone on
+ * keys (cancel steel, the action the hot red key; what cannot be undone on
  * the near-black red key, with a red LED by the title). Same arguments as
  * Alert.alert; no buttons: one "OK".
  *

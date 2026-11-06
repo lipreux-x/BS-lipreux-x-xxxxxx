@@ -23,7 +23,9 @@ import { GROUP_CODE_LENGTH, type FileBody, type ImageBody, type ReactionId, type
 import { wipe } from '@/crypto/encoding';
 import { useUnlocked, type OpenGroup } from '@/session/SessionProvider';
 import { useInsideGroup } from '@/session/useInsideGroup';
-import { ApiError, NetworkError, type WireMessage } from '@/services/api';
+import { ApiError, NetworkError, type ReportReason, type WireMessage } from '@/services/api';
+import { block, blockedUsers, type BlockedUsers } from '@/services/blocked';
+import { colorIn, colorsOf, saveColors, savedColors, type GroupColors } from '@/services/groupColors';
 import {
   approveMember,
   CodeChangedError,
@@ -103,7 +105,7 @@ const REVEAL_MS = 260;
 
 export default function GroupScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { openGroups } = useUnlocked();
+  const { openGroups, closeGroup } = useUnlocked();
   const [open, setOpen] = useState<OpenGroup | undefined>(openGroups.get(id));
   // Opened by its code: the code entry stays on top (blue LED, the blade turning)
   // while the chat decrypts its history under it, and goes once the messages are
@@ -149,11 +151,17 @@ export default function GroupScreen() {
     );
   }, [coverOpacity]);
 
-  // Dragged to the right anywhere on it, the conversation goes back to the list.
-  const back = useCallback(() => (router.canGoBack() ? router.back() : router.replace('/')), []);
+  // Dragged to the right anywhere on it, the conversation goes back to the list
+  // and the group closes at once (its code again next time), the quick way out.
+  // The header's back arrow keeps it open for 10 min.
+  const swipeShut = useCallback(() => {
+    closeGroup(id);
+    if (router.canGoBack()) router.back();
+    else router.replace('/');
+  }, [closeGroup, id]);
 
   return (
-    <SwipeBack onBack={back}>
+    <SwipeBack onBack={swipeShut}>
       <View style={styles.screen}>
         {open ? <Chat groupId={id} group={open} onUpdate={update} onLocked={relock} onReady={covered ? reveal : undefined} titled={!covered} /> : null}
         {covered ? (
@@ -623,6 +631,8 @@ function Chat({
   // What the server sent did not check out (keys refused): shown, never silently used.
   const [alert, setAlert] = useState<string | null>(null);
   const [newAdmin, setNewAdmin] = useState(false);
+  // Someone left with the current key: the server takes no message until a new one is drawn (an admin's phone).
+  const [rotationWait, setRotationWait] = useState(false);
 
   /** Rotation if a member left (admin), keys rotated by an admin, join requests (admin). */
   const sync = useCallback(async (): Promise<OpenGroup> => {
@@ -632,6 +642,7 @@ function Chat({
       setRole(admin ? 'admin' : 'member');
       setExpiresAt(r.summary.expiresAt ? new Date(r.summary.expiresAt) : null);
       if (r.adminChanged) setNewAdmin(true);
+      setRotationWait(r.summary.rotationPending);
       setAlert(null);
       const g = { keys: r.keys, keyVersion: r.keyVersion, name: r.name, direct: !!r.meta.direct, link: !!r.meta.link };
       current.current = g;
@@ -875,18 +886,107 @@ function Chat({
     }
   }
 
+  // "Signaler" picked in the action sheet: the reasons, once that sheet is gone.
+  const [reporting, setReporting] = useState<ChatMessage | null>(null);
+  // The message being reported, kept while its sheet closes.
+  const reported = useRef<ChatMessage | null>(null);
+  const reportAfterSheet = useRef<ChatMessage | null>(null);
+  // Same for "Bloquer": its confirmation (iOS refuses to present over a modal on its way out).
+  const blockAfterSheet = useRef<ChatMessage | null>(null);
+
+  // The reason picked: sent once the reasons sheet is gone (the answer is a dialog, another modal).
+  const reasonAfterSheet = useRef<ReportReason | null>(null);
+  function pickReason(reason: ReportReason) {
+    reasonAfterSheet.current = reason;
+    setReporting(null);
+  }
+
+  async function sendReport(m: ChatMessage, reason: ReportReason) {
+    try {
+      // What is handed over is what the reporter sees: the text, decrypted here. Never a photo or a voice message.
+      await session.api.report(groupId, { userId: m.senderId, messageId: m.id, reason, excerpt: m.text?.slice(0, 2000) });
+      dialog('Signalement envoyé', `Merci. Il est examiné au plus vite. Tu peux aussi bloquer ${m.senderName} : tu ne verras plus rien de sa part.`, [
+        { text: 'OK', style: 'cancel' },
+        { text: 'Bloquer', style: 'destructive', onPress: () => void blockSender(m) },
+      ]);
+    } catch (e) {
+      dialog('Signalement impossible', e instanceof NetworkError ? 'Pas de réseau.' : 'Réessaie plus tard.');
+    }
+  }
+
+  function confirmBlock(m: ChatMessage) {
+    dialog(
+      `Bloquer ${m.senderName} ?`,
+      `Sur ce téléphone, tu ne verras plus ses messages, ses réactions ni ses stories, dans aucun groupe. ${m.senderName} n’en est pas averti. Tu peux le débloquer dans les Réglages.`,
+      [
+        { text: 'Annuler', style: 'cancel' },
+        { text: 'Bloquer', style: 'destructive', onPress: () => void blockSender(m) },
+      ],
+    );
+  }
+
+  async function blockSender(m: ChatMessage) {
+    await keep(async (l) => setBlocked(await block(l, m.senderId, m.senderName)));
+  }
+
   useEffect(() => {
     if (outboxLoaded.current) void keep((l) => saveOutbox(l, groupId, pending));
   }, [pending, keep, groupId]);
 
+  // Members blocked on this phone (long press on a message): nothing of theirs is shown, in any group.
+  const [blocked, setBlocked] = useState<BlockedUsers>({});
+  useFocusEffect(
+    useCallback(() => {
+      void keep(async (l) => setBlocked(await blockedUsers(l)));
+    }, [keep]),
+  );
+  // Each member's color in this group (chosen in its settings): the saved list first, then the server's, fetched
+  // again on coming back (from the settings, where mine may have changed) and when someone new writes.
+  const [memberColors, setMemberColors] = useState<GroupColors | null>(null);
+  const colorsAsked = useRef(new Set<string>());
+  const refreshColors = useCallback(() => {
+    session.api
+      .members(groupId)
+      .then(({ members }) => {
+        const fresh = colorsOf(members);
+        if (!fresh) return;
+        setMemberColors(fresh);
+        void keep((l) => saveColors(l, groupId, fresh));
+      })
+      .catch(() => {});
+  }, [session, groupId, keep]);
+  useEffect(() => {
+    void keep(async (l) => {
+      const saved = await savedColors(l, groupId);
+      if (saved) setMemberColors((c) => c ?? saved);
+    });
+  }, [keep, groupId]);
+  useFocusEffect(refreshColors);
+  useEffect(() => {
+    if (!memberColors) return;
+    const unknown = messages.filter((m) => !Object.hasOwn(memberColors, m.senderId) && !colorsAsked.current.has(m.senderId));
+    if (!unknown.length) return;
+    for (const m of unknown) colorsAsked.current.add(m.senderId);
+    refreshColors();
+  }, [messages, memberColors, refreshColors]);
+  const shown = useMemo(() => {
+    const ids = Object.keys(blocked);
+    const visible = ids.length && messages.some((m) => ids.includes(m.senderId)) ? messages.filter((m) => !ids.includes(m.senderId)) : messages;
+    if (!memberColors) return visible;
+    return visible.map((m) => {
+      const color = colorIn(memberColors, m.senderId, m.senderColor);
+      return color === m.senderColor ? m : { ...m, senderColor: color };
+    });
+  }, [messages, blocked, memberColors]);
+
   // Stories of the group still alive, in the band's order; what was watched is kept on the phone.
-  const storyMessages = useMemo(() => messages.filter((m): m is ChatMessage & { story: NonNullable<ChatMessage['story']> } => !!m.story), [messages]);
+  const storyMessages = useMemo(() => shown.filter((m): m is ChatMessage & { story: NonNullable<ChatMessage['story']> } => !!m.story), [shown]);
   const storyList = useMemo(() => bandStories(storyMessages as StoryMessage[], storyNow), [storyMessages, storyNow]);
   useEffect(() => {
     if (seenLoaded.current) void keep((l) => l.setRecord(records.stories(groupId), { seen: pruneSeen(seen, storyMessages as StoryMessage[]) }));
   }, [seen, storyMessages, keep, groupId]);
   // The chat shows everything but the stories (in the band above it) and the reactions (under their messages).
-  const chatMessages = useMemo(() => (messages.some((m) => m.story || m.reaction) ? messages.filter((m) => !m.story && !m.reaction) : messages), [messages]);
+  const chatMessages = useMemo(() => (shown.some((m) => m.story || m.reaction) ? shown.filter((m) => !m.story && !m.reaction) : shown), [shown]);
   const chatPending = useMemo(
     () => (pending.some((p) => p.kind === 'story' || p.kind === 'reaction') ? pending.filter((p) => p.kind !== 'story' && p.kind !== 'reaction') : pending),
     [pending],
@@ -913,13 +1013,13 @@ function Chat({
   // What each message got: every member's latest reaction, mine on their way included, in this phone's order.
   const reactionTally = useMemo(() => {
     const tally = tallyReactions(
-      messages.flatMap((m) => (m.reaction ? [{ senderId: m.senderId, seq: m.seq, reaction: m.reaction }] : [])),
+      shown.flatMap((m) => (m.reaction ? [{ senderId: m.senderId, seq: m.seq, reaction: m.reaction }] : [])),
       pending.flatMap((p) => (p.kind === 'reaction' ? [p.reaction] : [])),
       session.account.userId,
     );
     for (const [id, counts] of tally) tally.set(id, orderCounts(counts, order));
     return tally;
-  }, [messages, pending, session.account.userId, order]);
+  }, [shown, pending, session.account.userId, order]);
   const storySending = pending.some((p) => p.kind === 'story' && !p.failed);
   const storyFailed = pending.find((p) => p.kind === 'story' && p.failed);
 
@@ -987,7 +1087,14 @@ function Chat({
       if (ready.kind === 'voice') voiceCache.set(ready.body!.attachmentId, ready.voice.audio);
       void keep((l) => l.saveMessages(groupId, [wire]));
       merge(await decrypt([wire]));
+      setRotationWait(false);
     } catch (e) {
+      // Waiting for the new key: like no network, it stays waiting (⏳) and goes out under the new key.
+      if (e instanceof ApiError && e.code === 'rotation_pending') {
+        setRotationWait(true);
+        setPending((p) => p.map((x) => (x.clientId === clientId ? { ...x, failed: false } : x)));
+        return;
+      }
       // Same clientId on retry: the server de-duplicates if the first send did land.
       // No network: stays waiting (⏳) and goes out when the connection is back.
       const error = e instanceof AttachmentTooLargeError ? (item.kind === 'voice' ? 'Vocal trop long' : 'Image trop lourde') : undefined;
@@ -1220,6 +1327,12 @@ function Chat({
           <Text style={styles.bannerText}>{alert.toUpperCase()}</Text>
         </View>
       ) : null}
+      {rotationWait ? (
+        <View style={styles.banner}>
+          <Led state="busy" size={7} />
+          <Text style={styles.bannerText}>UN MEMBRE EST PARTI — ENVOI DÈS QU’UN ADMIN CHANGE LA CLÉ</Text>
+        </View>
+      ) : null}
       {newAdmin ? (
         <Pressable style={styles.banner} onPress={() => setNewAdmin(false)} accessibilityRole="button">
           <Led state="busy" size={7} />
@@ -1291,6 +1404,7 @@ function Chat({
             reactions={reactionTally}
             onReact={react}
             onDoubleTap={quickReact}
+            colors={memberColors}
           />
           <StoriesBand
             session={session}
@@ -1389,13 +1503,58 @@ function Chat({
           setReplying(pressed);
           replyAfterSheet.current = true;
         }}
+        onReport={
+          pressed && pressed.senderId !== session.account.userId
+            ? () => {
+                reportAfterSheet.current = pressed;
+              }
+            : undefined
+        }
+        onBlock={
+          pressed && pressed.senderId !== session.account.userId
+            ? () => {
+                blockAfterSheet.current = pressed;
+              }
+            : undefined
+        }
         onClose={() => setPressed(null)}
         onHidden={() => {
+          // One sheet at a time: the reasons come up once this one is gone.
+          if (reportAfterSheet.current) {
+            reported.current = reportAfterSheet.current;
+            setReporting(reportAfterSheet.current);
+            reportAfterSheet.current = null;
+          }
+          if (blockAfterSheet.current) {
+            confirmBlock(blockAfterSheet.current);
+            blockAfterSheet.current = null;
+          }
           if (!replyAfterSheet.current) return;
           replyAfterSheet.current = false;
           input.current?.focus();
         }}
       />
+      <ActionSheet
+        visible={reporting !== null}
+        onClose={() => setReporting(null)}
+        onHidden={() => {
+          const reason = reasonAfterSheet.current;
+          reasonAfterSheet.current = null;
+          if (reason && reported.current) void sendReport(reported.current, reason);
+        }}
+      >
+        <Text style={styles.sheetTitle}>SIGNALER · {(reporting ?? reported.current)?.senderName ?? ''}</Text>
+        <Text style={styles.sheetNote}>
+          {(reporting ?? reported.current)?.text
+            ? 'Le texte de ce message, déchiffré sur ton téléphone, est envoyé à l’équipe de BaseSecrète avec ton signalement. Rien d’autre du groupe.'
+            : 'Le serveur ne peut pas voir ce contenu : seuls le nom du membre et ton motif sont envoyés à l’équipe de BaseSecrète.'}
+        </Text>
+        <ActionKey label="Harcèlement ou insulte" onPress={() => pickReason('abuse')} />
+        <ActionKey label="Spam" onPress={() => pickReason('spam')} />
+        <ActionKey label="Contenu illégal" onPress={() => pickReason('illegal')} />
+        <ActionKey label="Autre" onPress={() => pickReason('other')} />
+        <ActionKey label="Annuler" dim onPress={() => setReporting(null)} />
+      </ActionSheet>
       <ActionSheet visible={eraseDay !== null} onClose={() => setEraseDay(null)}>
         <Text style={styles.sheetTitle}>EFFACER POUR TOUS · {eraseDay ? dayLabel(eraseDay, now) : ''}</Text>
         {ERASE_SPANS.map((span) => (
@@ -1528,6 +1687,7 @@ const Timeline = memo(function Timeline({
   reactions,
   onReact,
   onDoubleTap,
+  colors: groupColors,
 }: {
   look: ChatLook;
   /** A private conversation: only the two of them read it. */
@@ -1550,18 +1710,21 @@ const Timeline = memo(function Timeline({
   onReact(m: ChatMessage, id: ReactionId): void;
   /** Two quick taps on a delivered message: the first reaction of this phone's order. */
   onDoubleTap(m: ChatMessage): void;
+  /** Each member's color in this group (null: not known yet, the profiles' then). */
+  colors: GroupColors | null;
 }) {
   const { session, profiles } = useUnlocked();
   const me = session.account.userId;
   const myName = session.account.username;
-  // My color, for my messages still on their way (the sent ones carry it from my profile).
-  const [myColor, setMyColor] = useState<string | null>(null);
+  // My color in this group, for my messages still on their way (the sent ones get it with the others').
+  const [profileColor, setProfileColor] = useState<string | null>(null);
   useEffect(() => {
     profiles
       .get([me])
-      .then((known) => setMyColor(known.get(me)?.color ?? null))
+      .then((known) => setProfileColor(known.get(me)?.color ?? null))
       .catch(() => {});
   }, [profiles, me]);
+  const myColor = colorIn(groupColors, me, profileColor);
   // Original lit for a moment after tapping a quote.
   const [highlight, setHighlight] = useState<string | null>(null);
   const highlightTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -1798,4 +1961,5 @@ const styles = StyleSheet.create({
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: space.sm, padding: space.xl },
   emptyTitle: { color: colors.text, fontSize: 18, fontFamily: fonts.semibold },
   sheetTitle: { ...labelText, textAlign: 'center', marginBottom: space.xs },
+  sheetNote: { ...type.dim, fontSize: 13, textAlign: 'center', marginBottom: space.xs },
 });

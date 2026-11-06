@@ -14,7 +14,7 @@ export type KeyTone = 'text' | 'cold' | 'dim' | 'alert';
  * inverts and the key sinks by a pixel, as on the keypad.
  *
  * `steel`: neutral (cancel, a tool, a lesser choice). `hot`: the action
- * (send, open, confirm), the blade's green with its halo. `danger`: what
+ * (send, open, confirm), the blade's red with its halo. `danger`: what
  * cannot be undone, near-black red with the red edge.
  *
  * `label` prints a text; `children` draws anything else (an icon). `square`

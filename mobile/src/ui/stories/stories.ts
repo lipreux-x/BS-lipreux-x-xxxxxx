@@ -12,6 +12,8 @@ export interface StoryMessage {
   senderId: string;
   senderName: string;
   senderAvatar: string | null;
+  /** The sender's account color id (null or absent: the default). */
+  senderColor?: string | null;
   mine: boolean;
   story: StoryBody;
   createdAt: string;

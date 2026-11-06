@@ -1,10 +1,13 @@
 import { ApiError } from './api';
+import { colorIn, colorsOf } from './groupColors';
 import { forgetGroup, peerOf, type ProfileCache, type Session } from './groups';
 
 export interface GroupInfoMember {
   userId: string;
   username: string;
   avatar: string | null;
+  /** Their color in this group (null: the default). */
+  color: string | null;
   role: 'admin' | 'member';
   me: boolean;
   /** Their keys changed since this phone first saw them: messages and keys from them are not trusted. */
@@ -39,11 +42,13 @@ export async function groupInfo(s: Session, profiles: ProfileCache, groupId: str
   const g = groups.find((x) => x.id === groupId);
   if (!g || g.status !== 'active') throw new ApiError(404, 'not_found');
   const known = await profiles.get(members.map((m) => m.userId));
+  const colors = colorsOf(members);
   // Roles come from the signed meta (the server's copy only mirrors it).
   const rows = members.map((m) => ({
     userId: m.userId,
     username: known.get(m.userId)?.username ?? '?',
     avatar: known.get(m.userId)?.avatar ?? null,
+    color: colorIn(colors, m.userId, known.get(m.userId)?.color ?? null),
     role: meta?.admins.includes(m.userId) ? ('admin' as const) : ('member' as const),
     me: m.userId === s.account.userId,
     keyChanged: known.get(m.userId)?.keyChanged ?? false,

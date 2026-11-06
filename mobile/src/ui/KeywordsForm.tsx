@@ -1,29 +1,37 @@
 import { useRef, useState, type ComponentRef } from 'react';
 import { Platform, StyleSheet, Text, type TextInput, View } from 'react-native';
-import { KEYWORD_COUNT, KEYWORD_MAX_LENGTH, keywordsProblem } from '@/services/keywords';
+import { KEYWORD_ACCEPT_LENGTH, KEYWORD_COUNT, KEYWORD_MAX_LENGTH, keywordsProblem } from '@/services/keywords';
 import { Button } from './Button';
 import { Field } from './Screen';
-import { colors, space, type } from './theme';
+import { colors, mono, space, type } from './theme';
 
-/** 3 keyword fields + submit. `onSubmit` returns null on success or an error message to show. */
+/**
+ * 3 keyword fields + submit. `onSubmit` returns null on success or an error
+ * message to show. `choose`: the admin picks them (a new group, a code
+ * change), at most KEYWORD_MAX_LENGTH characters each, a counter at the end
+ * of each field; otherwise they are typed to join or open a group.
+ */
 export function KeywordsForm({
   hint,
   submitTitle,
   initial,
   initialError,
+  choose,
   onSubmit,
 }: {
   hint: string;
   submitTitle: string;
   initial?: string[];
   initialError?: string;
+  choose?: boolean;
   onSubmit(words: string[]): Promise<string | null>;
 }) {
+  const max = choose ? KEYWORD_MAX_LENGTH : KEYWORD_ACCEPT_LENGTH;
   const [words, setWords] = useState<string[]>(initial ?? Array.from({ length: KEYWORD_COUNT }, () => ''));
   const [error, setError] = useState<string | null>(initialError ?? null);
   const [busy, setBusy] = useState(false);
   const inputs = useRef<(ComponentRef<typeof TextInput> | null)[]>([]);
-  const problem = keywordsProblem(words);
+  const problem = keywordsProblem(words, max);
 
   async function submit() {
     if (problem) return setError(problem);
@@ -48,7 +56,14 @@ export function KeywordsForm({
             setWords((ws) => ws.map((x, j) => (j === i ? t : x)));
           }}
           placeholder={`Mot-clé ${i + 1}`}
-          maxLength={KEYWORD_MAX_LENGTH}
+          maxLength={max}
+          right={
+            choose ? (
+              <Text style={[styles.count, w.trim().length > max && styles.over]} accessibilityLabel={`${w.trim().length} caractères sur ${max}`}>
+                {w.trim().length}/{max}
+              </Text>
+            ) : undefined
+          }
           autoCapitalize="none"
           autoCorrect={false}
           // Android keyboards would still learn the words and suggest them in other apps.
@@ -68,4 +83,6 @@ export function KeywordsForm({
 const styles = StyleSheet.create({
   form: { flex: 1, backgroundColor: colors.bg, padding: space.lg, gap: space.md },
   error: { color: colors.danger },
+  count: { fontFamily: mono, fontSize: 12, color: colors.textDim, paddingRight: 5 },
+  over: { color: colors.danger },
 });

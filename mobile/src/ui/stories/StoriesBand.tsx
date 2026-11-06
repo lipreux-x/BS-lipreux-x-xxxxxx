@@ -1,7 +1,7 @@
 import * as Haptics from 'expo-haptics';
 import { Check, ChevronDown, Plus } from 'lucide-react-native';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Animated, FlatList, Image, PanResponder, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Animated, FlatList, Image, Keyboard, PanResponder, Pressable, StyleSheet, Text, View } from 'react-native';
 import Svg, { Defs, Pattern, Rect } from 'react-native-svg';
 import { b64 } from '@/crypto';
 import { ApiError } from '@/services/api';
@@ -9,6 +9,7 @@ import { loadAttachment, type Session } from '@/services/groups';
 import { imageCache, jpegUri, previewUri } from '@/services/images';
 import { safeToDisplay } from '@/services/jpeg';
 import { Avatar, isAvatarId } from '../avatars';
+import { useKeyboardUp } from '../KeyboardGlide';
 import { Led } from '../Led';
 import { Logo } from '../Logo';
 import { colors, fonts, hotKey, mono, steel } from '../theme';
@@ -81,8 +82,8 @@ function useStoryImage(session: Session, groupId: string, story: StoryMessage, e
  * (or tapped), the photo itself comes down with the rail and is the whole
  * shutter, down to the composer: the photo whole and as large as it fits,
  * centred, and behind it the same photo blurred and stretched to fill the
- * rest (like a story). It shows through the steel grille only as the
- * shutter goes further down, whole once it is all the way: a band pulled
+ * rest (like a story). The steel grille over it fades only as the
+ * shutter goes further down, gone once it is all the way: a band pulled
  * halfway shows the grille, not the photo. A tap on the right half goes to the next one, on the
  * left half to the previous one, a swipe does the same, and a tap past the
  * last one folds the shutter back. It opens on the first photo not watched
@@ -127,7 +128,20 @@ export function StoriesBand({
   onView(jpeg: Uint8Array): void;
 }) {
   // The messages area the band lies over; the shutter comes down at most to its bottom.
+  // Taken with the keyboard down only: the keyboard goes away as the shutter
+  // opens, and the area then grows back in a glide. Following each of its
+  // frames re-rendered the photos and restarted the spring frame after frame
+  // (the shutter crawled down, then the photo popped in at the end).
   const [area, setArea] = useState({ width: 0, height: 0 });
+  const measured = useRef(area);
+  const keyboardUp = useKeyboardUp();
+  const takeArea = useCallback(() => {
+    const m = measured.current;
+    setArea((a) => (a.width === m.width && a.height === m.height ? a : m));
+  }, []);
+  useEffect(() => {
+    if (!keyboardUp) takeArea();
+  }, [keyboardUp, takeArea]);
   const maxH = Math.max(0, area.height - STORIES_RAIL_H);
   // How far the shutter is down (0: folded). Drives a translation only, never
   // a layout prop: animated natively, and a re-render of the band cannot
@@ -144,29 +158,43 @@ export function StoriesBand({
   // animates, and the shutter would jump for a frame.
   const slide = useMemo(() => Animated.subtract(height, maxH), [height, maxH]);
   const chevron = useMemo(() => height.interpolate({ inputRange: [0, Math.max(1, openH)], outputRange: ['0deg', '180deg'] }), [height, openH]);
-  // What comes down first is the steel grille: the photo only shows through
-  // it as the shutter goes further, whole only once it is all the way down.
-  // A glance at a half-pulled band shows nothing to someone looking over the shoulder.
-  const reveal = useMemo(
-    () => height.interpolate({ inputRange: [0, Math.max(1, openH) * 0.55, Math.max(1, openH)], outputRange: [0, 0.18, 1], extrapolate: 'clamp' }),
+  // What comes down first is the steel grille: a second grille lies over the
+  // photo and fades as the shutter goes further, gone once it is all the way
+  // down. A glance at a half-pulled band shows nothing to someone looking over the shoulder.
+  const veil = useMemo(
+    () => height.interpolate({ inputRange: [0, Math.max(1, openH) * 0.55, Math.max(1, openH)], outputRange: [1, 0.82, 0], extrapolate: 'clamp' }),
     [height, openH],
   );
-  // All the way down and at rest: the photo is shown by a plain opacity, not
-  // by \`reveal\`. With the native driver, a re-render during the spring
-  // commits the opacity JS knew then (stale, the grille still on), and the
-  // native side does not always put the right one back once it stops (seen
-  // on iPhone): the photo stayed behind the grille with the shutter open.
+  // All the way down and at rest: the veil is not there at all. The photo
+  // itself is never faded: with the native driver, a re-render during the
+  // spring commits the opacity JS knew then (stale), and the native side does
+  // not always put the right one back once it stops, even swapped for a plain
+  // opacity of 1 (seen on iPhone): the photo stayed behind the grille with
+  // the shutter open. A view taken out of the tree cannot stay half-applied.
   // Where the last spring came to rest (null: a drag moved it since).
   const [restAt, setRestAt] = useState<number | null>(null);
   const atRest = open && openH > 0 && restAt === openH;
+  // The same, for the gesture handler (folded at first).
+  const rest = useRef<number | null>(0);
+  // A pull has begun on the folded shutter: the photo it opens on is lined up
+  // and decrypted from then, ready when the finger lets go.
+  const [pulling, setPulling] = useState(false);
   const springTo = useCallback(
     (to: number) => {
       Animated.spring(height, { toValue: to, ...SPRING }).start(({ finished }) => {
-        if (finished) setRestAt(to);
+        if (!finished) return;
+        rest.current = to;
+        setRestAt(to);
+        if (to === 0) setPulling(false);
       });
     },
     [height],
   );
+  const prime = useCallback(() => {
+    if (!stories.length) return;
+    list.current?.scrollToIndex({ index: openingIndex(stories, seen), animated: false });
+    setPulling(true);
+  }, [stories, seen]);
   const fresh = stories.filter((s) => isNew(s, seen)).length;
   const mine = stories.filter((s) => s.mine).length;
 
@@ -190,10 +218,10 @@ export function StoriesBand({
   }, [published]);
 
   // The gesture handler outlives renders: it reads the latest values from refs.
-  const latest = useRef({ open, openH, onOpenChange });
+  const latest = useRef({ open, openH, onOpenChange, prime });
   useEffect(() => {
-    latest.current = { open, openH, onOpenChange };
-  }, [open, openH, onOpenChange]);
+    latest.current = { open, openH, onOpenChange, prime };
+  }, [open, openH, onOpenChange, prime]);
 
   const settle = useCallback(
     (target: boolean) => {
@@ -210,6 +238,12 @@ export function StoriesBand({
     [springTo],
   );
 
+  // The keyboard comes up over an open shutter (a tap on the composer): back
+  // to the chat. Sized for the area at rest, it would run under the composer.
+  useEffect(() => {
+    if (keyboardUp && latest.current.open) settle(false);
+  }, [keyboardUp, settle]);
+
   // Opened or closed from outside (or from a tap), or the area resized: the shutter follows.
   useEffect(() => {
     springTo(open ? openH : 0);
@@ -218,23 +252,37 @@ export function StoriesBand({
   // Created once; the refs are only read while a drag runs, never during render.
   // eslint-disable-next-line react-hooks/refs
   const [pan] = useState(() => {
-    let from = 0;
+    // Where the shutter was when the finger took it. The native value only
+    // comes back asynchronously: a move handled before it did used the last
+    // drag's start, and the shutter flashed wide open (or shut) for a frame.
+    // At rest it is known at once; taken mid-spring, moves wait for it.
+    let from: number | null = 0;
     const clamp = (v: number) => Math.min(latest.current.openH, Math.max(0, v));
     return PanResponder.create({
       // Clearly vertical drags only, anywhere on the shutter: taps and the
       // left-right swipe of the photos still reach them.
       onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dy) > 6 && Math.abs(g.dy) > Math.abs(g.dx),
       onPanResponderGrant: () => {
+        if (!latest.current.open) {
+          // Pulled down over the keyboard: it goes now, the room it leaves opens under the finger.
+          Keyboard.dismiss();
+          latest.current.prime();
+        }
+        from = rest.current;
+        rest.current = null;
         setRestAt(null);
         height.stopAnimation((v) => {
           from = v;
         });
       },
-      onPanResponderMove: (_e, g) => height.setValue(clamp(from + g.dy)),
+      onPanResponderMove: (_e, g) => {
+        if (from !== null) height.setValue(clamp(from + g.dy));
+      },
       // A flick decides; otherwise a short pull is enough to open (it never
       // snaps back like a pull-to-refresh), and closing takes pushing it
       // nearly all the way up.
       onPanResponderRelease: (_e, g) => {
+        if (from === null) return settle(latest.current.open);
         settle(Math.abs(g.vy) > 0.3 ? g.vy > 0 : clamp(from + g.dy) > Math.min(latest.current.openH / 2, OPEN_PULL));
       },
       onPanResponderTerminate: () => settle(latest.current.open),
@@ -286,12 +334,11 @@ export function StoriesBand({
     <View
       style={styles.area}
       pointerEvents="box-none"
-      onLayout={(e) =>
-        setArea({
-          width: e.nativeEvent.layout.width,
-          height: e.nativeEvent.layout.height,
-        })
-      }
+      onLayout={(e) => {
+        measured.current = { width: e.nativeEvent.layout.width, height: e.nativeEvent.layout.height };
+        // Never measured yet (the chat opened with the keyboard up): this one, for now.
+        if (!keyboardUp || area.height === 0) takeArea();
+      }}
     >
       {/* The whole shutter (stage + rail) slides down from above the area, which clips it:
           folded, only the rail shows; the photo's bottom edge rides on the rail. */}
@@ -299,7 +346,7 @@ export function StoriesBand({
         <View style={[styles.stage, { height: maxH }]}>
           <Shutter />
           {stories.length && area.width > 0 && maxH > 0 ? (
-            <Animated.View style={{ height: maxH, opacity: atRest ? 1 : reveal }}>
+            <View style={{ height: maxH }}>
               <FlatList
               ref={list}
               horizontal
@@ -323,14 +370,19 @@ export function StoriesBand({
                   width={area.width}
                   height={maxH}
                   box={fitStory(item.story, area.width, maxH)}
-                  load={open}
+                  load={open || pulling}
                   now={now}
                   onTap={tap}
                   onView={onView}
                 />
               )}
               />
-            </Animated.View>
+              {atRest ? null : (
+                <Animated.View style={[styles.veil, { opacity: veil }]} pointerEvents="none">
+                  <Shutter />
+                </Animated.View>
+              )}
+            </View>
           ) : (
             // At the bottom of the stage, like the photos: that is the part that comes down.
             <View style={{ height: openH, justifyContent: 'center' }}>
@@ -478,7 +530,7 @@ const StoryPage = memo(function StoryPage({
       </View>
       <Text style={styles.left}>{left} H</Text>
       <View style={styles.caption}>
-        <Avatar id={isAvatarId(story.senderAvatar) ? story.senderAvatar : null} size={AVATAR} />
+        <Avatar id={isAvatarId(story.senderAvatar) ? story.senderAvatar : null} size={AVATAR} color={story.senderColor} />
         <View style={{ flex: 1 }}>
           <Text style={styles.name} numberOfLines={1}>
             {story.mine ? 'Toi' : story.senderName}
@@ -536,6 +588,8 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
     overflow: 'hidden',
   },
+  // The grille over the photos while the shutter moves (opaque on its own, like the stage).
+  veil: { ...StyleSheet.absoluteFill, backgroundColor: STEEL },
   // Logo and "Story" on a dark plate screwed onto the shutter, so they read over the slots.
   empty: {
     alignSelf: 'center',

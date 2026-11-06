@@ -131,7 +131,8 @@ export class LocalStore {
     const key = this.k();
     const gid = blindLocalId(groupId, key);
     await this.db.runAsync('DELETE FROM messages WHERE gid = ?', [gid]);
-    for (const name of [records.group(groupId), records.chat(groupId), records.seen(groupId), records.outbox(groupId), records.stories(groupId), records.look(groupId)]) {
+    const names = [records.group, records.chat, records.seen, records.outbox, records.stories, records.look, records.colors].map((r) => r(groupId));
+    for (const name of names) {
       await this.db.runAsync('DELETE FROM records WHERE k = ?', [blindLocalId(name, key)]);
     }
     const blobs = await this.db.getAllAsync<{ name: string }>('SELECT name FROM blobs WHERE gid = ?', [gid]);
@@ -247,6 +248,8 @@ export const records = {
   stories: (id: string) => `stories/${id}`,
   /** How the conversation is drawn on this phone: { look: ChatLook } (ui/chat/look). */
   look: (id: string) => `look/${id}`,
+  /** Each member's color in the group, as the server last gave it: { colors: user id -> color id | null } (services/groupColors.ts). */
+  colors: (id: string) => `colors/${id}`,
   /** Messages written but not sent yet (services/outbox.ts). */
   outbox: (id: string) => `outbox/${id}`,
   /** Profiles of people met in groups, by user id. */
@@ -255,4 +258,6 @@ export const records = {
   verified: 'verified',
   /** The five reaction keys in the order chosen on this phone: { order: ReactionId[] } (ui/chat/reactions). */
   reactionOrder: 'reactions/order',
+  /** Members blocked on this phone: user id -> username (services/blocked.ts). */
+  blocked: 'blocked',
 };

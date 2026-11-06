@@ -161,7 +161,26 @@ export function replyExcerpt(body: MessageBody): Pick<ReplyRef, 'excerpt' | 'ima
   return { excerpt: flat.length > MAX_EXCERPT ? flat.slice(0, MAX_EXCERPT - 1) + '…' : flat };
 }
 
+/**
+ * Sizes a body is padded to before encryption (UTF-8 bytes): the server sees
+ * which bucket a message falls in, not its length ("ok" and a long sentence
+ * weigh the same). Spaces, so that phones without this still read it: JSON
+ * ignores them, and a plain text only gets trailing blanks.
+ */
+const PAD_BUCKETS = [256, 1024, 4096, 16_384];
+
+export function padBody(body: string): string {
+  const n = utf8.encode(body).length;
+  const target = PAD_BUCKETS.find((b) => b >= n) ?? Math.ceil(n / 16_384) * 16_384;
+  return body + ' '.repeat(target - n);
+}
+
+/** The body to encrypt, padded (padBody). */
 export function encodeMessageBody(body: MessageBody): string {
+  return padBody(bodyText(body));
+}
+
+function bodyText(body: MessageBody): string {
   if (body.kind === 'text') {
     if (body.text.startsWith(STRUCTURED_PREFIX)) throw new CryptoError('INVALID_INPUT');
     if (!body.replyTo) return body.text;
@@ -217,7 +236,11 @@ function parseReply(v: unknown): ReplyRef | undefined | null {
 
 /** Never throws: a malformed body (from a buggy or hostile member) reads as null. */
 export function parseMessageBody(plaintext: string): MessageBody | null {
-  if (!plaintext.startsWith(STRUCTURED_PREFIX)) return { kind: 'text', text: plaintext };
+  // The padding goes (padBody): a text never ends with blanks of its own that matter.
+  if (!plaintext.startsWith(STRUCTURED_PREFIX)) {
+    const text = plaintext.replace(/ +$/, '');
+    return text ? { kind: 'text', text } : null;
+  }
   try {
     const v = JSON.parse(plaintext.slice(STRUCTURED_PREFIX.length)) as Record<string, unknown>;
     const replyTo = parseReply(v.replyTo);

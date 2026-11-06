@@ -19,12 +19,12 @@ export const REACTION_LABELS: Record<ReactionId, string> = {
  * Each reaction's colour, along the blade (theme.ts `blade`, kept in step by
  * hand: this module stays free of react-native): sky blue, the crown's gold
  * (the one colour from outside the blade, as before the charte: a crown is
- * gold), pale phosphor, the red light for the flame, the blade's upper tip.
+ * gold), pale rose, the red light for the flame, the blade's upper tip.
  */
 export const REACTION_COLORS: Record<ReactionId, string> = {
   like: '#4FC3FF',
   crown: '#D3B03A',
-  money: '#8CFF8C',
+  money: '#FF8DA1',
   fire: '#FF3B4E',
   secret: '#7FE6FF',
 };

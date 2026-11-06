@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Animated, Easing, Keyboard, Platform, View, type HostInstance, type KeyboardEvent, type StyleProp, type ViewStyle } from 'react-native';
 
 /** Up with the keyboard, as fast as it rises (about 4 frames): the bar must never go under it. */
@@ -8,6 +8,15 @@ const RISE = Easing.out(Easing.quad);
 const DOWN_MS = 480;
 /** Even slowing down: a sharper curve covers most of the way in two frames and reads as a jump. */
 const GLIDE = Easing.out(Easing.quad);
+
+const KeyboardUp = createContext(false);
+
+/**
+ * True from the keyboard's rise until the content has glided back down after
+ * it: meanwhile a layout inside measures the screen less the keyboard, or a
+ * frame of the glide, not the room it has at rest.
+ */
+export const useKeyboardUp = () => useContext(KeyboardUp);
 
 /**
  * Keeps its content above the keyboard, like a KeyboardAvoidingView, but the
@@ -21,14 +30,18 @@ export function KeyboardGlide({ style, children }: { style?: StyleProp<ViewStyle
   const bottom = useRef<number | null>(null);
   const measure = () => box.current?.measureInWindow((_x, y, _w, h) => (bottom.current = y + h));
   const [space] = useState(() => new Animated.Value(0));
+  const [up, setUp] = useState(false);
 
   useEffect(() => {
     const ios = Platform.OS === 'ios';
     const move = (to: number, ms: number, easing: (t: number) => number) => {
       space.stopAnimation();
-      Animated.timing(space, { toValue: to, duration: ms, easing, useNativeDriver: false }).start();
+      Animated.timing(space, { toValue: to, duration: ms, easing, useNativeDriver: false }).start(({ finished }) => {
+        if (finished && to === 0) setUp(false);
+      });
     };
     const show = (e: KeyboardEvent) => {
+      setUp(true);
       // What the keyboard covers of this box (its bottom may sit above the screen's: safe area).
       const lift = (b: number) => move(Math.max(0, b - e.endCoordinates.screenY), ios && e.duration ? e.duration : UP_MS, RISE);
       if (bottom.current !== null) lift(bottom.current);
@@ -43,9 +56,11 @@ export function KeyboardGlide({ style, children }: { style?: StyleProp<ViewStyle
   }, [space]);
 
   return (
-    <View ref={box} style={style} onLayout={measure}>
-      {children}
-      <Animated.View style={{ height: space }} />
-    </View>
+    <KeyboardUp.Provider value={up}>
+      <View ref={box} style={style} onLayout={measure}>
+        {children}
+        <Animated.View style={{ height: space }} />
+      </View>
+    </KeyboardUp.Provider>
   );
 }

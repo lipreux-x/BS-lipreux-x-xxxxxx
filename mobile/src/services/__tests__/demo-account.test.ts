@@ -20,6 +20,8 @@ import { Vault, type SecretStore } from '../vault';
 
 const API_URL = process.env.DEMO_API_URL;
 const INVITE = process.env.DEMO_INVITE;
+const USERNAME = process.env.DEMO_USERNAME ?? 'apple_review';
+const FRIEND = process.env.DEMO_FRIEND ?? 'camille_demo';
 const run = API_URL && INVITE ? describe : describe.skip;
 
 jest.setTimeout(600_000);
@@ -56,8 +58,8 @@ run('App Review demo account', () => {
 
   it('creates the account, a second member and a group with a conversation', async () => {
     const password = randomPassword();
-    const review = await onboard('apple_review', password, INVITE!);
-    const camille = await onboard('camille_demo', randomPassword(), (await review.api.createInvite()).code);
+    const review = await onboard(USERNAME, password, INVITE!);
+    const camille = await onboard(FRIEND, randomPassword(), (await review.api.createInvite()).code);
 
     const groupCode = String(randomInt(1000, 10_000));
     const keywords = ['sun', 'beach', 'summer'];
@@ -77,7 +79,7 @@ run('App Review demo account', () => {
     console.log(
       [
         'App Review demo account',
-        `  username: apple_review`,
+        `  username: ${USERNAME}`,
         `  password: ${password}`,
         `  group: "Demo group", code ${groupCode}, keywords ${keywords.join(' ')}`,
       ].join('\n'),
