@@ -12,7 +12,11 @@ const marker = () => new File(Paths.document, '.installed');
 export function isFreshInstall(): boolean {
   try {
     return !marker().exists;
-  } catch {
+  } catch (e) {
+    // Can't tell (file-system error): treat it as a normal launch rather than
+    // wipe what might be a legitimate vault. The cost is missing the rare
+    // reinstall-with-FS-error case; the vault still needs the app code to open.
+    if (__DEV__) console.warn('[install] fresh-install check failed', e);
     return false;
   }
 }

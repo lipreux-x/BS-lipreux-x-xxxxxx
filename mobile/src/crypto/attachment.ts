@@ -1,5 +1,5 @@
 import * as aead from './aead';
-import { b64, frame, utf8 } from './encoding';
+import { b64, frame, utf8, UUID_RE as UUID } from './encoding';
 import { attempt, CryptoError } from './errors';
 
 /*
@@ -149,7 +149,6 @@ export const MAX_WAVEFORM = 64;
 const STRUCTURED_PREFIX = '\u0000';
 const MAX_PREVIEW_CHARS = 8 * 1024;
 const MAX_TEXT = 4000;
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** The excerpt to quote for a message: its text cut to MAX_EXCERPT, empty for an image or a voice message, the name of a document. */
 export function replyExcerpt(body: MessageBody): Pick<ReplyRef, 'excerpt' | 'image' | 'voice' | 'file'> {

@@ -7,6 +7,7 @@ import {
   type KeyBackup,
   type PublicIdentity,
 } from '@/crypto';
+import { UUID_RE as UUID } from '@/crypto/encoding';
 
 /*
  * Typed client for the BaseSecrete API (server/src/app.ts). Only ciphertext,
@@ -118,7 +119,6 @@ export interface JoinRequest {
   requestedAt: string;
 }
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** An id going into a URL path: anything but a UUID is refused before any request. */
 function id(value: string): string {

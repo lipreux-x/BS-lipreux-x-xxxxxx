@@ -73,3 +73,6 @@ export function constantTimeEqual(a: Uint8Array, b: Uint8Array): boolean {
 export function wipe(bytes: Uint8Array | null | undefined): void {
   bytes?.fill(0);
 }
+
+/** A UUID (v4-shaped, any version), e.g. for an id going into a URL path. */
+export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

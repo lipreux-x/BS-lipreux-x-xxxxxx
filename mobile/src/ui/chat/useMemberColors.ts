@@ -21,7 +21,9 @@ export function useMemberColors(session: Session, groupId: string, keep: Keep, m
         setMemberColors(fresh);
         void keep((l) => saveColors(l, groupId, fresh));
       })
-      .catch(() => {});
+      .catch((e: unknown) => {
+        if (__DEV__) console.warn('[colors] refresh failed', e);
+      });
   }, [session, groupId, keep]);
   useEffect(() => {
     void keep(async (l) => {

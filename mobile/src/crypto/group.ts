@@ -1,5 +1,5 @@
 import * as aead from './aead';
-import { b64, frame, u32, utf8, wipe } from './encoding';
+import { b64, frame, u32, utf8, wipe, UUID_RE as UUID } from './encoding';
 import { attempt, CryptoError } from './errors';
 import { handoutKey } from './groupSecret';
 import { openSealed, sealTo, sign, verify, type Identity } from './identity';
@@ -274,7 +274,6 @@ export function encryptGroupMeta(
   return { encryptedMeta: b64.encode(blob), metaSignature: b64.encode(signature) };
 }
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const isIdList = (v: unknown): v is string[] =>
   Array.isArray(v) && v.length >= 1 && v.length <= 1000 && v.every((x) => typeof x === 'string' && UUID.test(x)) && new Set(v).size === v.length;
 

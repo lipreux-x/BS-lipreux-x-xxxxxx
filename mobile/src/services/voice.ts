@@ -14,8 +14,8 @@ import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { AppState } from 'react-native';
 import { MAX_VOICE_MS } from '@/crypto';
-import { wipe } from '@/crypto/encoding';
 import { whileSystemUi } from '@/session/autoLock';
+import { createBlobCache, deleteQuietly } from './mediaCache';
 import { level, squeeze, WAVEFORM_BARS } from '@/ui/chat/waveform';
 import { ApiError } from './api';
 import type { PreparedVoice } from './groups';
@@ -414,24 +414,13 @@ export function usePlayback(id: string): PlaybackState & { loading: boolean } {
 // ---- Memory and cleanup ------------------------------------------------------------
 
 /** Decrypted voice messages of this session, by attachment id. Cleared on lock. */
-const cache = new Map<string, Uint8Array>();
-const MAX_CACHED = 20;
-
+const voiceBlobs = createBlobCache(20);
 export const voiceCache = {
-  get: (id: string) => cache.get(id),
-  set(id: string, audio: Uint8Array) {
-    cache.delete(id);
-    cache.set(id, audio);
-    for (const old of cache.keys()) {
-      if (cache.size <= MAX_CACHED) break;
-      cache.delete(old);
-    }
-  },
+  ...voiceBlobs,
   /** On lock: stop playback, wipe the audio in memory, delete every audio file left in the cache. */
   clear() {
     voicePlayer.stop();
-    for (const bytes of cache.values()) wipe(bytes);
-    cache.clear();
+    voiceBlobs.clear();
     for (const dir of [PLAYBACK_DIR(), ...RECORDER_DIRS()]) {
       try {
         if (dir.exists) dir.delete();
@@ -441,12 +430,3 @@ export const voiceCache = {
     }
   },
 };
-
-function deleteQuietly(uri: string) {
-  try {
-    const f = new File(uri);
-    if (f.exists) f.delete();
-  } catch {
-    // already gone
-  }
-}

@@ -1,6 +1,7 @@
 import Constants from 'expo-constants';
 import type { NotificationResponse, NotificationTaskPayload } from 'expo-notifications';
 import { AppState, Platform } from 'react-native';
+import { UUID_RE as UUID } from '@/crypto/encoding';
 import { whileSystemUi } from '@/session/autoLock';
 import type { Api } from './api';
 import { secureStore } from './secureStore';
@@ -61,7 +62,6 @@ const CHANNEL = 'messages';
 const TASK = 'bs-push';
 /** Keystore record: { names: group id -> name, counts: group id -> messages since the last opening }. */
 const STORE_KEY = 'bs.notif';
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_NAME = 60;
 
 export type PushKind = 'message' | 'join_request' | 'approved' | 'member_left' | 'code_changed' | 'direct';

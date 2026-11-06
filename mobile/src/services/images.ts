@@ -4,8 +4,8 @@ import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import { launchCameraAsync, launchImageLibraryAsync, requestCameraPermissionsAsync } from 'expo-image-picker';
 import { Asset, requestPermissionsAsync } from 'expo-media-library';
 import { b64 } from '@/crypto';
-import { wipe } from '@/crypto/encoding';
 import { whileSystemUi } from '@/session/autoLock';
+import { createBlobCache, deleteQuietly } from './mediaCache';
 import type { PreparedImage } from './groups';
 
 /*
@@ -80,14 +80,6 @@ export async function saveToGallery(jpeg: Uint8Array): Promise<'saved' | 'denied
   }
 }
 
-function deleteQuietly(uri: string) {
-  try {
-    const f = new File(uri);
-    if (f.exists) f.delete();
-  } catch {
-    // already gone
-  }
-}
 
 // ---- Display ---------------------------------------------------------------------
 
@@ -96,25 +88,7 @@ export const jpegUri = (jpeg: Uint8Array) => `data:image/jpeg;base64,${toStdBase
 export const previewUri = (preview: string) => `data:image/jpeg;base64,${toStdBase64(preview)}`;
 
 /** Decrypted images of this session, by attachment id. Cleared on lock. */
-const cache = new Map<string, Uint8Array>();
-const MAX_CACHED = 30;
-
-export const imageCache = {
-  get: (id: string) => cache.get(id),
-  set(id: string, jpeg: Uint8Array) {
-    cache.delete(id);
-    cache.set(id, jpeg);
-    // Oldest first (Map keeps insertion order). Not wiped: a bubble on screen may still show it.
-    for (const old of cache.keys()) {
-      if (cache.size <= MAX_CACHED) break;
-      cache.delete(old);
-    }
-  },
-  clear() {
-    for (const bytes of cache.values()) wipe(bytes);
-    cache.clear();
-  },
-};
+export const imageCache = createBlobCache(30);
 
 // expo-image-manipulator speaks standard base64; the crypto module, base64url.
 function toStdBase64(url: string): string {

@@ -338,7 +338,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     };
     const away = async () => {
       const cursors = await readCursors(session).catch(() => undefined);
-      const res = await api.presence(false, cursors).catch(() => null);
+      const res = await api.presence(false, cursors).catch((e: unknown) => {
+        if (__DEV__) console.warn('[presence] withdraw failed', e);
+        return null;
+      });
       if (res?.badge !== undefined) await setAppBadge(res.badge);
     };
     const sleep = () => {
