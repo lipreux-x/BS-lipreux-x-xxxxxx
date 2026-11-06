@@ -27,7 +27,7 @@ Trois audits ont été menés en parallèle : le serveur et l'API, le chiffremen
 | Après « Se connecter » sur un nouveau téléphone, n'importe quel code ouvrait les groupes. | Chaque groupe redemande son **code et ses mots-clés**. |
 | Mot de passe : 10 caractères. | 10 caractères au moins, sans suite (123456, azerty…) ni répétition ; sous 16 caractères, il faut mélanger les types de caractères. |
 | Invitations valables 7 jours, en nombre illimité. | Valables **2 h** ; 3 invitations ouvertes et 10 par jour au plus par membre. |
-| L'app se verrouillait dès qu'on la quittait. | Elle se verrouille après **5 min hors de l'app**, et un groupe **10 min après l'avoir quitté**. L'écran est masqué dans les apps récentes (flou sur iPhone, aperçu vide sur Android 13+). |
+| L'app se verrouillait dès qu'on la quittait. | Elle se verrouille après **5 min hors de l'app**, et un groupe **10 min après l'avoir quitté**. L'écran est masqué dans les apps récentes (plaque grise opaque « BS » sur iPhone, aperçu vide sur Android 13+). |
 | — | Les images piégées sont refusées. Une citation impossible à vérifier est marquée « non vérifié », une citation falsifiée est signalée. Le presse-papiers est vidé au bout d'une minute. |
 | L'app tournait dans Expo Go. | Il faut **un vrai build** (EAS), à cause du module natif de sécurité. |
 
@@ -130,7 +130,8 @@ Trois audits ont été menés en parallèle : le serveur et l'API, le chiffremen
 ### À faire bientôt
 1. **Premier build EAS iPhone.** Il vérifie le module natif iOS : Argon2Swift et Secure Enclave. S'il échoue, le journal du build indiquera quoi corriger.
 2. **Changer le code après un retrait.** Un membre retiré est banni, mais il connaît toujours le code et les mots-clés. Avec la complicité du serveur, il pourrait encore fabriquer des remises de clé. L'app le conseille ; elle pourrait **l'imposer** (proposer de changer le code juste après un retrait).
-3. **Rotation quand un membre quitte de lui-même.** La nouvelle clé n'est créée qu'à la prochaine ouverture du groupe par un admin. D'ici là, les messages restent sous l'ancienne clé, que le membre parti connaît ; il ne peut les lire qu'avec la complicité du serveur. Piste : bloquer l'envoi tant que la rotation n'est pas faite, ou laisser n'importe quel membre la faire avec une signature vérifiée.
+3. ~~**Rotation quand un membre quitte de lui-même.**~~ Fait le 04/11 : tant que la rotation n'est pas faite, le serveur refuse tout nouveau message (409 `rotation_pending`) ; l'app garde le message en attente avec un bandeau, et l'envoie sous la nouvelle clé dès qu'un admin a ouvert le groupe. Si plus aucun admin n'est là (compte supprimé), n'importe quel membre fait la rotation et se nomme admin dans la méta signée. Un départ d'une personne qui n'avait pas encore la clé (demande en attente) ne bloque rien.
+   - Rotation régulière (04/11) : un admin qui ouvre le groupe tire une nouvelle clé dès que l'actuelle a plus de 7 jours (`groups.key_since`, `KEY_LIFETIME_MS`). Une clé qui fuite n'ouvre donc qu'une semaine de messages. Les anciennes clés restent sur les téléphones des membres pour relire l'historique : ce n'est pas une confidentialité persistante complète (voir 10).
 4. **Blocage de la reconnexion.** Quelqu'un qui connaît ton pseudo peut bloquer ta reconnexion par mot de passe pendant une heure en enchaînant les échecs. Pistes : petit calcul imposé au client avant chaque essai (preuve de travail), ou limite par adresse réseau si Neon la fournit de façon fiable.
 5. ~~**Option « auto-destruction » après 10 codes faux**~~ : faite le 20/10 (Réglages, 10 ou 20 essais ; secret de l'appareil, clé maître et copie pour l'empreinte effacés en premier).
 
@@ -138,20 +139,21 @@ Trois audits ont été menés en parallèle : le serveur et l'API, le chiffremen
 6. **Historique des admins.** Si un téléphone rate un changement d'admin, il accepte comme nouvel admin un membre déjà connu, et une bannière le signale. Garder l'historique des metas signées sur le serveur permettrait de vérifier toute la chaîne.
 7. **Jeton dans l'adresse du WebSocket.** Il peut finir dans des journaux de proxy. Mieux : l'envoyer dans le premier message, ou utiliser un ticket à usage unique.
 8. **Métadonnées.**
-   - La taille d'un message chiffré trahit à peu près sa longueur : on pourrait arrondir les tailles.
+   - ~~La taille d'un message chiffré trahit sa longueur~~ : depuis le 04/11 chaque contenu est complété par des espaces jusqu'à 256 o, 1 Ko, 4 Ko ou 16 Ko avant chiffrement (`padBody`). Les photos, vocaux et documents gardent leur taille réelle (stockage).
    - Le serveur sait quels messages ont une pièce jointe et leur poids.
    - L'heure, l'ordre et le caractère éphémère d'un message sont décidés par le serveur, pas signés par l'expéditeur.
 9. **Citations.** Elles pointent vers l'identifiant donné par le serveur. Les rattacher à (expéditeur, identifiant choisi par l'expéditeur) serait plus solide.
-10. **Épinglage du certificat** de l'API. Il protégerait contre un faux certificat installé sur le téléphone (profil d'entreprise, MDM).
-11. **Android 12 et moins.** L'aperçu dans les apps récentes peut être capturé avant que le cache noir s'affiche. Seul `FLAG_SECURE` l'empêche, mais il bloque aussi les captures d'écran : depuis le 20/10, c'est une option dans les Réglages (« Captures d'écran : bloquées »), désactivée par défaut.
-12. **Clavier.** Le champ de message laisse le clavier apprendre les mots tapés : c'est un compromis entre confort et discrétion.
-13. **Mémoire.** En JavaScript, certaines valeurs secrètes (chaînes de caractères) ne peuvent pas être effacées de la mémoire. Le verrouillage est donc un verrou d'interface, pas un nettoyage garanti de la mémoire.
-14. **Codes de groupe courts.** 4 chiffres (10 000 combinaisons), c'est peu, par choix : le code se tape à chaque ouverture. Les mots-clés apportent l'essentiel de la protection ; sur le téléphone, la clé du groupe est en plus enfermée sous la clé maître.
-15. **Historique après un changement de code.** Une version de clé que l'admin ne détient pas est supprimée du serveur. Un membre qui se reconnecte sur un nouveau téléphone perd alors ces anciens messages.
+10. **Confidentialité persistante complète et post-quantique.** Double ratchet ou MLS (RFC 9420) pour que la compromission d'un téléphone n'ouvre pas l'historique ; échange de clés hybride X25519 + ML-KEM-768 (X-Wing, `@noble/post-quantum`, pas encore audité par un tiers en 11/2026) pour les remises de clé. Gros chantiers, après la sortie.
+11. **Épinglage du certificat** de l'API. Il protégerait contre un faux certificat installé sur le téléphone (profil d'entreprise, MDM).
+12. **Android 12 et moins.** L'aperçu dans les apps récentes peut être capturé avant que le cache gris s'affiche. Seul `FLAG_SECURE` l'empêche, mais il bloque aussi les captures d'écran : depuis le 20/10, c'est une option dans les Réglages (« Captures d'écran : bloquées »), désactivée par défaut.
+13. **Clavier.** Le champ de message laisse le clavier apprendre les mots tapés : c'est un compromis entre confort et discrétion.
+14. **Mémoire.** En JavaScript, certaines valeurs secrètes (chaînes de caractères) ne peuvent pas être effacées de la mémoire. Le verrouillage est donc un verrou d'interface, pas un nettoyage garanti de la mémoire.
+15. **Codes de groupe courts.** 4 chiffres (10 000 combinaisons), c'est peu, par choix : le code se tape à chaque ouverture. Les mots-clés apportent l'essentiel de la protection ; sur le téléphone, la clé du groupe est en plus enfermée sous la clé maître.
+16. **Historique après un changement de code.** Une version de clé que l'admin ne détient pas est supprimée du serveur. Un membre qui se reconnecte sur un nouveau téléphone perd alors ces anciens messages.
 
 ### Organisation
-16. **Secrets dans OneDrive.** Le dossier du projet est dans OneDrive : le fichier `.env` (base de données, secrets du serveur) est donc copié chez Microsoft. À sortir de OneDrive, ou à exclure de la synchronisation.
-17. **Déclaration du chiffrement (App Store).** `ITSAppUsesNonExemptEncryption: false` est discutable pour une messagerie chiffrée de bout en bout : déclarer le chiffrement et l'exemption qui s'applique.
-18. **URL de production.** `eas.json` ne fixe pas l'adresse de l'API pour le profil production. L'app vise donc la branche dev par défaut.
-19. **Lint.** 4 erreurs existaient avant l'audit (`SessionProvider`, `CodeEntry`).
-20. **Test de bout en bout en JavaScript pur.** Il est trop lent (Argon2 64 Mo sans le module natif) et finit par expirer. Seule la version libsodium est utilisable.
+17. **Secrets dans OneDrive.** Le dossier du projet est dans OneDrive : le fichier `.env` (base de données, secrets du serveur) est donc copié chez Microsoft. À sortir de OneDrive, ou à exclure de la synchronisation.
+18. **Déclaration du chiffrement (App Store).** `ITSAppUsesNonExemptEncryption: false` est discutable pour une messagerie chiffrée de bout en bout : déclarer le chiffrement et l'exemption qui s'applique.
+19. **URL de production.** `eas.json` ne fixe pas l'adresse de l'API pour le profil production. L'app vise donc la branche dev par défaut.
+20. **Lint.** 4 erreurs existaient avant l'audit (`SessionProvider`, `CodeEntry`).
+21. **Test de bout en bout en JavaScript pur.** Il est trop lent (Argon2 64 Mo sans le module natif) et finit par expirer. Seule la version libsodium est utilisable.

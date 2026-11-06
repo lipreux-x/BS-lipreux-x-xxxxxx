@@ -4,10 +4,18 @@
 
 ## Derniers ajouts et changements
 
+### Une couleur par groupe au lieu d'une pour tous (04/11)
+
+- Retour des utilisateurs : on veut une couleur différente selon le groupe. **La couleur se choisit maintenant dans les réglages de chaque groupe** (roue dentée → « Ta couleur dans ce groupe », ou « … dans ce tête-à-tête »), avec un aperçu de son avatar et de son nom. Elle s'applique comme avant à son nom, au trait de son avatar, à ses bulles et à ses stories, pour tous les membres, mais **dans ce groupe seulement**.
+- Réglages → Profil n'a plus de sélecteur : une ligne explique où la choisir.
+- Serveur : colonne `group_members.color` (migration `0021_member_color`, qui recopie la couleur de chacun dans tous ses groupes : rien ne change à l'écran), route `PUT /groups/:id/color` (membre actif, une des 8 couleurs ou `null`), couleur de chaque membre renvoyée par `GET /groups/:id/members`. Les anciennes versions de l'app gardent `PUT /me/color`, qui applique alors la couleur à tous leurs groupes ; elles affichent encore la couleur du profil.
+- App : `services/groupColors.ts` ; la conversation garde la dernière liste chiffrée sur le téléphone (record `colors/<groupe>`), la recharge en revenant à l'écran et quand quelqu'un de nouveau écrit. Quelqu'un qui a quitté le groupe garde la couleur de son profil.
+- Test : `groupColors.test.ts` (partie pure verte ; partie contre l'API à lancer avec une invitation). **Migration 0021 pas encore appliquée, ni sur dev ni en prod**, API pas redéployée.
+
 ### Une couleur par compte dans les discussions (27/10)
 
-- **Réglages → Profil → « Couleur dans les discussions »** : chacun choisit sa couleur parmi 8 (Ciel, Phosphore, Turquoise, Violet, Rose, Ambre, Orange, Or ; pas de rouge, gardé pour les erreurs) ou « Par défaut » (vert pour soi, bleu ciel pour les autres, comme avant).
-- Tous les membres la voient : **la bulle de ses messages est teintée de sa couleur** (une version foncée, pour que le texte blanc reste lisible), et son nom est dans la couleur vive (en **Terminal**, le `❯` et le nom ; **avec avatars**, le nom au-dessus de la plaque).
+- **Réglages → Profil → « Couleur dans les discussions »** : chacun choisit sa couleur parmi 8 (Ciel, Phosphore, Turquoise, Violet, Rose, Ambre, Orange, Or ; pas de rouge, gardé pour soi et les erreurs) ou « Par défaut » (rouge pour soi, bleu ciel pour les autres, comme avant).
+- Tous les membres la voient : **la bulle de ses messages est teintée de sa couleur** (une version foncée, pour que le texte blanc reste lisible), et son nom est dans la couleur vive (en **Terminal**, le `❯` et le nom ; **avec avatars**, le nom au-dessus de la plaque). Le trait de **son icône de profil** la prend aussi (l'anneau reste en acier), partout où elle apparaît : à côté de ses messages, sur ses stories, dans la liste des membres et dans ses Réglages. Sans couleur choisie, l'icône reste bleu ciel.
 - Comme l'avatar, c'est un simple nom de couleur stocké sur le serveur (`profiles.color`, route `PUT /me/color`, renvoyé par `/me` et `/profiles`) : migration `0016_profile_color`, appliquée sur dev et déployée ; pas en prod. La couleur d'un autre membre se met à jour à la prochaine ouverture de l'app (comme son avatar).
 
 ### Gestes : coffre qui s'ouvre seul, glisser entre Groupes et Tête-à-tête, glisser pour revenir (27/10)
@@ -15,7 +23,7 @@
 - **La porte du coffre s'ouvre toute seule** au lancement : elle se met en place, ses verrous claquent, puis la molette tourne et le portail aspire, sans toucher. Un toucher l'ouvre sans attendre. La plaque dit « Ouverture du coffre ».
 - **« Privé » devient « Tête-à-tête »** (touche, titre de la liste, fiche, notification) : « Privé » laissait croire que les groupes ne l'étaient pas.
 - **Groupes / Tête-à-tête côte à côte** : on passe de l'un à l'autre en glissant la liste vers la gauche ou la droite. Le pavé bleu de la touche choisie passe d'une touche à l'autre en suivant le doigt (l'espace entre les deux reste vide), et toucher une touche fait glisser la page.
-- **Dans une conversation, glisser vers la droite = retour** à la liste, n'importe où sur l'écran (pas seulement depuis le bord). L'écran suit le doigt et une flèche apparaît à gauche ; un geste rapide suffit.
+- **Dans une conversation, glisser vers la droite = retour** à la liste, n'importe où sur l'écran (pas seulement depuis le bord). L'écran suit le doigt et une flèche apparaît à gauche ; un geste rapide suffit. **Depuis le 03/11, ce glissement referme aussi le groupe (ou le tête-à-tête) aussitôt** : fermeture rapide, les clés sortent de la mémoire et il faudra son code la prochaine fois ; la flèche retour de l'en-tête, elle, le laisse ouvert 10 min comme avant.
 - **Répondre à un message se fait maintenant en le glissant vers la gauche** (avant : vers la droite), comme sur Telegram, pour laisser la droite au retour.
 
 ### Discussions privées : deux espaces, Groupes et Privé (26/10)

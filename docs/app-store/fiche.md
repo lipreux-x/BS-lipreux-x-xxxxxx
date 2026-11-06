@@ -143,18 +143,47 @@ BaseSecrète is an invitation-only, end-to-end encrypted messenger for small gro
 The app is in French. How to sign in:
 1. Open the app. On the welcome screen, choose « Se connecter » (Sign in).
 2. Enter the username (« Pseudo ») and password (« Mot de passe ») above, then tap « Se connecter ». The key derivation takes a few seconds.
-3. Choose any 6-digit app code and type it twice. It locks the app on this device only.
+3. Choose any 6-digit app code that is not too simple (not 123456 or 111111) and type it twice. It locks the app on this device only.
 4. On the home screen, tap the group, then enter the group code and the three keywords below.
 
+Group: « Demo group »
 Group code: [GROUP CODE]
-Keywords: [KEYWORD 1] [KEYWORD 2] [KEYWORD 3]
+Keywords: sun beach summer
 
 About the features:
 - Messages, photos and voice notes are encrypted on the device (X25519, Ed25519, XChaCha20-Poly1305, Argon2id). The server only stores ciphertext.
 - Notifications never contain any content: they only say « uçer egassem » (« message reçu », i.e. "message received", written backwards).
 - The microphone is used only to record voice notes. Photo library access is used to send photos and, on explicit request, to save a received photo.
-- Fingerprint unlock (Touch ID) is optional and replaces the app code only. Face ID is not used.
+- Face ID / Touch ID unlock is optional (off by default, turned on in Settings) and replaces the app code only.
 - No ads, no tracking, no third-party analytics.
 ```
 
 Publication : automatique après validation (réglage par défaut laissé tel quel).
+
+## Compte de démo App Review (production, créé le 04/11/2026)
+
+Créé par `demo-account.test.ts` (`DEMO_USERNAME=review_apple DEMO_FRIEND=camille_review`). L'ancien `apple_review` existe aussi en prod mais son mot de passe n'a été noté nulle part.
+
+- Pseudo : `review_apple`
+- Mot de passe : dans `demo-secrets.local.md` (fichier local, hors git : le dépôt est public)
+- Groupe « Demo group », code dans `demo-secrets.local.md`, mots-clés `sun beach summer` (avec `camille_review` et 4 messages)
+
+## TestFlight — test externe (bêta publique)
+
+Informations de test (anglais) :
+
+- Description de la bêta (4000) :
+
+```
+BaseSecrète is a private, end-to-end encrypted messenger for a small circle of friends, by invitation only. One 6-digit code opens the app; each group (a "vault") has its own 4-digit code and three keywords, shared in person. Messages, photos and voice notes are encrypted on the phone before they leave it: the server only stores ciphertext.
+```
+
+- À tester (« What to Test ») :
+
+```
+Thanks for testing BaseSecrète! Please try: creating or joining a group, sending messages, photos and voice notes, reactions and replies (long-press a message), stories, notifications when the app is in the background, and locking / unlocking the app. Report anything that looks wrong or feels slow with a screenshot from TestFlight.
+```
+
+- E-mail pour les retours : allier.maxence7@gmail.com
+- URL marketing : page d'assistance ; URL de la politique de confidentialité : voir README.
+- Informations pour la vérification : connexion requise, compte ci-dessus, Remarques = texte de la section précédente.
