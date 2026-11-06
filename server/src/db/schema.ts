@@ -24,8 +24,9 @@ export const profiles = pgTable(
     // One of the avatar icons (AVATARS in app.ts), never an uploaded image.
     // Null: the default empty silhouette. Visible to group mates, like the username.
     avatar: text('avatar'),
-    // One of the account colors (COLORS in app.ts): their name and the edge of their
-    // messages in the chats. Null: the default (green for mine, sky blue for the others').
+    // One of the account colors (COLORS in app.ts), from before the color was chosen
+    // per group (group_members.color): still set by older apps (PUT /me/color, then
+    // copied to every group), and shown for someone who left a group. Null: the default.
     color: text('color'),
     // Password-sealed copy of the identity secret keys, to sign in again on a
     // phone that lost its data (mobile src/crypto/backup.ts). Null: no backup.
@@ -35,7 +36,14 @@ export const profiles = pgTable(
     // The app is open on one of this person's phones until then (PUT /me/presence,
     // renewed every 30 s): no "new message" push meanwhile, the open app shows it.
     awakeUntil: timestamp('awake_until', { withTimezone: true }),
+    // The app icon's badge (lib/push.ts): how many messages waited unread when
+    // the app last went to the background, and since when. Null: never told.
+    badgeBase: integer('badge_base'),
+    badgeSince: timestamp('badge_since', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    // Account deleted (DELETE /me): only the id and the public keys are left, so
+    // what it signed in other people's groups still verifies. No sign-in any more.
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
   // "Alice" and "alice" cannot both exist: no look-alike names in a member list.
   (t) => [uniqueIndex('profiles_username_lower_idx').on(sql`lower(${t.username})`)],
@@ -74,9 +82,13 @@ export const groups = pgTable(
     // Direct conversation: its two user ids, sorted, joined by ':'. One per pair.
     directPair: text('direct_pair').unique(),
     currentKeyVersion: integer('current_key_version').notNull().default(1),
-    // Set when a member leaves or is removed: the next member who opens the
-    // group draws a new key for those who remain (POST /groups/:id/rotate).
+    // Set when a member who held the key leaves or is removed: nothing new is
+    // sent until an admin's phone draws a new key for those who remain
+    // (POST /groups/:id/rotate; any member's once no admin is left).
     rotationPending: boolean('rotation_pending').notNull().default(false),
+    // When the current key was drawn: an admin's phone draws a new one once it
+    // is a week old (mobile services/groups.ts), so a key that leaks only opens a week.
+    keySince: timestamp('key_since', { withTimezone: true }).notNull().defaultNow(),
     // Bumped when the admin changes the code: members' phones then ask for the
     // new one to re-lock the group key locally.
     codeVersion: integer('code_version').notNull().default(1),
@@ -125,6 +137,10 @@ export const groupMembers = pgTable(
     // Pending: asked to join with the right code + keywords, waiting for an
     // admin to approve (and hand over the key). Sees nothing of the group.
     status: text('status', { enum: ['pending', 'active'] }).notNull().default('active'),
+    // This member's color in this group (COLORS in app.ts): their name, avatar and
+    // messages, for every member. Chosen in the group's settings, one per group.
+    // Null: the default (the blade's red for mine, sky blue for the others').
+    color: text('color'),
     joinedAt: timestamp('joined_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.groupId, t.userId] }), index('group_members_user_idx').on(t.userId)],
@@ -319,4 +335,25 @@ export const pushTokens = pgTable(
     lastPushAt: timestamp('last_push_at', { withTimezone: true }),
   },
   (t) => [index('push_tokens_user_idx').on(t.userId)],
+);
+
+// Reports of a member or a message (App Store rule 1.2), read by whoever runs
+// the server (scripts/reports.ts). The server cannot read messages: the excerpt
+// is what the reporter chose to hand over, decrypted on their phone. No foreign
+// key to the group, the message or the reported account: a report outlives them.
+export const reports = pgTable(
+  'reports',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    reporterId: uuid('reporter_id').references(() => profiles.id, { onDelete: 'set null' }),
+    reportedId: uuid('reported_id').notNull(),
+    reportedUsername: text('reported_username').notNull(),
+    groupId: uuid('group_id').notNull(),
+    messageId: uuid('message_id'),
+    reason: text('reason', { enum: ['abuse', 'spam', 'illegal', 'other'] }).notNull(),
+    excerpt: text('excerpt'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    handledAt: timestamp('handled_at', { withTimezone: true }),
+  },
+  (t) => [index('reports_open_idx').on(t.handledAt, t.createdAt)],
 );

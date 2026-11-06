@@ -127,6 +127,34 @@
       "when": 1793699893872,
       "tag": "0017_group_links",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1793725041328,
+      "tag": "0018_badge",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1793798664703,
+      "tag": "0019_reports_account_deletion",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1793809403786,
+      "tag": "0020_key_since",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1793822062572,
+      "tag": "0021_member_color",
+      "breakpoints": true
     }
   ]
 }

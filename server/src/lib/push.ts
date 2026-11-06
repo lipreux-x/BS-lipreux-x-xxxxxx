@@ -1,5 +1,5 @@
 import { and, eq, inArray, isNull, lt, ne, or, sql } from 'drizzle-orm';
-import { db } from '../db/client';
+import { db, pool } from '../db/client';
 import { groupMembers, profiles, pushTokens } from '../db/schema';
 
 /*
@@ -20,6 +20,12 @@ import { groupMembers, profiles, pushTokens } from '../db/schema';
  * PUT /me/presence): the open app shows the message itself. The other
  * kinds (the group waits for this person) are rare and each one matters:
  * sent every time, app open or not.
+ *
+ * Every push carries the app icon's badge: the messages that waited unread
+ * when the app last went to the background (counted then from the phone's
+ * cursors, DELETE /me/presence), plus those come since. iOS sets it from the
+ * push itself; the Android app from the payload, as it wakes. A number, never
+ * which group or message.
  */
 
 const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';
@@ -86,20 +92,45 @@ async function ring(groupId: string, kind: PushKind, recipients: ReturnType<type
           throttle ? or(isNull(pushTokens.lastPushAt), lt(pushTokens.lastPushAt, sql`now() - make_interval(secs => ${THROTTLE_SECONDS})`)) : undefined,
         ),
       )
-      .returning({ token: pushTokens.token, platform: pushTokens.platform });
+      .returning({ token: pushTokens.token, platform: pushTokens.platform, userId: pushTokens.userId });
     if (!due.length) return;
-    await send(due, kind, groupId);
+    // Best effort as well: without a count, the push still goes.
+    const counts = await badges([...new Set(due.map((t) => t.userId))]).catch(() => new Map<string, number>());
+    await send(
+      due.map((t) => ({ ...t, badge: counts.get(t.userId) ?? null })),
+      kind,
+      groupId,
+    );
   } catch {
     // Whatever happened is stored either way; the phone sees it at the next opening.
   }
 }
 
-type Target = { token: string; platform: 'ios' | 'android' | null };
+/** Each person's badge now; left out: never told (no badge in their pushes, the icon keeps its own). */
+async function badges(userIds: string[]): Promise<Map<string, number>> {
+  const { rows } = await pool.query<{ id: string; badge: number }>(
+    `select p.id, p.badge_base + (
+              select count(*)::int
+                from messages m
+                join group_members gm on gm.group_id = m.group_id and gm.user_id = p.id and gm.status = 'active'
+               where m.created_at > p.badge_since
+                 and m.sender_id <> p.id
+                 and not m.quiet
+                 and (m.expires_at is null or m.expires_at > now())
+            ) as badge
+       from profiles p
+      where p.id = any($1::uuid[]) and p.badge_since is not null`,
+    [userIds],
+  );
+  return new Map(rows.map((r) => [r.id, r.badge]));
+}
+
+type Target = { token: string; platform: 'ios' | 'android' | null; badge: number | null };
 
 async function send(targets: Target[], kind: PushKind, groupId: string) {
-  const data = { groupId, kind };
-  const payload = targets.map(({ token, platform }) =>
-    platform === 'android'
+  const payload = targets.map(({ token, platform, badge }) => {
+    const data = badge === null ? { groupId, kind } : { groupId, kind, badge };
+    return platform === 'android'
       ? // Silent: the app shows the notification itself (high priority: delivered at once, even dozing).
         { to: token, data, priority: 'high' }
       : {
@@ -110,9 +141,10 @@ async function send(targets: Target[], kind: PushKind, groupId: string) {
           priority: 'high',
           channelId: 'messages',
           collapseId: `${kind}:${groupId}`,
+          ...(badge !== null && { badge }),
           data,
-        },
-  );
+        };
+  });
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {

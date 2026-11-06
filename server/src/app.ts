@@ -19,6 +19,7 @@ import {
   messages,
   profiles,
   pushTokens,
+  reports,
   usedChallenges,
   userActions,
 } from './db/schema';
@@ -117,7 +118,13 @@ const requireAuth: MiddlewareHandler<Env> = async (c, next) => {
 /** 404 rather than 403, so non-members cannot probe which groups exist. Pending requests are not members yet. */
 async function requireMember(groupId: string, userId: string) {
   const [row] = await db
-    .select({ role: groupMembers.role, currentKeyVersion: groups.currentKeyVersion, ephemeralSeconds: groups.ephemeralSeconds, kind: groups.kind })
+    .select({
+      role: groupMembers.role,
+      currentKeyVersion: groups.currentKeyVersion,
+      ephemeralSeconds: groups.ephemeralSeconds,
+      kind: groups.kind,
+      rotationPending: groups.rotationPending,
+    })
     .from(groupMembers)
     .innerJoin(groups, eq(groups.id, groupMembers.groupId))
     .where(and(eq(groupMembers.groupId, groupId), eq(groupMembers.userId, userId), eq(groupMembers.status, 'active'), groupAlive));
@@ -213,6 +220,8 @@ app.post('/auth/register', async (c) => {
       backup: keyBackup,
     }),
   );
+  // The name a deleted account is left with (DELETE /me): nobody else can take it.
+  if (/^deleted_/i.test(input.username)) throw new HTTPException(409, { message: 'username_taken' });
   const invite = normalizeInviteCode(input.inviteCode);
   const pkBox = fromB64(input.publicKeyBox)!;
   const pkSign = fromB64(input.publicKeySign)!;
@@ -302,7 +311,7 @@ app.post('/auth/recover', async (c) => {
 
 app.post('/auth/challenge', async (c) => {
   const { userId } = await body(c, z.object({ userId: z.uuid() }));
-  const [p] = await db.select({ id: profiles.id }).from(profiles).where(eq(profiles.id, userId));
+  const [p] = await db.select({ id: profiles.id }).from(profiles).where(and(eq(profiles.id, userId), isNull(profiles.deletedAt)));
   if (!p) throw new HTTPException(404, { message: 'not_found' });
   return c.json({ challenge: await issueChallenge(userId) });
 });
@@ -314,7 +323,7 @@ app.post('/auth/token', async (c) => {
   const { userId } = challenge;
   const [p] = await db.select().from(profiles).where(eq(profiles.id, userId));
   const signed = frame(utf8('bs/v1/login'), utf8(input.challenge));
-  if (!p || !verifyEd25519(fromB64(input.signature)!, signed, fromB64(p.publicKeySign)!)) {
+  if (!p || p.deletedAt || !verifyEd25519(fromB64(input.signature)!, signed, fromB64(p.publicKeySign)!)) {
     throw new HTTPException(401, { message: 'bad_signature' });
   }
   // Single use: a captured (challenge, signature) pair mints nothing more.
@@ -350,10 +359,17 @@ app.put('/me/avatar', async (c) => {
   return c.json({ avatar });
 });
 
-/** Picks one of the account colors, or null for the default. */
+/**
+ * Older apps: one color for every group. It still goes to each of them
+ * (the color is now chosen per group: PUT /groups/:id/color).
+ */
 app.put('/me/color', async (c) => {
+  const me = c.get('userId');
   const { color } = await body(c, z.object({ color: z.enum(COLORS).nullable() }));
-  await db.update(profiles).set({ color }).where(eq(profiles.id, c.get('userId')));
+  await db.transaction(async (tx) => {
+    await tx.update(profiles).set({ color }).where(eq(profiles.id, me));
+    await tx.update(groupMembers).set({ color }).where(eq(groupMembers.userId, me));
+  });
   return c.json({ color });
 });
 
@@ -382,15 +398,93 @@ app.put('/me/presence', async (c) => {
   return c.json({ ok: true });
 });
 
+/**
+ * The app went to the background. With `cursors` (as for POST /groups/unread),
+ * what waits unread then is counted and kept: the base of the app icon's badge
+ * in the pushes that follow (lib/push.ts), and handed back for the phone to
+ * show at once.
+ */
 app.delete('/me/presence', async (c) => {
-  await db.update(profiles).set({ awakeUntil: null }).where(eq(profiles.id, c.get('userId')));
-  return c.json({ ok: true });
+  const me = c.get('userId');
+  const parsed = z.object({ cursors }).safeParse(await c.req.json().catch(() => undefined));
+  if (!parsed.success) {
+    await db.update(profiles).set({ awakeUntil: null }).where(eq(profiles.id, me));
+    return c.json({ ok: true });
+  }
+  const counts = await unreadByGroup(me, parsed.data.cursors);
+  const badge = Object.values(counts).reduce((a, n) => a + n, 0);
+  await db.update(profiles).set({ awakeUntil: null, badgeBase: badge, badgeSince: sql`now()` }).where(eq(profiles.id, me));
+  return c.json({ ok: true, badge });
 });
 
 app.delete('/me/push-token', async (c) => {
   const { token } = await body(c, z.object({ token: z.string().regex(PUSH_TOKEN) }));
   await db.delete(pushTokens).where(and(eq(pushTokens.token, token), eq(pushTokens.userId, c.get('userId'))));
   return c.json({ ok: true });
+});
+
+/**
+ * Deletes the account (App Store rule 5.1.1(v)). It leaves every group (a
+ * private conversation goes for both), its messages and files go, and the
+ * profile keeps only its id and public keys: what it signed in other people's
+ * groups (meta, key handouts) must still verify. Username, avatar, color and
+ * the password-sealed backup go, and it can never sign in again.
+ *
+ * The only admin of a group others stay in: 409 `handover_required` with those
+ * groups, unless `force` (the group then has no admin: nobody new gets in).
+ */
+app.delete('/me', async (c) => {
+  const me = c.get('userId');
+  const { force = false } = await body(c, z.object({ force: z.boolean().optional() }));
+  const mine = await db
+    .select({ groupId: groupMembers.groupId, role: groupMembers.role, status: groupMembers.status, kind: groups.kind })
+    .from(groupMembers)
+    .innerJoin(groups, eq(groups.id, groupMembers.groupId))
+    .where(eq(groupMembers.userId, me));
+  if (!force) {
+    const stuck: string[] = [];
+    for (const g of mine) {
+      if (g.kind === 'direct' || g.status !== 'active' || g.role !== 'admin') continue;
+      if ((await adminCount(g.groupId)) === 1 && (await activeCount(g.groupId)) > 1) stuck.push(g.groupId);
+    }
+    if (stuck.length) return c.json({ error: 'handover_required', groups: stuck }, 409);
+  }
+  for (const g of mine) {
+    if (g.kind === 'direct') await deleteConversation(g.groupId);
+    else {
+      await removeMember(g.groupId, me, false);
+      if (g.status === 'active') await notifyAction(g.groupId, 'member_left', 'admins', me);
+    }
+  }
+  // What it sent in the groups that remain, files first (their rows go with the messages).
+  const files = await db.select({ id: attachments.id, groupId: attachments.groupId }).from(attachments).where(eq(attachments.uploaderId, me));
+  await db.transaction(async (tx) => {
+    await tx.delete(attachments).where(eq(attachments.uploaderId, me));
+    await tx.delete(messages).where(eq(messages.senderId, me));
+    await tx.delete(invites).where(and(eq(invites.createdBy, me), isNull(invites.usedBy)));
+    await tx.delete(pushTokens).where(eq(pushTokens.userId, me));
+    await tx.delete(userActions).where(eq(userActions.userId, me));
+    await tx.delete(joinAttempts).where(eq(joinAttempts.userId, me));
+    await tx.delete(groupBans).where(eq(groupBans.userId, me));
+    await tx
+      .update(profiles)
+      .set({
+        username: `deleted_${me.replace(/-/g, '').slice(0, 12)}`,
+        avatar: null,
+        color: null,
+        backupParams: null,
+        backupAuth: null,
+        backupBox: null,
+        awakeUntil: null,
+        badgeBase: null,
+        badgeSince: null,
+        deletedAt: sql`now()`,
+      })
+      .where(eq(profiles.id, me));
+  });
+  if (files.length) await deleteObjects(files.map((f) => objectKey(f.groupId, f.id))).catch((e: Error) => console.error('[storage]', e.name));
+  realtime.nudge();
+  return c.json({ deleted: true });
 });
 
 app.post('/invites', async (c) => {
@@ -437,6 +531,11 @@ app.get('/profiles', async (c) => {
           // Someone who left still signed the messages they wrote: their keys check them.
           sql`exists (select 1 from ${groupMembers} a join ${messages} m on m.group_id = a.group_id
                       where a.user_id = ${me} and a.status = 'active' and m.sender_id = ${profiles.id})`,
+          // Same for the meta and the key handouts of my groups: a gone admin (deleted account) still signed them.
+          sql`exists (select 1 from ${groupMembers} a join ${groups} g on g.id = a.group_id
+                      where a.user_id = ${me} and a.status = 'active' and g.meta_signer_id = ${profiles.id})`,
+          sql`exists (select 1 from ${groupMembers} a join ${groupKeys} k on k.group_id = a.group_id
+                      where a.user_id = ${me} and a.status = 'active' and (k.signer_id = ${profiles.id} or k.label_signer_id = ${profiles.id}))`,
         ),
       ),
     );
@@ -483,6 +582,7 @@ app.get('/groups', async (c) => {
       currentKeyVersion: groups.currentKeyVersion,
       ephemeralSeconds: groups.ephemeralSeconds,
       rotationPending: groups.rotationPending,
+      keySince: groups.keySince,
       codeVersion: groups.codeVersion,
       expiresAt: groups.expiresAt,
       kind: groups.kind,
@@ -794,7 +894,7 @@ app.get('/groups/:groupId/members', async (c) => {
   const groupId = groupIdParam(c);
   const { currentKeyVersion, role } = await requireMember(groupId, c.get('userId'));
   const rows = await db
-    .select({ userId: groupMembers.userId, role: groupMembers.role, status: groupMembers.status, joinedAt: groupMembers.joinedAt })
+    .select({ userId: groupMembers.userId, role: groupMembers.role, status: groupMembers.status, color: groupMembers.color, joinedAt: groupMembers.joinedAt })
     .from(groupMembers)
     .where(eq(groupMembers.groupId, groupId))
     .orderBy(groupMembers.joinedAt);
@@ -807,6 +907,8 @@ app.get('/groups/:groupId/members', async (c) => {
     .map((r) => ({
       userId: r.userId,
       role: r.role,
+      // Their color in this group (null: the default).
+      color: r.color,
       keyVersions: held.filter((h) => h.userId === r.userId).map((h) => h.keyVersion),
       // Handouts without the group's name sealed beside the key (from before it): an admin's phone fills them in.
       unlabelledKeyVersions: held.filter((h) => h.userId === r.userId && !h.sealedLabel).map((h) => h.keyVersion),
@@ -903,7 +1005,10 @@ app.post('/groups/:groupId/members/:userId/reject', async (c) => {
 async function removeMember(groupId: string, userId: string, ban: boolean) {
   const orphaned = await db.transaction(async (tx): Promise<string[]> => {
     await tx.select({ id: groups.id }).from(groups).where(eq(groups.id, groupId)).for('update');
-    await tx.delete(groupMembers).where(and(eq(groupMembers.groupId, groupId), eq(groupMembers.userId, userId)));
+    const [was] = await tx
+      .delete(groupMembers)
+      .where(and(eq(groupMembers.groupId, groupId), eq(groupMembers.userId, userId)))
+      .returning({ status: groupMembers.status });
     await tx.delete(groupKeys).where(and(eq(groupKeys.groupId, groupId), eq(groupKeys.userId, userId)));
     if (ban) await tx.insert(groupBans).values({ groupId, userId }).onConflictDoNothing();
     const rest = await tx
@@ -916,7 +1021,8 @@ async function removeMember(groupId: string, userId: string, ban: boolean) {
       await tx.delete(groups).where(eq(groups.id, groupId));
       return files.map((f) => objectKey(groupId, f.id));
     }
-    await tx.update(groups).set({ rotationPending: true }).where(eq(groups.id, groupId));
+    // Someone who held the key: nothing new is sent under it until the next one is drawn (POST /messages).
+    if (was?.status === 'active') await tx.update(groups).set({ rotationPending: true }).where(eq(groups.id, groupId));
     return [];
   });
   // After the commit: a storage failure must not keep the group alive. Blobs are
@@ -997,6 +1103,50 @@ app.post('/groups/:groupId/members/:userId/remove', async (c) => {
 });
 
 /**
+ * A member reports another one, or one of their messages (App Store rule 1.2).
+ * The server cannot read the group: `excerpt` is what the reporter chose to
+ * hand over, decrypted on their phone. Read with scripts/reports.ts.
+ */
+app.post('/groups/:groupId/reports', async (c) => {
+  const groupId = groupIdParam(c);
+  const me = c.get('userId');
+  await requireMember(groupId, me);
+  const input = await body(
+    c,
+    z.object({
+      userId: z.uuid(),
+      messageId: z.uuid().optional(),
+      reason: z.enum(['abuse', 'spam', 'illegal', 'other']),
+      excerpt: z.string().max(2000).optional(),
+    }),
+  );
+  if (input.userId === me) throw new HTTPException(400, { message: 'invalid_member' });
+  const [target] = await db
+    .select({ username: profiles.username })
+    .from(groupMembers)
+    .innerJoin(profiles, eq(profiles.id, groupMembers.userId))
+    .where(and(eq(groupMembers.groupId, groupId), eq(groupMembers.userId, input.userId)));
+  if (!target) throw new HTTPException(404, { message: 'not_found' });
+  if (input.messageId) {
+    const [m] = await db
+      .select({ id: messages.id })
+      .from(messages)
+      .where(and(eq(messages.id, input.messageId), eq(messages.groupId, groupId), eq(messages.senderId, input.userId)));
+    if (!m) throw new HTTPException(404, { message: 'not_found' });
+  }
+  await db.insert(reports).values({
+    reporterId: me,
+    reportedId: input.userId,
+    reportedUsername: target.username,
+    groupId,
+    messageId: input.messageId ?? null,
+    reason: input.reason,
+    excerpt: input.excerpt ?? null,
+  });
+  return c.json({ reported: true });
+});
+
+/**
  * Admin: key rotation. The admin's phone drew a new group key, sealed it to
  * every active member (itself included), signed each handout and wrote the
  * new signed meta, whose admin list the server mirrors in `role`. The key set
@@ -1016,7 +1166,12 @@ app.post('/groups/:groupId/rotate', async (c) => {
       keys: z.array(z.object({ userId: z.uuid(), sealedKey, signature, sealedLabel, labelSignature })).min(1).max(500),
     }),
   );
-  await requireAdmin(groupId, me);
+  // An admin; or, once no admin is left (the last one deleted their account), any member, who becomes one:
+  // otherwise a pending rotation would freeze the group for good (no message under the old key).
+  const { role } = await requireMember(groupId, me);
+  if (role !== 'admin' && (await adminCount(groupId)) > 0) throw new HTTPException(403, { message: 'admin_only' });
+  // Their phone names them admin in the signed meta: the other phones accept a key only from an admin.
+  if (role !== 'admin' && !input.admins.includes(me)) throw new HTTPException(400, { message: 'invalid_admins' });
   const next = await db.transaction(async (tx) => {
     const [g] = await tx
       .select({ currentKeyVersion: groups.currentKeyVersion })
@@ -1040,7 +1195,14 @@ app.post('/groups/:groupId/rotate', async (c) => {
       .values(input.keys.map((k) => ({ groupId, userId: k.userId, keyVersion: v, sealedKey: k.sealedKey, signerId: me, signature: k.signature, ...label(k) })));
     await tx
       .update(groups)
-      .set({ currentKeyVersion: v, encryptedMeta: input.encryptedMeta, metaSignerId: me, metaSignature: input.metaSignature, rotationPending: false })
+      .set({
+        currentKeyVersion: v,
+        encryptedMeta: input.encryptedMeta,
+        metaSignerId: me,
+        metaSignature: input.metaSignature,
+        rotationPending: false,
+        keySince: sql`now()`,
+      })
       .where(eq(groups.id, groupId));
     await setAdmins(tx, groupId, input.admins);
     return v;
@@ -1140,6 +1302,19 @@ app.put('/groups/:groupId/code', async (c) => {
   return c.json({ codeVersion });
 });
 
+/** Any member: their own color in this group (name, avatar, messages), or null for the default. Seen by every member. */
+app.put('/groups/:groupId/color', async (c) => {
+  const groupId = groupIdParam(c);
+  const me = c.get('userId');
+  const { color } = await body(c, z.object({ color: z.enum(COLORS).nullable() }));
+  await requireMember(groupId, me);
+  await db
+    .update(groupMembers)
+    .set({ color })
+    .where(and(eq(groupMembers.groupId, groupId), eq(groupMembers.userId, me)));
+  return c.json({ color });
+});
+
 /** Admin: disappearing messages, for messages sent from now on. */
 app.put('/groups/:groupId/ephemeral', async (c) => {
   const groupId = groupIdParam(c);
@@ -1156,13 +1331,16 @@ app.put('/groups/:groupId/ephemeral', async (c) => {
  * number per group goes back, never a message.
  */
 app.post('/groups/unread', async (c) => {
-  const { cursors } = await body(
-    c,
-    z.object({ cursors: z.record(z.uuid(), z.number().int().min(0)).refine((r) => Object.keys(r).length <= 200, 'too_many_groups') }),
-  );
-  const me = c.get('userId');
+  const input = await body(c, z.object({ cursors }));
+  return c.json(await unreadByGroup(c.get('userId'), input.cursors));
+});
+
+/** Where a phone stands in each group: group id -> the last seq it showed (0: never opened there). */
+const cursors = z.record(z.uuid(), z.number().int().min(0)).refine((r) => Object.keys(r).length <= 200, 'too_many_groups');
+
+async function unreadByGroup(me: string, cursors: Record<string, number>): Promise<Record<string, number>> {
   const ids = Object.keys(cursors);
-  if (!ids.length) return c.json({});
+  if (!ids.length) return {};
   const { rows } = await pool.query<{ group_id: string; n: number }>(
     `select m.group_id, count(*)::int as n
        from unnest($2::uuid[], $3::bigint[]) as c(group_id, seq)
@@ -1174,8 +1352,8 @@ app.post('/groups/unread', async (c) => {
       group by m.group_id`,
     [me, ids, ids.map((id) => cursors[id])],
   );
-  return c.json(Object.fromEntries(rows.map((r) => [r.group_id, r.n])));
-});
+  return Object.fromEntries(rows.map((r) => [r.group_id, r.n]));
+}
 
 // ---- Messages ----------------------------------------------------------------
 
@@ -1198,8 +1376,11 @@ app.post('/groups/:groupId/messages', async (c) => {
     }),
   );
   const me = c.get('userId');
-  const { currentKeyVersion, ephemeralSeconds } = await requireMember(groupId, me);
+  const { currentKeyVersion, ephemeralSeconds, rotationPending } = await requireMember(groupId, me);
   if (input.keyVersion !== currentKeyVersion) throw new HTTPException(409, { message: 'stale_key_version' });
+  // Someone left with the current key: nothing new under it. The phone keeps the message and sends it
+  // under the next key, which an admin's phone draws when it opens the group (any member's if none is left).
+  if (rotationPending) throw new HTTPException(409, { message: 'rotation_pending' });
   const { attachmentId, expiresInSeconds, quiet, ...msg } = input;
   const lifetimes = [ephemeralSeconds, expiresInSeconds].filter((s): s is number => !!s);
   const expiresAt = lifetimes.length ? new Date(Date.now() + Math.min(...lifetimes) * 1000) : null;
