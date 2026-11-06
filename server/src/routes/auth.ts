@@ -26,6 +26,7 @@ import {
   LOGIN_FAILURES_PER_HOUR,
   LOGIN_FAILURES_PER_HOUR_ALL,
   REGISTER_FAILURES_PER_INVITE,
+  tooManyAttempts,
   username,
   type Env,
 } from './_shared';
@@ -122,10 +123,7 @@ auth.post('/auth/recover', async (c) => {
     })
     .from(loginAttempts)
     .where(gt(loginAttempts.attemptedAt, sql`now() - interval '1 hour'`));
-  if ((counts?.mine ?? 0) > LOGIN_FAILURES_PER_HOUR || (counts?.all ?? 0) > LOGIN_FAILURES_PER_HOUR_ALL) {
-    c.header('Retry-After', '3600');
-    throw new HTTPException(429, { message: 'too_many_attempts' });
-  }
+  if ((counts?.mine ?? 0) > LOGIN_FAILURES_PER_HOUR || (counts?.all ?? 0) > LOGIN_FAILURES_PER_HOUR_ALL) tooManyAttempts(c);
   const [p] = await db.select().from(profiles).where(eq(profiles.username, input.username));
   if (!p?.backupAuth || !p.backupBox || !backupAuthMatches(fromB64(input.authKey)!, p.backupAuth)) {
     throw new HTTPException(401, { message: 'bad_credentials' });

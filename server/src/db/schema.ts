@@ -115,6 +115,7 @@ export const groupLinks = pgTable(
     groupId: uuid('group_id')
       .notNull()
       .references(() => groups.id, { onDelete: 'cascade' }),
+    // Audit trail only (who made a link, who used it and when): written, never read by the API.
     createdBy: uuid('created_by').references(() => profiles.id, { onDelete: 'set null' }),
     usedBy: uuid('used_by').references(() => profiles.id, { onDelete: 'set null' }),
     usedAt: timestamp('used_at', { withTimezone: true }),

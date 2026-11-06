@@ -137,7 +137,8 @@ groupSettings.post('/groups/:groupId/rotate', async (c) => {
   );
   // An admin; or, once no admin is left (the last one deleted their account), any member, who becomes one:
   // otherwise a pending rotation would freeze the group for good (no message under the old key).
-  const { role } = await requireMember(groupId, me);
+  const { role, kind } = await requireMember(groupId, me);
+  requireGroupKind(kind); // a private conversation never rotates (nobody leaves one)
   if (role !== 'admin' && (await adminCount(groupId)) > 0) throw new HTTPException(403, { message: 'admin_only' });
   // Their phone names them admin in the signed meta: the other phones accept a key only from an admin.
   if (role !== 'admin' && !input.admins.includes(me)) throw new HTTPException(400, { message: 'invalid_admins' });
@@ -288,7 +289,7 @@ groupSettings.put('/groups/:groupId/color', async (c) => {
 groupSettings.put('/groups/:groupId/ephemeral', async (c) => {
   const groupId = groupIdParam(c);
   const input = await body(c, z.object({ seconds: ephemeral }));
-  await requireAdmin(groupId, c.get('userId'));
+  requireGroupKind((await requireAdmin(groupId, c.get('userId'))).kind);
   await db.update(groups).set({ ephemeralSeconds: input.seconds }).where(eq(groups.id, groupId));
   return c.json({ ephemeralSeconds: input.seconds });
 });

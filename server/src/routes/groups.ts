@@ -32,6 +32,7 @@ import {
   sealedLabel,
   signature,
   spendQuota,
+  tooManyAttempts,
   uuidParam,
   type Env,
 } from './_shared';
@@ -267,10 +268,7 @@ groupsRoutes.post('/groups/join', async (c) => {
     })
     .from(joinAttempts)
     .where(and(gt(joinAttempts.attemptedAt, sql`now() - interval '1 hour'`), or(eq(joinAttempts.userId, me), group ? eq(joinAttempts.groupId, group.id) : sql`false`)));
-  if ((counts?.mine ?? 0) > JOIN_ATTEMPTS_PER_HOUR || (counts?.group ?? 0) > GROUP_JOIN_ATTEMPTS_PER_HOUR) {
-    c.header('Retry-After', '3600');
-    throw new HTTPException(429, { message: 'too_many_attempts' });
-  }
+  if ((counts?.mine ?? 0) > JOIN_ATTEMPTS_PER_HOUR || (counts?.group ?? 0) > GROUP_JOIN_ATTEMPTS_PER_HOUR) tooManyAttempts(c);
   if (!group) throw new HTTPException(403, { message: 'wrong_code' });
   const [banned] = await db
     .select({ userId: groupBans.userId })
@@ -339,10 +337,7 @@ groupsRoutes.post('/groups/join-link', async (c) => {
     .select({ mine: sql<number>`count(*)::int` })
     .from(joinAttempts)
     .where(and(eq(joinAttempts.userId, me), gt(joinAttempts.attemptedAt, sql`now() - interval '1 hour'`)));
-  if (mine > JOIN_ATTEMPTS_PER_HOUR) {
-    c.header('Retry-After', '3600');
-    throw new HTTPException(429, { message: 'too_many_attempts' });
-  }
+  if (mine > JOIN_ATTEMPTS_PER_HOUR) tooManyAttempts(c);
   const result = await db.transaction(async (tx) => {
     const [link] = await tx
       .select({ codeHash: groupLinks.codeHash, groupId: groupLinks.groupId, usedBy: groupLinks.usedBy, expiresAt: groupLinks.expiresAt })

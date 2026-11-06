@@ -125,6 +125,12 @@ export function requireGroupKind(kind: 'group' | 'direct' | 'link') {
 }
 
 /** Records one `action` for the user, or 429 once the day's quota is spent. Record first, then count: races cannot slip past. */
+/** An hourly attempt ceiling was reached (login, join): ask the caller to come back in an hour. */
+export function tooManyAttempts(c: Context): never {
+  c.header('Retry-After', '3600');
+  throw new HTTPException(429, { message: 'too_many_attempts' });
+}
+
 export async function spendQuota(userId: string, action: 'invite' | 'group_code' | 'direct', perDay: number) {
   await db.insert(userActions).values({ userId, action });
   const [{ count } = { count: 0 }] = await db
