@@ -254,8 +254,6 @@ export const records = {
   outbox: (id: string) => `outbox/${id}`,
   /** Profiles of people met in groups, by user id. */
   profiles: 'profiles',
-  /** Contacts checked in person: user id -> public keys at the time. */
-  verified: 'verified',
   /** The five reaction keys in the order chosen on this phone: { order: ReactionId[] } (ui/chat/reactions). */
   reactionOrder: 'reactions/order',
   /** Members blocked on this phone: user id -> username (services/blocked.ts). */

@@ -86,7 +86,7 @@ export async function openDocument(bytes: Uint8Array, name: string, mime: string
   const Sharing = await sharing();
   dropOpenedDocuments();
   const dir = OPEN_DIR();
-  dir.create();
+  dir.create({ intermediates: true, idempotent: true });
   const file = new File(dir, safeFileName(name));
   file.writeSync(bytes);
   await whileSystemUi(() => Sharing.shareAsync(file.uri, { mimeType: mime, dialogTitle: name }));
