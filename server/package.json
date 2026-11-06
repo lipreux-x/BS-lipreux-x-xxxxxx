@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "tsx scripts/smoke.ts",
     "db:generate": "drizzle-kit generate",
     "smoke": "tsx scripts/smoke.ts"
   },

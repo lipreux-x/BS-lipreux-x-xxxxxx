@@ -9,4 +9,3 @@ export const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, ma
 attachDatabasePool(pool);
 
 export const db = drizzle(pool, { schema });
-export type Db = typeof db;
