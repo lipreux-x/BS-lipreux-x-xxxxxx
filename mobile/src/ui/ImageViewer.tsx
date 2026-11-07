@@ -18,7 +18,7 @@ const SAVE_MESSAGES: Partial<Record<SaveState, string>> = {
 export function ImageViewer({ jpeg, onClose }: { jpeg: Uint8Array | null; onClose(): void }) {
   const [save, setSave] = useState<SaveState>('idle');
   const uri = useMemo(() => (jpeg ? jpegUri(jpeg) : null), [jpeg]);
-  // The screen's insets, not a SafeAreaView of the modal's own (see StoryPreview).
+  // The screen's insets, not a SafeAreaView of the modal's own (see CaptureScreen).
   const insets = useSafeAreaInsets();
 
   function close() {

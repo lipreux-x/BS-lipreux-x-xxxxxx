@@ -9,7 +9,7 @@ import { useUnlocked, type OpenGroup } from '@/session/SessionProvider';
 import { colorIn } from '@/services/groupColors';
 import { newClientId, type ChatMessage, type PreparedImage } from '@/services/groups';
 import { DocumentsUnavailableError, FileTooLargeError, openDocument, pickDocument } from '@/services/files';
-import { pickImage, takePhoto } from '@/services/images';
+import { pickImage } from '@/services/images';
 import { records } from '@/services/localStore';
 import { myReaction } from '@/ui/chat/reactions';
 import { ActionKey, ActionSheet, MessageActions } from '@/ui/chat/MessageActions';
@@ -38,7 +38,7 @@ import { SentVoice, VoiceBubble } from '@/ui/VoiceBubble';
 import { Led } from '@/ui/Led';
 import { bandStories, pruneSeen, type StoryMessage } from '@/ui/stories/stories';
 import { STORIES_RAIL_H, StoriesBand } from '@/ui/stories/StoriesBand';
-import { StoryPreview } from '@/ui/stories/StoryPreview';
+import { CaptureScreen, type CaptureKind } from '@/ui/camera/CaptureScreen';
 import { Working } from '@/ui/Working';
 import { colors, fonts, mono, space, type } from '@/ui/theme';
 
@@ -130,11 +130,12 @@ export function Chat({
     setViewing(jpeg);
   }, []);
 
-  // Stories: ids already watched (kept on the phone), the photo waiting to be
-  // published, the "add" panel, and whether the band is pulled down.
+  // Stories: ids already watched (kept on the phone), the "add" panel (for a
+  // story that failed), and whether the band is pulled down.
   const [seen, setSeen] = useState<ReadonlySet<string>>(() => new Set());
   const seenLoaded = useRef(false);
-  const [storyPick, setStoryPick] = useState<PreparedImage | null>(null);
+  // The app's camera, open for a story or a photo of the chat.
+  const [capture, setCapture] = useState<CaptureKind | null>(null);
   const [storySheet, setStorySheet] = useState(false);
   const [bandOpen, setBandOpen] = useState(false);
   const [storyNow, setStoryNow] = useState(() => new Date());
@@ -266,27 +267,12 @@ export function Chat({
     setStorySheet(false);
   }
 
-  /** A story: the camera or the library, then a look at the photo before it goes out. */
-  async function pickStory(source: 'camera' | 'library') {
-    setPicking(true);
-    try {
-      const image = source === 'camera' ? await takePhoto() : await pickImage();
-      if (image === 'denied') {
-        dialog('Appareil photo désactivé', 'Autorise l’appareil photo dans les réglages du téléphone pour prendre une story.');
-      } else if (image) {
-        setStoryPick(image);
-      }
-    } catch {
-      // Camera, picker or re-encoding failed: nothing to publish.
-    } finally {
-      setPicking(false);
-    }
-  }
-
-  function publishStory() {
-    const image = storyPick;
-    setStoryPick(null);
-    if (image) void send({ clientId: newClientId(), at: new Date().toISOString(), kind: 'story', image, failed: false }, { scroll: false });
+  /** The photo taken (or picked) in the app's camera, once checked: a story, or a photo of the chat. */
+  function sendShot(image: PreparedImage) {
+    const at = new Date().toISOString();
+    if (capture === 'story') void send({ clientId: newClientId(), at, kind: 'story', image, failed: false }, { scroll: false });
+    else void send({ clientId: newClientId(), at, kind: 'image', image, failed: false, replyTo: takeReply() });
+    setCapture(null);
   }
 
   const pullBand = useCallback((open: boolean) => {
@@ -491,7 +477,9 @@ export function Chat({
             onOpenChange={pullBand}
             onAdd={() => {
               Keyboard.dismiss();
-              setStorySheet(true);
+              // Straight to the camera; a story that failed is dealt with first.
+              if (storyFailed) setStorySheet(true);
+              else setCapture('story');
             }}
             onSeen={markSeen}
             onView={openImage}
@@ -517,7 +505,7 @@ export function Chat({
         />
       </KeyboardGlide>
       <ImageViewer jpeg={viewing} onClose={() => setViewing(null)} />
-      <StoryPreview image={storyPick} onPublish={publishStory} onCancel={() => setStoryPick(null)} />
+      <CaptureScreen kind={capture} onSend={sendShot} onClose={() => setCapture(null)} />
       {/* The pickers open once the panel is gone (iOS refuses to present over a modal on its way out). */}
       <ActionSheet
         visible={attachSheet}
@@ -529,11 +517,13 @@ export function Chat({
         }}
       >
         <Text style={styles.sheetTitle}>ENVOYER · CHIFFRÉ</Text>
-        <ActionKey label="Une photo" onPress={() => closeAttachSheet(() => void sendPhoto())} />
+        <ActionKey label="Prendre une photo" onPress={() => closeAttachSheet(() => setCapture('photo'))} />
+        <ActionKey label="Une photo de la galerie" onPress={() => closeAttachSheet(() => void sendPhoto())} />
         <ActionKey label="Un document (PDF, …)" onPress={() => closeAttachSheet(() => void sendDocument())} />
         <ActionKey label="Annuler" dim onPress={() => closeAttachSheet()} />
       </ActionSheet>
-      {/* The camera or the picker open once the panel is gone (iOS refuses to present over a modal on its way out). */}
+      {/* A story that failed: what to do with it, or a new one. The camera opens once the panel
+          is gone (iOS refuses to present over a modal on its way out). */}
       <ActionSheet
         visible={storySheet}
         onClose={() => closeStorySheet()}
@@ -558,8 +548,7 @@ export function Chat({
             />
           </>
         ) : null}
-        <ActionKey label="Prendre une photo" onPress={() => closeStorySheet(() => void pickStory('camera'))} />
-        <ActionKey label="Choisir dans la galerie" onPress={() => closeStorySheet(() => void pickStory('library'))} />
+        <ActionKey label="Nouvelle story" onPress={() => closeStorySheet(() => setCapture('story'))} />
         <ActionKey label="Annuler" dim onPress={() => closeStorySheet()} />
       </ActionSheet>
       <MessageActions

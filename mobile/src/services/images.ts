@@ -1,7 +1,7 @@
 import { randomUUID } from 'expo-crypto';
 import { File, Paths } from 'expo-file-system';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
-import { launchCameraAsync, launchImageLibraryAsync, requestCameraPermissionsAsync } from 'expo-image-picker';
+import { launchImageLibraryAsync } from 'expo-image-picker';
 import { Asset, requestPermissionsAsync } from 'expo-media-library';
 import { b64 } from '@/crypto';
 import { whileSystemUi } from '@/session/autoLock';
@@ -31,17 +31,11 @@ export async function pickImage(): Promise<PreparedImage | null> {
 }
 
 /**
- * Opens the camera (stories). 'denied' if the user refused the camera, null
- * if they backed out. The shot goes through the same re-encoding as a picked
- * photo: no metadata, and the camera's copy in the cache is deleted.
+ * A shot of the app's own camera (ui/camera), from its file in the cache:
+ * the same re-encoding as a picked photo (no metadata), and the camera's
+ * file is deleted.
  */
-export async function takePhoto(): Promise<PreparedImage | 'denied' | null> {
-  const { granted } = await whileSystemUi(() => requestCameraPermissionsAsync());
-  if (!granted) return 'denied';
-  const res = await whileSystemUi(() => launchCameraAsync({ mediaTypes: ['images'], quality: 1, exif: false }));
-  const asset = res.canceled ? undefined : res.assets?.[0];
-  return asset ? prepareImage(asset.uri, asset.width, asset.height) : null;
-}
+export const prepareShot = (uri: string, width: number, height: number) => prepareImage(uri, width, height);
 
 async function prepareImage(uri: string, width: number, height: number): Promise<PreparedImage> {
   const scale = Math.min(1, MAX_SIDE / Math.max(width, height, 1));

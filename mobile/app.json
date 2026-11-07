@@ -65,6 +65,15 @@
         }
       ],
       [
+        "expo-camera",
+        {
+          "cameraPermission": "BaseSecrète utilise l’appareil photo pour les stories et les photos que tu envoies, chiffrées, dans tes groupes.",
+          "microphonePermission": "BaseSecrète utilise le micro pour enregistrer les vocaux que tu envoies, chiffrés, dans tes groupes.",
+          "recordAudioAndroid": false,
+          "barcodeScannerEnabled": false
+        }
+      ],
+      [
         "expo-media-library",
         {
           "photosPermission": "BaseSecrète accède à tes photos pour enregistrer celles que tu télécharges depuis un groupe.",
