@@ -24,7 +24,7 @@ export function ChatComposer({
   onAttach(): void;
   replyTo: Quote | null;
   onCancelReply(): void;
-  inputRef: React.Ref<React.ComponentRef<typeof TextInput>>;
+  inputRef: React.RefObject<React.ComponentRef<typeof TextInput> | null>;
   onSendText(text: string): void;
   onSendVoice(voice: PreparedVoice): void;
   placeholder?: string;
@@ -65,6 +65,9 @@ export function ChatComposer({
         onSend={() => {
           const text = draft.trim().replace(/^\u0000+/, ''); // a leading NUL marks structured bodies
           setDraft('');
+          // The field itself too: on Android a predictive keyboard (SwiftKey, Samsung) keeps the word it
+          // was composing when only the value changes, and puts the message back on the next key.
+          inputRef.current?.clear();
           if (text) onSendText(text);
         }}
       />
