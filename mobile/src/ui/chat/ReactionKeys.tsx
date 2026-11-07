@@ -42,8 +42,11 @@ const lit = (id: ReactionId) => {
   return { backgroundColor: withAlpha(c, 0.18), borderTopColor: withAlpha(c, 0.7), borderLeftColor: withAlpha(c, 0.7), boxShadow: `0 0 8px ${withAlpha(c, 0.55)}` };
 };
 
-/** Under a bubble: what it got, as small plates with the count; mine lit. A tap gives (or takes back) the same reaction. */
-export function ReactionChips({ counts, onPress }: { counts: ReactionCount[]; onPress?(id: ReactionId): void }) {
+/**
+ * Under a bubble: what it got, as small plates with the count; mine lit. A
+ * tap gives (or takes back) the same reaction; a long press shows who gave which.
+ */
+export function ReactionChips({ counts, onPress, onLongPress }: { counts: ReactionCount[]; onPress?(id: ReactionId): void; onLongPress?(): void }) {
   return (
     <View style={styles.chips}>
       {counts.map((c) => (
@@ -51,8 +54,10 @@ export function ReactionChips({ counts, onPress }: { counts: ReactionCount[]; on
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={`${REACTION_LABELS[c.reaction]} : ${c.count}${c.mine ? ', dont toi' : ''}`}
-            disabled={!onPress}
+            accessibilityHint={onLongPress ? 'Appui long : qui a réagi' : undefined}
+            disabled={!onPress && !onLongPress}
             onPress={() => onPress?.(c.reaction)}
+            onLongPress={onLongPress}
             style={({ pressed }) => [styles.chip, c.mine && lit(c.reaction), pressed && styles.pressed]}
           >
             <ReactionIcon id={c.reaction} size={13} />
@@ -69,9 +74,20 @@ const STORY_KEY = 32;
 /**
  * On a story: the five keys in a row, in this phone's order, each with what
  * the story got (a small count on its corner) and mine lit. A tap gives the
- * reaction, or takes it back (the same one again), as on a message.
+ * reaction, or takes it back (the same one again), as on a message; a long
+ * press shows who gave which.
  */
-export function StoryReactions({ order, counts, onPick }: { order: ReactionId[]; counts: ReactionCount[] | undefined; onPick(id: ReactionId): void }) {
+export function StoryReactions({
+  order,
+  counts,
+  onPick,
+  onLongPress,
+}: {
+  order: ReactionId[];
+  counts: ReactionCount[] | undefined;
+  onPick(id: ReactionId): void;
+  onLongPress?(): void;
+}) {
   return (
     <View style={styles.storyKeys}>
       {order.map((id) => {
@@ -84,6 +100,7 @@ export function StoryReactions({ order, counts, onPick }: { order: ReactionId[];
               accessibilityState={{ selected: !!c?.mine }}
               hitSlop={4}
               onPress={() => onPick(id)}
+              onLongPress={counts?.length ? onLongPress : undefined}
               style={({ pressed }) => [styles.storyKey, c?.mine && lit(id), pressed && styles.pressed]}
             >
               <ReactionIcon id={id} size={16} />

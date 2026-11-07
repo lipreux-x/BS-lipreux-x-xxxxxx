@@ -1,5 +1,5 @@
 import type { ReactionBody } from '@/crypto';
-import { moveKey, myReaction, nextReaction, orderCounts, reactionOrder, tallyReactions, withAlpha, type ReactionMessage } from '../reactions';
+import { moveKey, myReaction, nextReaction, orderCounts, reactionOrder, reactorsOf, tallyReactions, withAlpha, type ReactionMessage } from '../reactions';
 
 const M1 = '1b9d6bcd-0000-4000-8000-0000000000aa';
 const M2 = '1b9d6bcd-0000-4000-8000-0000000000ab';
@@ -34,6 +34,19 @@ describe('reaction tally', () => {
     expect(tally.get(M1)).toEqual([{ reaction: 'secret', count: 1, mine: true }]);
     expect(myReaction(tally.get(M1))).toBe('secret');
     expect(myReaction(tally.get(M2))).toBeNull();
+  });
+});
+
+describe('who reacted', () => {
+  it("lists each member's latest reaction, in the keys' order, mine first within a key, taken-back ones left out", () => {
+    const received = [r('bob', 1, M1, 'fire'), r('carol', 2, M1, 'like'), r('dan', 3, M1, 'fire'), r('dan', 4, M1, null), r('bob', 5, M2, 'money')];
+    expect(reactorsOf(received, [{ kind: 'reaction', messageId: M1, reaction: 'fire' }], 'me', M1)).toEqual([
+      { senderId: 'carol', reaction: 'like', mine: false },
+      { senderId: 'me', reaction: 'fire', mine: true },
+      { senderId: 'bob', reaction: 'fire', mine: false },
+    ]);
+    expect(reactorsOf(received, [], 'me', M1, ['fire', 'like', 'crown', 'money', 'secret']).map((x) => x.senderId)).toEqual(['bob', 'carol']);
+    expect(reactorsOf(received, [], 'me', 'nothing')).toEqual([]);
   });
 });
 

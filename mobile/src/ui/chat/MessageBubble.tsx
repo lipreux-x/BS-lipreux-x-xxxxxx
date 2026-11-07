@@ -69,6 +69,7 @@ export function MessageBubble({
   onQuotePress,
   onLongPress,
   onReact,
+  onReactionsLongPress,
   onDoubleTap,
   children,
 }: {
@@ -100,6 +101,8 @@ export function MessageBubble({
   onLongPress?(): void;
   /** Tap on one of the reactions under the message: the same one (toggle). */
   onReact?(id: ReactionId): void;
+  /** Long press on its reactions: who gave which. */
+  onReactionsLongPress?(): void;
   /** Two quick taps on the message: the first reaction of the phone's order. */
   onDoubleTap?(): void;
   children: ReactNode;
@@ -157,7 +160,7 @@ export function MessageBubble({
             {statusLed}
           </View>
         </Pressable>
-        {reactions?.length ? <ReactionChips counts={reactions} onPress={onReact} /> : null}
+        {reactions?.length ? <ReactionChips counts={reactions} onPress={onReact} onLongPress={onReactionsLongPress} /> : null}
         {failed ? <Text style={plates.failure}>{`${error ?? 'Échec de l’envoi'} — touche pour renvoyer`}</Text> : null}
       </View>
     );
@@ -191,7 +194,7 @@ export function MessageBubble({
       </Pressable>
       {reactions?.length ? (
         <View style={styles.reactions}>
-          <ReactionChips counts={reactions} onPress={onReact} />
+          <ReactionChips counts={reactions} onPress={onReact} onLongPress={onReactionsLongPress} />
         </View>
       ) : null}
       {failed ? <Text style={styles.failure}>{`${error ?? 'Échec de l’envoi'} — touche pour renvoyer`}</Text> : null}

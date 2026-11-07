@@ -4,10 +4,20 @@ import type { ReactionId } from '@/crypto';
 import { newClientId, type ChatMessage } from '@/services/groups';
 import { records } from '@/services/localStore';
 import type { Pending } from '@/services/outbox';
-import { myReaction, nextReaction, orderCounts, reactionOrder, tallyReactions } from './reactions';
+import { myReaction, nextReaction, orderCounts, reactionOrder, reactorsOf, tallyReactions } from './reactions';
 import type { Keep } from './useKeep';
 
 type SendFn = (item: Pending, opts?: { scroll?: boolean }) => void;
+
+/** Someone's reaction to a message, as the panel of who reacted lists it. */
+export interface Reactor {
+  senderId: string;
+  reaction: ReactionId;
+  mine: boolean;
+  name: string;
+  avatar: string | null;
+  color: string | null;
+}
 
 /**
  * The five reaction keys in the order chosen on this phone (long press in the
@@ -52,5 +62,18 @@ export function useReactions(shown: ChatMessage[], pending: Pending[], userId: s
   /** Two taps on a message: the first key of this phone's order (the same one again takes it back). */
   const quickReact = useCallback((m: ChatMessage) => react(m, order[0]!), [react, order]);
 
-  return { order, reorder, reactionTally, react, quickReact };
+  /** Who gave what to a message (a long press on its reactions), with their names and avatars. */
+  const reactors = useCallback(
+    (messageId: string): Reactor[] => {
+      const received = shown.flatMap((m) => (m.reaction ? [{ senderId: m.senderId, seq: m.seq, reaction: m.reaction }] : []));
+      const people = new Map(shown.map((m) => [m.senderId, m] as const));
+      return reactorsOf(received, pending.flatMap((p) => (p.kind === 'reaction' ? [p.reaction] : [])), userId, messageId, order).map((r) => {
+        const who = people.get(r.senderId);
+        return { ...r, name: r.mine ? 'Toi' : (who?.senderName ?? 'Un membre'), avatar: who?.senderAvatar ?? null, color: who?.senderColor ?? null };
+      });
+    },
+    [shown, pending, userId, order],
+  );
+
+  return { order, reorder, reactionTally, react, quickReact, reactors };
 }

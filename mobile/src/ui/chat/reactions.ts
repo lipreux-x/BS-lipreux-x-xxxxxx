@@ -72,16 +72,7 @@ export interface ReactionMessage {
  * Reactions still on their way (`pending`, mine) come after everything.
  */
 export function tallyReactions(received: ReactionMessage[], pending: ReactionBody[], me: string): Map<string, ReactionCount[]> {
-  // Latest per (message, member).
-  const latest = new Map<string, Map<string, ReactionId | null>>();
-  const set = (messageId: string, senderId: string, reaction: ReactionId | null) => {
-    let byMember = latest.get(messageId);
-    if (!byMember) latest.set(messageId, (byMember = new Map()));
-    byMember.set(senderId, reaction);
-  };
-  for (const r of [...received].sort((a, b) => a.seq - b.seq)) set(r.reaction.messageId, r.senderId, r.reaction.reaction);
-  for (const p of pending) set(p.messageId, me, p.reaction);
-
+  const latest = latestReactions(received, pending, me);
   const out = new Map<string, ReactionCount[]>();
   for (const [messageId, byMember] of latest) {
     const counts = REACTIONS.map((reaction) => ({ reaction, count: 0, mine: false }));
@@ -95,6 +86,37 @@ export function tallyReactions(received: ReactionMessage[], pending: ReactionBod
     if (got.length) out.set(messageId, got);
   }
   return out;
+}
+
+/** Per message id, each member's latest reaction to it (null: taken back); mine still on their way last. */
+function latestReactions(received: ReactionMessage[], pending: ReactionBody[], me: string): Map<string, Map<string, ReactionId | null>> {
+  const latest = new Map<string, Map<string, ReactionId | null>>();
+  const set = (messageId: string, senderId: string, reaction: ReactionId | null) => {
+    let byMember = latest.get(messageId);
+    if (!byMember) latest.set(messageId, (byMember = new Map()));
+    byMember.set(senderId, reaction);
+  };
+  for (const r of [...received].sort((a, b) => a.seq - b.seq)) set(r.reaction.messageId, r.senderId, r.reaction.reaction);
+  for (const p of pending) set(p.messageId, me, p.reaction);
+  return latest;
+}
+
+/**
+ * Who gave what to a message (a long press on its reactions): each member's
+ * latest reaction, in this phone's order of the keys, mine first within a key.
+ */
+export function reactorsOf(
+  received: ReactionMessage[],
+  pending: ReactionBody[],
+  me: string,
+  messageId: string,
+  order: readonly ReactionId[] = REACTIONS,
+): { senderId: string; reaction: ReactionId; mine: boolean }[] {
+  const byMember = latestReactions(received, pending, me).get(messageId);
+  if (!byMember) return [];
+  return [...byMember]
+    .flatMap(([senderId, reaction]) => (reaction ? [{ senderId, reaction, mine: senderId === me }] : []))
+    .sort((a, b) => order.indexOf(a.reaction) - order.indexOf(b.reaction) || +b.mine - +a.mine);
 }
 
 /** My reaction to a message, from its tally. */

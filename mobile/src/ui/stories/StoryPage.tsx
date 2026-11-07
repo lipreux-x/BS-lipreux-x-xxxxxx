@@ -122,6 +122,7 @@ export const StoryPage = memo(function StoryPage({
   order,
   onReact,
   onDelete,
+  onShowReactions,
 }: {
   session: Session;
   groupId: string;
@@ -139,6 +140,8 @@ export const StoryPage = memo(function StoryPage({
   onReact(storyId: string, id: ReactionId): void;
   /** One of mine: delete it for everyone (asked first). */
   onDelete(storyId: string): void;
+  /** Long press on its reaction keys: who gave which. */
+  onShowReactions(storyId: string): void;
 }) {
   const loaded = useStoryImage(session, groupId, story, load);
   const uri = useMemo(() => (loaded.kind === 'ready' ? jpegUri(loaded.jpeg) : null), [loaded]);
@@ -212,7 +215,7 @@ export const StoryPage = memo(function StoryPage({
             </Text>
           </View>
         </View>
-        <StoryReactions order={order} counts={reactions} onPick={(id) => onReact(story.id, id)} />
+        <StoryReactions order={order} counts={reactions} onPick={(id) => onReact(story.id, id)} onLongPress={() => onShowReactions(story.id)} />
       </View>
     </View>
   );

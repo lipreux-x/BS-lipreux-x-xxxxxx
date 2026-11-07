@@ -82,6 +82,7 @@ export const Timeline = memo(function Timeline({
   storyReactions,
   onStoryQuote,
   readMark,
+  onShowReactions,
 }: {
   look: ChatLook;
   /** A private conversation: only the two of them read it. */
@@ -114,6 +115,8 @@ export const Timeline = memo(function Timeline({
   onStoryQuote(storyId: string): void;
   /** The last message seen on this phone before the conversation opened: « nouveaux messages » after it. */
   readMark: number | null;
+  /** Long press on a message's reactions: who gave which. */
+  onShowReactions(m: ChatMessage): void;
 }) {
   const { session, profiles } = useUnlocked();
   const me = session.account.userId;
@@ -242,10 +245,11 @@ export const Timeline = memo(function Timeline({
           onReact={onReact}
           onDoubleTap={onDoubleTap}
           onQuotePress={jumpTo}
+          onShowReactions={onShowReactions}
         />
       );
     },
-    [look, highlight, renderContent, onRetry, onLongPress, onReply, onDayLongPress, jumpTo, onReact, onDoubleTap],
+    [look, highlight, renderContent, onRetry, onLongPress, onReply, onDayLongPress, jumpTo, onReact, onDoubleTap, onShowReactions],
   );
 
   const dragFrom = useRef<number | null>(null);
@@ -311,6 +315,7 @@ const TimelineRow = memo(function TimelineRow({
   onReact,
   onDoubleTap,
   onQuotePress,
+  onShowReactions,
 }: {
   look: ChatLook;
   line: Line;
@@ -324,6 +329,7 @@ const TimelineRow = memo(function TimelineRow({
   onDoubleTap(m: ChatMessage): void;
   /** Tap on the quote: to the original (by id). */
   onQuotePress(messageId: string): void;
+  onShowReactions(m: ChatMessage): void;
 }) {
   const { message, pending, replyTo } = line;
   const longPress = message ? () => onLongPress(message) : undefined;
@@ -348,6 +354,7 @@ const TimelineRow = memo(function TimelineRow({
           onQuotePress={replyTo ? () => onQuotePress(replyTo.messageId) : undefined}
           onLongPress={longPress}
           onReact={message ? (id) => onReact(message, id) : undefined}
+          onReactionsLongPress={message ? () => onShowReactions(message) : undefined}
           onDoubleTap={message ? () => onDoubleTap(message) : undefined}
         >
           {renderContent(line, longPress)}

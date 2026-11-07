@@ -14,6 +14,7 @@ import { records } from '@/services/localStore';
 import { myReaction } from '@/ui/chat/reactions';
 import { ActionKey, ActionSheet, MessageActions } from '@/ui/chat/MessageActions';
 import { ReactionIcon } from '@/ui/chat/ReactionKeys';
+import { ReactorsSheet } from '@/ui/chat/ReactorsSheet';
 import { chatLook, type ChatLook } from '@/ui/chat/look';
 import { replyRefFor, resolveQuote } from '@/ui/chat/replies';
 import { countdownLabel, dateTimeLabel, dayLabel } from '@/ui/chat/timeline';
@@ -174,7 +175,7 @@ export function Chat({
     }, [keep, groupId]),
   );
   // The reaction keys' order (this phone), the tally under each message, and the senders.
-  const { order, reorder, reactionTally, react, quickReact } = useReactions(shown, pending, session.account.userId, keep, send);
+  const { order, reorder, reactionTally, react, quickReact, reactors } = useReactions(shown, pending, session.account.userId, keep, send);
   // The stories: the band's state, and what its keys do.
   const stories = useStories({ groupId, shown, pending, keep, react, reply: setReplying, onOpenChange: onStoriesOpen });
   const storyFailed = stories.failed;
@@ -184,6 +185,9 @@ export function Chat({
     [session, groupId, stories.messages],
   );
 
+  // Long press on the reactions of a message or a story: the panel of who gave which.
+  const [reactorsOf, setReactorsOf] = useState<string | null>(null);
+  const showReactors = useCallback((m: ChatMessage) => setReactorsOf(m.id), []);
   // "Supprimer pour tous" on a message: asked once its panel is gone.
   const deleteAfterSheet = useRef<ChatMessage | null>(null);
 
@@ -456,6 +460,7 @@ export function Chat({
               storyReactions={stories.reactions}
               onStoryQuote={stories.show}
               readMark={readMark}
+              onShowReactions={showReactors}
             />
             <StoriesBand
               session={session}
@@ -474,6 +479,7 @@ export function Chat({
                 const story = stories.messages.find((s) => s.id === id);
                 if (story) confirmDelete(story);
               }}
+              onShowReactions={setReactorsOf}
             />
             {/* Until the history is decrypted (from the phone, or fetched): what the wait is, not a black screen. */}
             {!loaded ? <Working label={DECRYPTING} style={styles.decrypting} /> : null}
@@ -543,6 +549,7 @@ export function Chat({
           <ActionKey label="Nouvelle story" onPress={() => closeStorySheet(() => setCapture('story'))} />
           <ActionKey label="Annuler" dim onPress={() => closeStorySheet()} />
         </ActionSheet>
+        <ReactorsSheet reactors={reactorsOf ? reactors(reactorsOf) : null} onClose={() => setReactorsOf(null)} />
         <MessageActions
           target={pressed ? { quote: resolveQuote(replyRefFor(pressed)!, messages, session.account.userId), text: pressed.text } : null}
           reaction={pressed ? myReaction(reactionTally.get(pressed.id)) : null}
