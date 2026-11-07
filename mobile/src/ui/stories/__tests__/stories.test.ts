@@ -1,4 +1,4 @@
-import { bandStories, fitStory, isNew, openingIndex, pruneSeen, railLabel, storyAlive, storyExpiry, storyTap, type StoryMessage } from '../stories';
+import { bandStories, fitStory, isNew, openingIndex, pruneSeen, railLabel, storyAlive, storyExpiry, storyReactions, storyTap, timeLeftLabel, type StoryMessage } from '../stories';
 
 const now = new Date('2026-10-20T15:00:00Z');
 const hoursAgo = (h: number) => new Date(now.getTime() - h * 3_600_000).toISOString();
@@ -93,6 +93,37 @@ describe('photo in the shutter', () => {
   });
 });
 
+describe('storyReactions', () => {
+  const r = (seq: number, senderId: string, messageId: string, reaction: string | null) => ({ seq, senderId, reaction: { messageId, reaction } });
+  it("keeps each member's latest reaction to each story, in order, without the ones taken back", () => {
+    const got = storyReactions(
+      [
+        r(1, 'bob', 's1', 'fire'),
+        r(2, 'eve', 's1', 'like'),
+        r(3, 'bob', 's1', 'crown'), // bob changed his mind
+        r(4, 'eve', 's1', null), // eve took hers back
+        r(5, 'bob', 'm9', 'like'), // not a story
+        { seq: 6, senderId: 'bob', reaction: null }, // not a reaction
+        r(7, 'eve', 's2', 'secret'),
+      ],
+      new Set(['s1', 's2']),
+    );
+    expect(got.map((m) => [m.senderId, m.reaction!.messageId, m.reaction!.reaction])).toEqual([
+      ['bob', 's1', 'crown'],
+      ['eve', 's2', 'secret'],
+    ]);
+  });
+});
+
+describe('timeLeftLabel', () => {
+  it('says the hours left, then the minutes in the last hour', () => {
+    expect(timeLeftLabel({ createdAt: hoursAgo(0), expiresAt: null }, now)).toBe('PART DANS 24 H');
+    expect(timeLeftLabel({ createdAt: hoursAgo(18.5), expiresAt: null }, now)).toBe('PART DANS 5 H');
+    expect(timeLeftLabel({ createdAt: hoursAgo(23.5), expiresAt: null }, now)).toBe('PART DANS 30 MIN');
+    expect(timeLeftLabel({ createdAt: hoursAgo(23.999), expiresAt: null }, now)).toBe('PART DANS 1 MIN');
+  });
+});
+
 describe('railLabel', () => {
   const base = { failed: false, sending: false, published: false, open: false, index: 0, count: 0, fresh: 0, mine: 0 };
   it('says what the band is doing first', () => {
@@ -101,7 +132,8 @@ describe('railLabel', () => {
     expect(railLabel({ ...base, published: true, count: 1, mine: 1 })).toBe('STORIES · 24 H · PUBLIÉE');
   });
   it('counts the pages when open', () => {
-    expect(railLabel({ ...base, open: true, index: 1, count: 3, mine: 1 })).toBe('STORIES · 24 H · 2 / 3');
+    expect(railLabel({ ...base, open: true, index: 1, count: 3, mine: 1 })).toBe('STORIES · 2 / 3');
+    expect(railLabel({ ...base, open: true, index: 0, count: 2, left: 'PART DANS 5 H' })).toBe('STORIES · 1 / 2 · PART DANS 5 H');
     expect(railLabel({ ...base, open: true })).toBe('STORIES · 24 H');
   });
   it('names my story while it is up, with the others', () => {

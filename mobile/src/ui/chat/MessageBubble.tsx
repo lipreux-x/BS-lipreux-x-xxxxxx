@@ -1,4 +1,4 @@
-import { Camera, Mic, Paperclip } from 'lucide-react-native';
+import { Camera, CircleDashed, Mic, Paperclip } from 'lucide-react-native';
 import { useRef, type ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, View, type StyleProp, type TextStyle } from 'react-native';
 import { accountTones } from '../accountColors';
@@ -10,6 +10,7 @@ import type { ChatLook } from './look';
 import { ReactionChips } from './ReactionKeys';
 import type { ReactionCount } from './reactions';
 import type { Quote } from './replies';
+import { StoryThumb } from '../stories/StoryThumb';
 
 export type DeliveryStatus = 'sending' | 'sent' | 'failed';
 
@@ -231,13 +232,14 @@ export function QuoteBlock({
   );
 }
 
-/** What a quoted message holds: its text, or an icon and a word for a photo, a voice message, a file. */
+/** What a quoted message holds: its text, or an icon and a word for a story, a photo, a voice message, a file. */
 export function QuoteExcerpt({ quote, style, numberOfLines = 1 }: { quote: Quote; style: StyleProp<TextStyle>; numberOfLines?: number }) {
   const flat = StyleSheet.flatten(style) ?? {};
-  const Icon = quote.image ? Camera : quote.voice ? Mic : quote.file ? Paperclip : null;
-  const text = quote.image ? 'Photo' : quote.voice ? 'Vocal' : quote.excerpt;
+  const Icon = quote.story ? CircleDashed : quote.image ? Camera : quote.voice ? Mic : quote.file ? Paperclip : null;
+  const text = quote.story ? 'Story' : quote.image ? 'Photo' : quote.voice ? 'Vocal' : quote.excerpt;
   return (
     <View style={styles.excerpt}>
+      {quote.storyId ? <StoryThumb storyId={quote.storyId} /> : null}
       {Icon ? <Icon size={(flat.fontSize ?? 13) + 1} color={flat.color ?? colors.textDim} strokeWidth={2.25} /> : null}
       <Text style={[style, styles.excerptText]} numberOfLines={numberOfLines}>
         {text}

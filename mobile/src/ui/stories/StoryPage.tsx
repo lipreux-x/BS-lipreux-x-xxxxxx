@@ -1,15 +1,17 @@
 import { memo, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import Svg, { Defs, Pattern, Rect } from 'react-native-svg';
-import { b64 } from '@/crypto';
+import { b64, type ReactionId } from '@/crypto';
 import { ApiError } from '@/services/api';
 import { loadAttachment, type Session } from '@/services/groups';
 import { imageCache, jpegUri, previewUri } from '@/services/images';
 import { safeToDisplay } from '@/services/jpeg';
 import { Avatar, isAvatarId } from '../avatars';
 import { colors, fonts, mono } from '../theme';
+import { StoryReactions } from '../chat/ReactionKeys';
+import type { ReactionCount } from '../chat/reactions';
 import { agoLabel } from '../chat/timeline';
-import { storyExpiry, type StoryMessage } from './stories';
+import type { StoryMessage } from './stories';
 
 /** The avatar on a photo, the size of the chat's. */
 const AVATAR = 34;
@@ -28,7 +30,7 @@ const SLOT = '#030303';
 type Loaded = { kind: 'loading' } | { kind: 'ready'; jpeg: Uint8Array } | { kind: 'error'; message: string };
 
 /** The story's photo, downloaded and decrypted in memory (or from this session's cache), once `enabled`. */
-function useStoryImage(session: Session, groupId: string, story: StoryMessage, enabled: boolean): Loaded {
+export function useStoryImage(session: Session, groupId: string, story: StoryMessage, enabled: boolean): Loaded {
   const { attachmentId } = story.story;
   // The outcome is kept with the id it is for: another story shows as loading until its own arrives.
   const [done, setDone] = useState<{ id: string; loaded: Loaded } | null>(null);
@@ -102,7 +104,7 @@ export const Shutter = memo(function Shutter() {
  * One story, a page the size of the whole stage: the whole photo centred in
  * its box (`box`), the same photo blurred filling the page behind it (the
  * tiny preview while it decrypts). The page's left and right halves are the
- * previous/next keys.
+ * previous/next keys; the five reaction keys sit in its caption.
  */
 export const StoryPage = memo(function StoryPage({
   session,
@@ -115,6 +117,9 @@ export const StoryPage = memo(function StoryPage({
   now,
   onTap,
   onView,
+  reactions,
+  order,
+  onReact,
 }: {
   session: Session;
   groupId: string;
@@ -126,6 +131,10 @@ export const StoryPage = memo(function StoryPage({
   now: Date;
   onTap(side: 'left' | 'right'): void;
   onView(jpeg: Uint8Array): void;
+  /** What this story got. */
+  reactions: ReactionCount[] | undefined;
+  order: ReactionId[];
+  onReact(storyId: string, id: ReactionId): void;
 }) {
   const loaded = useStoryImage(session, groupId, story, load);
   const uri = useMemo(() => (loaded.kind === 'ready' ? jpegUri(loaded.jpeg) : null), [loaded]);
@@ -138,7 +147,6 @@ export const StoryPage = memo(function StoryPage({
       return null;
     }
   }, [story]);
-  const left = Math.max(1, Math.ceil((storyExpiry(story).getTime() - now.getTime()) / 3_600_000));
   const who = story.mine ? 'toi' : story.senderName;
   const view = () => {
     if (loaded.kind === 'ready') onView(loaded.jpeg);
@@ -157,18 +165,6 @@ export const StoryPage = memo(function StoryPage({
           </View>
         )}
       </View>
-      <Text style={styles.left}>{left} H</Text>
-      <View style={styles.caption}>
-        <Avatar id={isAvatarId(story.senderAvatar) ? story.senderAvatar : null} size={AVATAR} color={story.senderColor} />
-        <View style={{ flex: 1 }}>
-          <Text style={styles.name} numberOfLines={1}>
-            {story.mine ? 'Toi' : story.senderName}
-          </Text>
-          <Text style={styles.ago} numberOfLines={1}>
-            {agoLabel(new Date(story.createdAt), now)}
-          </Text>
-        </View>
-      </View>
       <View style={styles.zones}>
         <Pressable
           accessibilityRole="button"
@@ -186,6 +182,21 @@ export const StoryPage = memo(function StoryPage({
           onPress={() => onTap('right')}
           onLongPress={view}
         />
+      </View>
+      {/* Over the keys: a tap on the name still turns the page, the reaction keys take their own. */}
+      <View style={styles.caption} pointerEvents="box-none">
+        <View style={styles.who} pointerEvents="none">
+          <Avatar id={isAvatarId(story.senderAvatar) ? story.senderAvatar : null} size={AVATAR} color={story.senderColor} />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.name} numberOfLines={1}>
+              {story.mine ? 'Toi' : story.senderName}
+            </Text>
+            <Text style={styles.ago} numberOfLines={1}>
+              {agoLabel(new Date(story.createdAt), now)}
+            </Text>
+          </View>
+        </View>
+        <StoryReactions order={order} counts={reactions} onPick={(id) => onReact(story.id, id)} />
       </View>
     </View>
   );
@@ -219,19 +230,6 @@ const styles = StyleSheet.create({
   // The two invisible keys over the photo: left half back, right half forward.
   zones: { ...StyleSheet.absoluteFill, flexDirection: 'row' },
   zone: { flex: 1 },
-  left: {
-    position: 'absolute',
-    top: 8,
-    right: 8,
-    paddingHorizontal: 5,
-    paddingVertical: 2,
-    borderRadius: 4,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    color: colors.textDim,
-    fontFamily: mono,
-    fontSize: 9,
-    letterSpacing: 1,
-  },
   caption: {
     position: 'absolute',
     left: 0,
@@ -244,6 +242,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     backgroundColor: 'rgba(0,0,0,0.6)',
   },
+  who: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 },
   name: { color: colors.text, fontSize: 13, fontFamily: fonts.semibold },
   ago: { color: colors.textDim, fontSize: 10, fontFamily: mono },
 });

@@ -57,6 +57,8 @@ export interface ReplyRef {
   image?: true;
   voice?: true;
   file?: true;
+  /** A story (with `image`, so that older phones still show "Photo"). */
+  story?: true;
 }
 
 export interface ImageBody {
@@ -151,8 +153,9 @@ const MAX_PREVIEW_CHARS = 8 * 1024;
 const MAX_TEXT = 4000;
 
 /** The excerpt to quote for a message: its text cut to MAX_EXCERPT, empty for an image or a voice message, the name of a document. */
-export function replyExcerpt(body: MessageBody): Pick<ReplyRef, 'excerpt' | 'image' | 'voice' | 'file'> {
-  if (body.kind === 'image' || body.kind === 'story') return { excerpt: '', image: true };
+export function replyExcerpt(body: MessageBody): Pick<ReplyRef, 'excerpt' | 'image' | 'voice' | 'file' | 'story'> {
+  if (body.kind === 'story') return { excerpt: '', image: true, story: true };
+  if (body.kind === 'image') return { excerpt: '', image: true };
   if (body.kind === 'voice') return { excerpt: '', voice: true };
   if (body.kind === 'file') return { excerpt: body.name, file: true };
   if (body.kind === 'reaction') return { excerpt: '' }; // never quoted (not shown as a message)
@@ -219,7 +222,8 @@ function parseReply(v: unknown): ReplyRef | undefined | null {
     r.excerpt.length > MAX_EXCERPT ||
     (r.image !== undefined && r.image !== true) ||
     (r.voice !== undefined && r.voice !== true) ||
-    (r.file !== undefined && r.file !== true)
+    (r.file !== undefined && r.file !== true) ||
+    (r.story !== undefined && r.story !== true)
   ) {
     return null;
   }
@@ -230,6 +234,7 @@ function parseReply(v: unknown): ReplyRef | undefined | null {
     ...(r.image === true && { image: true as const }),
     ...(r.voice === true && { voice: true as const }),
     ...(r.file === true && { file: true as const }),
+    ...(r.story === true && { story: true as const }),
   };
 }
 

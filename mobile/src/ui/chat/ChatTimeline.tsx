@@ -18,7 +18,7 @@ import type { Pending } from '@/services/outbox';
 import type { ReactionCount } from './reactions';
 import type { ChatLook } from './look';
 import { DaySeparator, MessageBubble, type DeliveryStatus } from './MessageBubble';
-import { quoteResolver, type Quote } from './replies';
+import { quoteResolver, replyRefFor, type Quote } from './replies';
 import { SwipeToReply } from './SwipeToReply';
 import { buildTimeline, timeLabel } from './timeline';
 import { colors, fonts, led, space, type } from '../theme';
@@ -52,6 +52,8 @@ export interface Line {
   quote?: Quote;
   /** Delivered message: can be answered (long press). */
   message?: ChatMessage;
+  /** A reaction to the story quoted (`quote`), shown as a line of its own. */
+  storyReaction?: ReactionId;
 }
 
 export type Item = ReturnType<typeof buildTimeline<Line>>[number];
@@ -74,6 +76,9 @@ export const Timeline = memo(function Timeline({
   onReact,
   onDoubleTap,
   colors: groupColors,
+  stories,
+  storyReactions,
+  onStoryQuote,
 }: {
   look: ChatLook;
   /** A private conversation: only the two of them read it. */
@@ -98,6 +103,12 @@ export const Timeline = memo(function Timeline({
   onDoubleTap(m: ChatMessage): void;
   /** Each member's color in this group (null: not known yet, the profiles' then). */
   colors: GroupColors | null;
+  /** The stories (in the band, not in the list): a reply to one quotes it. */
+  stories: ChatMessage[];
+  /** Each member's latest reaction to each story (reaction messages): a line each, quoting the story. */
+  storyReactions: ChatMessage[];
+  /** Tap on the quote of a story: show it. */
+  onStoryQuote(storyId: string): void;
 }) {
   const { session, profiles } = useUnlocked();
   const me = session.account.userId;
@@ -118,8 +129,27 @@ export const Timeline = memo(function Timeline({
   // Newest first: the list is inverted so it opens on the latest message.
   const items = useMemo(() => {
     // Quotes resolved here, once per change of the history, not on each render of each row.
-    const quoteOf = quoteResolver(messages, me);
-    const lines: Line[] = [
+    const quoteOf = quoteResolver(stories.length ? [...messages, ...stories] : messages, me);
+    const reacted: Line[] = storyReactions.flatMap((m) => {
+      const story = stories.find((s) => s.id === m.reaction?.messageId);
+      const ref = story && replyRefFor(story);
+      if (!ref || !m.reaction?.reaction) return [];
+      const line: Line = {
+        key: m.id,
+        senderId: m.senderId,
+        at: new Date(m.createdAt),
+        mine: m.mine,
+        author: m.senderName,
+        avatar: m.senderAvatar,
+        color: m.senderColor,
+        text: null,
+        storyReaction: m.reaction.reaction,
+        replyTo: ref,
+        quote: quoteOf(ref),
+      };
+      return [line];
+    });
+    const delivered: Line[] = [
       ...messages.map((m) => ({
         key: m.id,
         senderId: m.senderId,
@@ -139,6 +169,14 @@ export const Timeline = memo(function Timeline({
         // Unreadable messages cannot be quoted.
         message: m.text !== null || m.image || m.voice || m.file ? m : undefined,
       })),
+    ];
+    // In the order they happened, among the messages (a stable sort keeps the messages' own).
+    if (reacted.length) {
+      delivered.push(...reacted);
+      delivered.sort((a, b) => a.at.getTime() - b.at.getTime());
+    }
+    const lines: Line[] = [
+      ...delivered,
       ...pending.map((p) => ({
         key: p.clientId,
         senderId: me,
@@ -157,18 +195,21 @@ export const Timeline = memo(function Timeline({
       })),
     ];
     return buildTimeline(lines, new Date()).reverse();
-  }, [messages, pending, me, myName, myColor, reactions]);
+  }, [messages, stories, storyReactions, pending, me, myName, myColor, reactions]);
 
   const jumpTo = useCallback(
     (messageId: string) => {
       const index = items.findIndex((i) => i.kind === 'message' && i.key === messageId);
-      if (index < 0) return;
+      if (index < 0) {
+        if (stories.some((s) => s.id === messageId)) onStoryQuote(messageId);
+        return;
+      }
       listRef.current?.scrollToIndex({ index, viewPosition: 0.5, animated: true });
       setHighlight(messageId);
       clearTimeout(highlightTimer.current);
       highlightTimer.current = setTimeout(() => setHighlight(null), 1500);
     },
-    [items, listRef],
+    [items, listRef, stories, onStoryQuote],
   );
 
   const renderItem = useCallback(

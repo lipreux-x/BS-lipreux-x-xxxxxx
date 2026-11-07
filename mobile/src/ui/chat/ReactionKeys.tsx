@@ -64,6 +64,42 @@ export function ReactionChips({ counts, onPress }: { counts: ReactionCount[]; on
   );
 }
 
+const STORY_KEY = 32;
+
+/**
+ * On a story: the five keys in a row, in this phone's order, each with what
+ * the story got (a small count on its corner) and mine lit. A tap gives the
+ * reaction, or takes it back (the same one again), as on a message.
+ */
+export function StoryReactions({ order, counts, onPick }: { order: ReactionId[]; counts: ReactionCount[] | undefined; onPick(id: ReactionId): void }) {
+  return (
+    <View style={styles.storyKeys}>
+      {order.map((id) => {
+        const c = counts?.find((x) => x.reaction === id);
+        return (
+          <Pop key={id} beat={`${c?.count ?? 0}/${!!c?.mine}`}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`${REACTION_LABELS[id]}${c ? ` : ${c.count}${c.mine ? ', dont toi' : ''}` : ''}`}
+              accessibilityState={{ selected: !!c?.mine }}
+              hitSlop={4}
+              onPress={() => onPick(id)}
+              style={({ pressed }) => [styles.storyKey, c?.mine && lit(id), pressed && styles.pressed]}
+            >
+              <ReactionIcon id={id} size={16} />
+              {c ? (
+                <View style={styles.storyCount}>
+                  <Text style={styles.storyCountText}>{c.count}</Text>
+                </View>
+              ) : null}
+            </Pressable>
+          </Pop>
+        );
+      })}
+    </View>
+  );
+}
+
 const GAP = 8;
 const KEY_H = 46;
 /** How long a key is held before it lifts to be moved. */
@@ -224,5 +260,23 @@ const styles = StyleSheet.create({
   keySlot: { position: 'absolute', top: 0, left: 0, height: KEY_H },
   key: { ...PLATE, height: KEY_H, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
   lifted: { zIndex: 1, elevation: 4 },
+  storyKeys: { flexDirection: 'row', gap: 6 },
+  storyKey: { ...PLATE, width: STORY_KEY, height: STORY_KEY, borderRadius: STORY_KEY / 2, alignItems: 'center', justifyContent: 'center' },
+  // The count, a small dark tab on the key's corner.
+  storyCount: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    minWidth: 15,
+    height: 15,
+    paddingHorizontal: 3,
+    borderRadius: 7.5,
+    backgroundColor: '#000000',
+    borderWidth: 1,
+    borderColor: steel.edgeLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  storyCountText: { color: colors.text, fontFamily: mono, fontSize: 9 },
   pressed: { transform: [{ translateY: 1 }], opacity: 0.9 },
 });

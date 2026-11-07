@@ -15,6 +15,7 @@ const msg = (id: string, senderId: string, text: string | null, extra: Partial<Q
 const m1 = msg('11111111-0000-4000-8000-000000000001', bob, 'Rdv à la base ce soir ?');
 const photo = msg('22222222-0000-4000-8000-000000000002', bob, null, { image: { kind: 'image' } });
 const vocal = msg('44444444-0000-4000-8000-000000000004', bob, null, { voice: { kind: 'voice' } });
+const story = msg('55555555-0000-4000-8000-000000000005', bob, null, { story: { kind: 'story' } });
 const unreadable = msg('33333333-0000-4000-8000-000000000003', bob, null);
 
 describe('replyRefFor', () => {
@@ -22,6 +23,13 @@ describe('replyRefFor', () => {
     expect(replyRefFor(m1)).toEqual({ messageId: m1.id, senderId: bob, excerpt: 'Rdv à la base ce soir ?' });
     expect(replyRefFor(photo)).toEqual({ messageId: photo.id, senderId: bob, excerpt: '', image: true });
     expect(replyRefFor(unreadable)).toBeNull();
+  });
+
+  it('quotes a story as a story (a photo for older versions)', () => {
+    expect(replyRefFor(story)).toEqual({ messageId: story.id, senderId: bob, excerpt: '', image: true, story: true });
+    expect(resolveQuote(replyRefFor(story)!, [story], alice)).toMatchObject({ author: 'bob', image: true, story: true, found: true });
+    // Gone after 24 h: what the reply claims, unverified, still a story.
+    expect(resolveQuote(replyRefFor(story)!, [], alice)).toMatchObject({ image: true, story: true, found: false });
   });
 });
 

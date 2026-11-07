@@ -31,6 +31,7 @@ export function Composer({
   onCancelReply,
   inputRef,
   voice,
+  placeholder = 'Message chiffré',
 }: {
   value: string;
   onChange(text: string): void;
@@ -52,6 +53,8 @@ export function Composer({
     onCancel(): void;
     onSend(): void;
   };
+  /** What the empty field says (a story on screen: answer it). */
+  placeholder?: string;
 }) {
   const canSend = value.trim().length > 0;
   const recording = voice.phase === 'recording';
@@ -99,7 +102,7 @@ export function Composer({
                 ref={inputRef}
                 value={value}
                 onChangeText={onChange}
-                placeholder="Message chiffré"
+                placeholder={placeholder}
                 placeholderTextColor={steel.engraving}
                 selectionColor={blade.sky}
                 cursorColor={blade.sky}

@@ -19,6 +19,7 @@ export interface Quotable {
   image: { kind: 'image' } | null;
   voice?: { kind: 'voice' } | null;
   file?: { kind: 'file'; name: string } | null;
+  story?: { kind: 'story' } | null;
 }
 
 export interface Quote {
@@ -28,12 +29,16 @@ export interface Quote {
   image: boolean;
   voice?: true;
   file?: true;
+  story?: true;
+  /** The story answered (its id), for its thumbnail. */
+  storyId?: string;
   /** The original is loaded: tapping the quote can scroll to it. */
   found: boolean;
 }
 
 function bodyOf(m: Quotable): MessageBody | null {
   if (m.image) return m.image as MessageBody;
+  if (m.story) return m.story as MessageBody;
   if (m.voice) return m.voice as MessageBody;
   if (m.file) return m.file as MessageBody;
   return m.text === null ? null : { kind: 'text', text: m.text };
@@ -60,6 +65,10 @@ export function quoteResolver(messages: Quotable[], me: string): (ref: ReplyRef)
     if (!names.has(m.senderId)) names.set(m.senderId, m.senderName);
   }
   return (ref) => {
+    const quote = resolve(ref);
+    return quote.story ? { ...quote, storyId: ref.messageId } : quote;
+  };
+  function resolve(ref: ReplyRef): Quote {
     const original = byId.get(ref.messageId);
     const body = original && bodyOf(original);
     if (original && body && original.senderId === ref.senderId) {
@@ -68,12 +77,13 @@ export function quoteResolver(messages: Quotable[], me: string): (ref: ReplyRef)
     if (original) return { author: 'Citation falsifiée', excerpt: 'Ce message ne correspond pas à l’original', image: false, found: false };
     const claimed = ref.senderId === me ? 'Toi' : (names.get(ref.senderId) ?? 'Un membre');
     return { author: `${claimed} · non vérifié`, ...withImage(ref), found: false };
-  };
+  }
 }
 
-const withImage = (e: Pick<ReplyRef, 'excerpt' | 'image' | 'voice' | 'file'>) => ({
+const withImage = (e: Pick<ReplyRef, 'excerpt' | 'image' | 'voice' | 'file' | 'story'>) => ({
   excerpt: e.excerpt,
   image: e.image === true,
   ...(e.voice === true && { voice: true as const }),
   ...(e.file === true && { file: true as const }),
+  ...(e.story === true && { story: true as const }),
 });

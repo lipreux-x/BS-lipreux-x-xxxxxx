@@ -25,6 +25,13 @@ export function storyExpiry(m: Pick<StoryMessage, 'createdAt' | 'expiresAt'>): D
   return new Date(m.expiresAt ? Date.parse(m.expiresAt) : Date.parse(m.createdAt) + STORY_TTL_SECONDS * 1000);
 }
 
+/** How long a story has left, said on it: "PART DANS 5 H", then in minutes for the last hour. */
+export function timeLeftLabel(m: Pick<StoryMessage, 'createdAt' | 'expiresAt'>, now: Date): string {
+  const ms = storyExpiry(m).getTime() - now.getTime();
+  const hours = Math.floor(ms / 3_600_000);
+  return hours >= 1 ? `PART DANS ${hours} H` : `PART DANS ${Math.max(1, Math.ceil(ms / 60_000))} MIN`;
+}
+
 export const storyAlive = (m: Pick<StoryMessage, 'createdAt' | 'expiresAt'>, now: Date) => storyExpiry(m) > now;
 
 /**
@@ -34,6 +41,25 @@ export const storyAlive = (m: Pick<StoryMessage, 'createdAt' | 'expiresAt'>, now
  */
 export function bandStories(stories: StoryMessage[], now: Date): StoryMessage[] {
   return stories.filter((s) => storyAlive(s, now)).sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+}
+
+/**
+ * The reactions to the stories, shown in the conversation like replies (so
+ * that everyone sees who reacted to which one): each member's latest
+ * reaction to each story still loaded, oldest first; one taken back is left out.
+ */
+export function storyReactions<M extends { senderId: string; seq: number; reaction: { messageId: string; reaction: string | null } | null }>(
+  messages: M[],
+  storyIds: ReadonlySet<string>,
+): M[] {
+  const latest = new Map<string, M>();
+  for (const m of messages) {
+    if (!m.reaction || !storyIds.has(m.reaction.messageId)) continue;
+    const key = `${m.reaction.messageId}/${m.senderId}`;
+    const before = latest.get(key);
+    if (!before || before.seq < m.seq) latest.set(key, m);
+  }
+  return [...latest.values()].filter((m) => m.reaction!.reaction !== null).sort((a, b) => a.seq - b.seq);
 }
 
 /** Someone else's story not watched yet (mine never count as new). */
@@ -53,7 +79,8 @@ export function pruneSeen(seen: ReadonlySet<string>, stories: StoryMessage[]): s
 
 /**
  * The rail's line, folded or open. What the band is doing comes first
- * (failed, sending, just published); then, folded, my own story is named
+ * (failed, sending, just published); open, the page and how long the story
+ * on screen has left (in place of the band's "24 H"); folded, my own story is named
  * ("LA TIENNE", with "+ 2" for the others when none is new) before the new
  * ones, so that a story just sent stays visibly up.
  */
@@ -68,12 +95,14 @@ export function railLabel(s: {
   fresh: number;
   /** My own stories still up. */
   mine: number;
+  /** Open: how long the story on screen has left (timeLeftLabel). */
+  left?: string;
 }): string {
   const parts = ['STORIES · 24 H'];
   if (s.failed) parts.push('ÉCHEC');
   else if (s.sending) parts.push('ENVOI…');
   else if (s.published) parts.push('PUBLIÉE');
-  else if (s.open && s.count) parts.push(`${s.index + 1} / ${s.count}`);
+  else if (s.open && s.count) return ['STORIES', `${s.index + 1} / ${s.count}`, ...(s.left ? [s.left] : [])].join(' · ');
   else {
     const others = s.count - s.mine;
     if (s.mine) {

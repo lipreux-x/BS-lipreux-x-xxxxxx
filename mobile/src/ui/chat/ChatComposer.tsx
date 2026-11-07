@@ -18,6 +18,7 @@ export function ChatComposer({
   inputRef,
   onSendText,
   onSendVoice,
+  placeholder,
 }: {
   attaching: boolean;
   onAttach(): void;
@@ -26,6 +27,7 @@ export function ChatComposer({
   inputRef: React.Ref<React.ComponentRef<typeof TextInput>>;
   onSendText(text: string): void;
   onSendVoice(voice: PreparedVoice): void;
+  placeholder?: string;
 }) {
   const [draft, setDraft] = useState('');
   const recorder = useVoiceRecorder(onSendVoice);
@@ -51,6 +53,7 @@ export function ChatComposer({
         replyTo={replyTo}
         onCancelReply={onCancelReply}
         inputRef={inputRef}
+        placeholder={placeholder}
         voice={{
           phase: recorder.phase,
           elapsedMs: recorder.elapsedMs,

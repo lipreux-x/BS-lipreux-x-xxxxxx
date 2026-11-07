@@ -2,12 +2,14 @@ import * as Haptics from 'expo-haptics';
 import { Check, ChevronDown, Plus } from 'lucide-react-native';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Animated, FlatList, Keyboard, PanResponder, Pressable, StyleSheet, Text, View } from 'react-native';
+import type { ReactionId } from '@/crypto';
 import { type Session } from '@/services/groups';
+import type { ReactionCount } from '../chat/reactions';
 import { useKeyboardUp } from '../KeyboardGlide';
 import { Led } from '../Led';
 import { Logo } from '../Logo';
 import { colors, fonts, hotKey, mono, steel } from '../theme';
-import { fitStory, isNew, openingIndex, railLabel, storyTap, type StoryMessage } from './stories';
+import { fitStory, isNew, openingIndex, railLabel, storyTap, timeLeftLabel, type StoryMessage } from './stories';
 import { Shutter, STEEL, StoryPage } from './StoryPage';
 
 /** Height of the shutter's bottom rail: the only part of the band that stays in the chat's flow. */
@@ -33,7 +35,9 @@ const PUBLISHED_MS = 4000;
  * left half to the previous one, a swipe does the same, and a tap past the
  * last one folds the shutter back. It opens on the first photo not watched
  * yet (oldest first); the photo shown counts as watched. A long press on
- * the photo shows it full screen, where it can be saved. The steel grille of
+ * the photo shows it full screen, where it can be saved. Each photo carries
+ * the five reaction keys of the chat in its caption, and typing while it
+ * is down answers it (the shutter folds, the reply strip quotes it). The steel grille of
  * a safe's vent shows only with no story at all, where the logo and "Story"
  * sit in the middle (a tap adds one). Pushed back up, it folds.
  *
@@ -53,6 +57,11 @@ export function StoriesBand({
   onAdd,
   onSeen,
   onView,
+  reactions,
+  order,
+  onReact,
+  focus,
+  onReply,
 }: {
   session: Session;
   groupId: string;
@@ -71,6 +80,15 @@ export function StoriesBand({
   onSeen(storyId: string): void;
   /** Long press on a photo already decrypted: full screen. */
   onView(jpeg: Uint8Array): void;
+  /** Per story id, what it got (the chat's tally). */
+  reactions: ReadonlyMap<string, ReactionCount[]>;
+  /** The reaction keys' order on this phone. */
+  order: ReactionId[];
+  onReact(storyId: string, id: ReactionId): void;
+  /** The story to open on (its quote was tapped), instead of the first one not watched. */
+  focus: string | null;
+  /** The keyboard came up over this story: the message being typed answers it. */
+  onReply(storyId: string): void;
 }) {
   // The messages area the band lies over; the shutter comes down at most to its bottom.
   // Taken with the keyboard down only: the keyboard goes away as the shutter
@@ -184,9 +202,17 @@ export function StoriesBand({
   );
 
   // The keyboard comes up over an open shutter (a tap on the composer): back
-  // to the chat. Sized for the area at rest, it would run under the composer.
+  // to the chat (sized for the area at rest, it would run under the composer),
+  // and what is typed answers the story that was on screen.
+  const onScreen = useRef<{ id?: string; onReply(id: string): void }>({ onReply });
   useEffect(() => {
-    if (keyboardUp && latest.current.open) settle(false);
+    onScreen.current = { id: stories[at]?.id, onReply };
+  }, [stories, at, onReply]);
+  useEffect(() => {
+    if (!keyboardUp || !latest.current.open) return;
+    const { id, onReply: reply } = onScreen.current;
+    if (id) reply(id);
+    settle(false);
   }, [keyboardUp, settle]);
 
   // Opened or closed from outside (or from a tap), or the area resized: the shutter follows.
@@ -245,11 +271,12 @@ export function StoriesBand({
     [stories, onSeen],
   );
 
-  // On opening: straight to the first photo not watched yet.
+  // On opening: straight to the story asked for, or the first photo not watched yet.
   const wasOpen = useRef(open);
   useEffect(() => {
     if (open && !wasOpen.current && stories.length) {
-      const index = openingIndex(stories, seen);
+      const asked = focus ? stories.findIndex((s) => s.id === focus) : -1;
+      const index = asked >= 0 ? asked : openingIndex(stories, seen);
       list.current?.scrollToIndex({ index, animated: false });
       show(index);
     }
@@ -306,6 +333,7 @@ export function StoriesBand({
               showsHorizontalScrollIndicator={false}
               initialNumToRender={2}
               windowSize={3}
+              extraData={reactions}
               onMomentumScrollEnd={(e) => show(Math.round(e.nativeEvent.contentOffset.x / area.width))}
               renderItem={({ item }) => (
                 <StoryPage
@@ -319,6 +347,9 @@ export function StoriesBand({
                   now={now}
                   onTap={tap}
                   onView={onView}
+                  reactions={reactions.get(item.id)}
+                  order={order}
+                  onReact={onReact}
                 />
               )}
               />
@@ -353,7 +384,17 @@ export function StoriesBand({
             style={styles.edgeMain}
           >
             <Led state={failed ? 'error' : sending ? 'busy' : published || fresh ? 'ok' : 'off'} size={6} />
-            <Text style={styles.label}>{railLabel({ failed, sending, published, open, index: at, count: stories.length, fresh, mine })}</Text>
+            <Text style={styles.label}>{railLabel({
+                failed,
+                sending,
+                published,
+                open,
+                index: at,
+                count: stories.length,
+                fresh,
+                mine,
+                left: stories[at] ? timeLeftLabel(stories[at], now) : undefined,
+              })}</Text>
             <Animated.View
               style={{
                 transform: [{ rotate: chevron }],

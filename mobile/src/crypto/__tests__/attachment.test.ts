@@ -171,8 +171,8 @@ describe('story bodies', () => {
     expect(parseMessageBody(enc({ replyTo }))).toBeNull();
   });
 
-  it('is quoted like an image', () => {
-    expect(replyExcerpt(story)).toEqual({ excerpt: '', image: true });
+  it('is quoted as a story, and as an image for older versions', () => {
+    expect(replyExcerpt(story)).toEqual({ excerpt: '', image: true, story: true });
   });
 });
 
@@ -249,6 +249,11 @@ describe('replies', () => {
     expect(parseMessageBody(encodeMessageBody(image))).toEqual(image);
   });
 
+  it('round-trips a reply to a story, which older versions read as a reply to a photo', () => {
+    const text = { kind: 'text' as const, text: 'Trop bien', replyTo: { ...replyTo, excerpt: '', image: true as const, story: true as const } };
+    expect(parseMessageBody(encodeMessageBody(text))).toEqual(text);
+  });
+
   it('keeps a text without reply as plain text (readable by older versions)', () => {
     expect(encodeMessageBody({ kind: 'text', text: 'salut' }).trimEnd()).toBe('salut');
   });
@@ -268,6 +273,7 @@ describe('replies', () => {
     expect(parseMessageBody(enc({ excerpt: 'x'.repeat(500) }))).toBeNull();
     expect(parseMessageBody(enc({ image: 'yes' }))).toBeNull();
     expect(parseMessageBody(enc({ voice: 1 }))).toBeNull();
+    expect(parseMessageBody(enc({ story: 'yes' }))).toBeNull();
     // A structured text must be a reply, and not empty.
     expect(parseMessageBody('\u0000' + JSON.stringify({ kind: 'text', text: 'ok' }))).toBeNull();
     expect(parseMessageBody('\u0000' + JSON.stringify({ kind: 'text', text: '', replyTo }))).toBeNull();
