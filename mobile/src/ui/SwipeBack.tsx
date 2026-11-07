@@ -14,21 +14,24 @@ const FLICK = 0.6; // px/ms: a quick flick goes back even short of the trigger
  * past the trigger point the phone ticks once, and letting go goes back.
  * Only clearly horizontal drags to the right are taken, and only those no
  * child took first (a message dragged to the left answers it, see SwipeToReply).
+ * `off` lets every drag through (the stories, swiped back and forth).
  */
-export function SwipeBack({ onBack, children }: { onBack(): void; children: ReactNode }) {
+export function SwipeBack({ onBack, off = false, children }: { onBack(): void; off?: boolean; children: ReactNode }) {
   const [x] = useState(() => new Animated.Value(0));
   const armed = useRef(false);
-  // The handler outlives renders: it reads the latest callback from a ref.
+  // The handler outlives renders: it reads the latest values from refs.
   const back = useRef(onBack);
+  const disabled = useRef(off);
   useEffect(() => {
     back.current = onBack;
-  }, [onBack]);
+    disabled.current = off;
+  }, [onBack, off]);
 
   // Created once; the refs are only read while a drag runs, never during render.
   // eslint-disable-next-line react-hooks/refs
   const [pan] = useState(() =>
     PanResponder.create({
-      onMoveShouldSetPanResponder: (_e, g) => g.dx > 14 && Math.abs(g.dx) > Math.abs(g.dy) * 2,
+      onMoveShouldSetPanResponder: (_e, g) => !disabled.current && g.dx > 14 && Math.abs(g.dx) > Math.abs(g.dy) * 2,
       onPanResponderTerminationRequest: () => false,
       onPanResponderMove: (_e, g) => {
         // Follows the finger, then resists past the trigger point.

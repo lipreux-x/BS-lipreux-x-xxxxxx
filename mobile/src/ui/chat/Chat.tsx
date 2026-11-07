@@ -57,6 +57,7 @@ export function Chat({
   onLocked,
   onReady,
   titled,
+  onStoriesOpen,
 }: {
   groupId: string;
   group: OpenGroup;
@@ -66,6 +67,8 @@ export function Chat({
   onReady?(): void;
   /** False while the code entry is still over it: the header stays the locked group's. */
   titled: boolean;
+  /** The stories pulled down, or folded back. */
+  onStoriesOpen?(open: boolean): void;
 }) {
   const { session, profiles, openGroups } = useUnlocked();
   const [dialog, dialogView] = useDialog();
@@ -139,6 +142,9 @@ export function Chat({
     const t = setInterval(() => setStoryNow(new Date()), 30_000);
     return () => clearInterval(t);
   }, []);
+  useEffect(() => {
+    onStoriesOpen?.(bandOpen);
+  }, [bandOpen, onStoriesOpen]);
   const markSeen = useCallback((id: string) => {
     setSeen((prev) => (prev.has(id) ? prev : new Set([...prev, id])));
   }, []);

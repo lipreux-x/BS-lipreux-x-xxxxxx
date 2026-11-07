@@ -22,6 +22,8 @@ export default function GroupScreen() {
   const [coverOpacity] = useState(() => new Animated.Value(1));
   // Each locking brings a fresh code entry (the last one may still hold its success).
   const [locks, setLocks] = useState(0);
+  // The stories pulled down: a drag to the right goes back to the previous one, not out of the group.
+  const [storiesOpen, setStoriesOpen] = useState(false);
   const update = useCallback(
     (g: OpenGroup) => {
       openGroups.set(id, g);
@@ -69,9 +71,19 @@ export default function GroupScreen() {
   }, [closeGroup, id]);
 
   return (
-    <SwipeBack onBack={swipeShut}>
+    <SwipeBack onBack={swipeShut} off={storiesOpen}>
       <View style={styles.screen}>
-        {open ? <Chat groupId={id} group={open} onUpdate={update} onLocked={relock} onReady={covered ? reveal : undefined} titled={!covered} /> : null}
+        {open ? (
+          <Chat
+            groupId={id}
+            group={open}
+            onUpdate={update}
+            onLocked={relock}
+            onReady={covered ? reveal : undefined}
+            titled={!covered}
+            onStoriesOpen={setStoriesOpen}
+          />
+        ) : null}
         {covered ? (
           <Animated.View key={locks} style={[StyleSheet.absoluteFill, styles.cover, { opacity: coverOpacity }]} pointerEvents={open ? 'none' : 'auto'}>
             <GroupUnlock groupId={id} onOpen={update} />
