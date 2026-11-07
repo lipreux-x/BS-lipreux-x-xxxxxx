@@ -165,6 +165,58 @@ messagesRoutes.post('/groups/:groupId/messages/erase', async (c) => {
   return c.json({ deleted });
 });
 
+/**
+ * The sender deletes one of their messages (text, photo, voice, document,
+ * story) for everyone. Its content goes (nonce, ciphertext, signature
+ * emptied, its file deleted); the row stays as a tombstone so that phones
+ * show « message supprimé » in its place. Quiet from then on: it no longer
+ * counts as unread. A story (`?story=1`, which only the sender's phone can
+ * tell) leaves no tombstone: it was never in the conversation, it just goes.
+ * Phones learn of it as of an erase (group_purges): they reload the
+ * history, and their own copy of the message goes with it.
+ */
+messagesRoutes.delete('/groups/:groupId/messages/:messageId', async (c) => {
+  const groupId = groupIdParam(c);
+  const messageId = z.uuid().safeParse(c.req.param('messageId'));
+  if (!messageId.success) throw new HTTPException(404, { message: 'not_found' });
+  const me = c.get('userId');
+  const story = c.req.query('story') === '1';
+  await requireMember(groupId, me);
+  const files = await db.transaction(async (tx) => {
+    const [row] = await tx
+      .select({ senderId: messages.senderId, deletedAt: messages.deletedAt })
+      .from(messages)
+      .where(and(eq(messages.id, messageId.data), eq(messages.groupId, groupId)))
+      .for('update');
+    if (!row) throw new HTTPException(404, { message: 'not_found' });
+    if (row.senderId !== me) throw new HTTPException(403, { message: 'not_yours' });
+    if (row.deletedAt) return null; // already gone: nothing to do again
+    // Unlinked: if the storage fails below, the purge sweeps them like any leftover upload.
+    const files = await tx
+      .update(attachments)
+      .set({ messageId: null })
+      .where(eq(attachments.messageId, messageId.data))
+      .returning({ id: attachments.id });
+    if (story) await tx.delete(messages).where(eq(messages.id, messageId.data));
+    else {
+      await tx
+        .update(messages)
+        .set({ nonce: '', ciphertext: '', signature: '', quiet: true, deletedAt: sql`now()` })
+        .where(eq(messages.id, messageId.data));
+    }
+    await tx.insert(groupPurges).values({ groupId });
+    return files;
+  });
+  if (files === null) return c.json({ deleted: false });
+  if (files.length) {
+    await deleteObjects(files.map((f) => objectKey(groupId, f.id)))
+      .then(() => db.delete(attachments).where(inArray(attachments.id, files.map((f) => f.id))))
+      .catch((e: Error) => console.error('[storage]', e.name));
+  }
+  realtime.nudge();
+  return c.json({ deleted: true });
+});
+
 // ---- Attachments (encrypted on the phone, SPEC §4.3) -------------------------
 
 /** Reserves an attachment id and returns a short-lived URL to PUT exactly `size` encrypted bytes. */
@@ -205,6 +257,7 @@ messagesRoutes.get('/groups/:groupId/attachments/:attachmentId', async (c) => {
         eq(attachments.id, attachmentId.data),
         eq(attachments.groupId, groupId),
         or(isNull(messages.expiresAt), gt(messages.expiresAt, sql`now()`)),
+        isNull(messages.deletedAt),
       ),
     );
   if (!row) throw new HTTPException(404, { message: 'not_found' });

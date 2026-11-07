@@ -1,3 +1,4 @@
+import { Trash2 } from 'lucide-react-native';
 import { memo, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import Svg, { Defs, Pattern, Rect } from 'react-native-svg';
@@ -120,6 +121,7 @@ export const StoryPage = memo(function StoryPage({
   reactions,
   order,
   onReact,
+  onDelete,
 }: {
   session: Session;
   groupId: string;
@@ -135,6 +137,8 @@ export const StoryPage = memo(function StoryPage({
   reactions: ReactionCount[] | undefined;
   order: ReactionId[];
   onReact(storyId: string, id: ReactionId): void;
+  /** One of mine: delete it for everyone (asked first). */
+  onDelete(storyId: string): void;
 }) {
   const loaded = useStoryImage(session, groupId, story, load);
   const uri = useMemo(() => (loaded.kind === 'ready' ? jpegUri(loaded.jpeg) : null), [loaded]);
@@ -183,6 +187,18 @@ export const StoryPage = memo(function StoryPage({
           onLongPress={view}
         />
       </View>
+      {/* One of mine: a quiet delete key in the top right corner, above the page's keys (the red is for the confirmation). */}
+      {story.mine ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Supprimer ta story"
+          hitSlop={10}
+          onPress={() => onDelete(story.id)}
+          style={({ pressed }) => [styles.delete, pressed && styles.deletePressed]}
+        >
+          <Trash2 size={15} color={colors.textDim} strokeWidth={2} />
+        </Pressable>
+      ) : null}
       {/* Over the keys: a tap on the name still turns the page, the reaction keys take their own. */}
       <View style={styles.caption} pointerEvents="box-none">
         <View style={styles.who} pointerEvents="none">
@@ -229,6 +245,18 @@ const styles = StyleSheet.create({
   },
   // The two invisible keys over the photo: left half back, right half forward.
   zones: { ...StyleSheet.absoluteFill, flexDirection: 'row' },
+  delete: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.4)',
+  },
+  deletePressed: { backgroundColor: 'rgba(0,0,0,0.7)' },
   zone: { flex: 1 },
   caption: {
     position: 'absolute',

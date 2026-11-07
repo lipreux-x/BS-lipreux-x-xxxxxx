@@ -198,6 +198,9 @@ export const messages = pgTable(
     quiet: boolean('quiet').notNull().default(false),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     expiresAt: timestamp('expires_at', { withTimezone: true }),
+    // Deleted by its sender: nonce, ciphertext and signature are emptied, the
+    // row stays (id, sender, time) so that everyone sees « message supprimé ».
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
   (t) => [
     // Offline replays: the same phone resending the same message is a no-op.

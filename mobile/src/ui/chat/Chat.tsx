@@ -40,6 +40,7 @@ import { SentVoice, VoiceBubble } from '@/ui/VoiceBubble';
 import { Led } from '@/ui/Led';
 import { STORIES_RAIL_H, StoriesBand } from '@/ui/stories/StoriesBand';
 import { QuotedStories } from '@/ui/stories/StoryThumb';
+import { DeletedNote } from '@/ui/chat/MessageBubble';
 import type { StoryMessage } from '@/ui/stories/stories';
 import { CaptureScreen, type CaptureKind } from '@/ui/camera/CaptureScreen';
 import { Working } from '@/ui/Working';
@@ -85,6 +86,7 @@ export function Chat({
     setPending,
     loaded,
     readMark,
+    confirmDelete,
     online,
     fetchFailed,
     removed,
@@ -182,6 +184,9 @@ export function Chat({
     [session, groupId, stories.messages],
   );
 
+  // "Supprimer pour tous" on a message: asked once its panel is gone.
+  const deleteAfterSheet = useRef<ChatMessage | null>(null);
+
   /** The reply to attach to the next message, and clear it from the composer. */
   function takeReply(): ReplyRef | undefined {
     const ref = replying ? (replyRefFor(replying) ?? undefined) : undefined;
@@ -257,7 +262,9 @@ export function Chat({
 
   const renderContent = useCallback(
     (item: Line, onLongPress?: () => void) =>
-      item.storyReaction ? (
+      item.deleted ? (
+        <DeletedNote />
+      ) : item.storyReaction ? (
         <View style={styles.reacted}>
           <ReactionIcon id={item.storyReaction} size={16} />
           <Text style={look === 'plates' ? styles.plateText : styles.text}>{item.mine ? 'Tu as réagi à la story' : 'a réagi à la story'}</Text>
@@ -463,6 +470,10 @@ export function Chat({
               onView={openImage}
               reactions={reactionTally}
               order={order}
+              onDelete={(id) => {
+                const story = stories.messages.find((s) => s.id === id);
+                if (story) confirmDelete(story);
+              }}
             />
             {/* Until the history is decrypted (from the phone, or fetched): what the wait is, not a black screen. */}
             {!loaded ? <Working label={DECRYPTING} style={styles.decrypting} /> : null}
@@ -548,10 +559,13 @@ export function Chat({
           }}
           onReport={pressed && pressed.senderId !== session.account.userId ? () => armReport(pressed) : undefined}
           onBlock={pressed && pressed.senderId !== session.account.userId ? () => armBlock(pressed) : undefined}
+          onDelete={pressed?.mine ? () => (deleteAfterSheet.current = pressed) : undefined}
           onClose={() => setPressed(null)}
           onHidden={() => {
             // One sheet at a time: the reasons or the block confirmation come up once this one is gone.
             onActionsHidden();
+            if (deleteAfterSheet.current) confirmDelete(deleteAfterSheet.current);
+            deleteAfterSheet.current = null;
             if (!replyAfterSheet.current) return;
             replyAfterSheet.current = false;
             input.current?.focus();

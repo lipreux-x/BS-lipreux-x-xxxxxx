@@ -41,6 +41,8 @@ export interface ChatMessage {
   /** Disappearing message or story: gone for everyone at this time. */
   expiresAt: string | null;
   mine: boolean;
+  /** Deleted by its sender: nothing left of it but « message supprimé ». */
+  deleted: boolean;
 }
 
 export async function decryptMessages(s: Session, profiles: ProfileCache, keys: GroupKeys, wire: WireMessage[]): Promise<ChatMessage[]> {
@@ -55,7 +57,7 @@ export async function decryptMessages(s: Session, profiles: ProfileCache, keys: 
     let story: StoryBody | null = null;
     let reaction: ReactionBody | null = null;
     let replyTo: ReplyRef | null = null;
-    if (p && groupKey) {
+    if (p && groupKey && !m.deleted) {
       try {
         const body = parseMessageBody(
           decryptMessage(
@@ -94,6 +96,7 @@ export async function decryptMessages(s: Session, profiles: ProfileCache, keys: 
       createdAt: m.createdAt,
       expiresAt: m.expiresAt ?? null,
       mine: m.senderId === s.account.userId,
+      deleted: !!m.deleted,
     };
   });
 }

@@ -138,6 +138,8 @@ export interface WireMessage {
   signature: string;
   createdAt: string;
   expiresAt: string | null;
+  /** Deleted by its sender: nonce, ciphertext and signature are empty. */
+  deleted?: true;
 }
 
 export interface Credentials {
@@ -476,6 +478,11 @@ export class Api {
     return this.request<{ messages: WireMessage[]; hasMore: boolean; purgeSeq: number }>(
       `/groups/${id(groupId)}/messages?after=${after}&limit=${limit}`,
     );
+  }
+
+  /** One of my messages, deleted for everyone (its file too); a story leaves no « message supprimé ». */
+  deleteMessage(groupId: string, messageId: string, story: boolean) {
+    return this.request<{ deleted: boolean }>(`/groups/${id(groupId)}/messages/${id(messageId)}${story ? '?story=1' : ''}`, { method: 'DELETE' });
   }
 
   /** Admin: erases every message sent in [from, to) for everyone, images included. */

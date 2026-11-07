@@ -162,6 +162,8 @@ export const toWireMessage = (m: typeof messages.$inferSelect) => ({
   signature: m.signature,
   createdAt: m.createdAt.toISOString(),
   expiresAt: m.expiresAt?.toISOString() ?? null,
+  // Deleted by its sender: nothing left to decrypt, the phones show « message supprimé ».
+  ...(m.deletedAt && { deleted: true as const }),
 });
 export type WireMessage = ReturnType<typeof toWireMessage>;
 

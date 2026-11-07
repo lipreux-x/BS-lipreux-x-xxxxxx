@@ -20,6 +20,8 @@ export interface Quotable {
   voice?: { kind: 'voice' } | null;
   file?: { kind: 'file'; name: string } | null;
   story?: { kind: 'story' } | null;
+  /** Deleted by its sender. */
+  deleted?: boolean;
 }
 
 export interface Quote {
@@ -70,6 +72,7 @@ export function quoteResolver(messages: Quotable[], me: string): (ref: ReplyRef)
   };
   function resolve(ref: ReplyRef): Quote {
     const original = byId.get(ref.messageId);
+    if (original?.deleted) return { author: original.mine ? 'Toi' : original.senderName, excerpt: 'Message supprimé', image: false, found: false };
     const body = original && bodyOf(original);
     if (original && body && original.senderId === ref.senderId) {
       return { author: original.mine ? 'Toi' : original.senderName, ...withImage(replyExcerpt(body)), found: true };

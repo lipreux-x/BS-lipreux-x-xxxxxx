@@ -388,12 +388,38 @@ export function useChat({
     setPending([]);
   }, []);
 
+  /** One of my messages (or stories), deleted for everyone once confirmed; the history is then fetched again without it. */
+  const confirmDelete = useCallback(
+    (m: ChatMessage) => {
+      const unsend = async () => {
+        await session.api.deleteMessage(groupId, m.id, !!m.story);
+        await resync({ full: true });
+      };
+      dialog(
+        m.story ? 'Supprimer ta story ?' : 'Supprimer ce message ?',
+        m.story
+          ? 'Elle disparaît pour tout le monde, du serveur comme des téléphones.'
+          : 'Il est effacé pour tout le monde, du serveur comme des téléphones, avec sa photo ou son fichier. À sa place, chacun voit « message supprimé ».',
+        [
+          { text: 'Annuler', style: 'cancel' },
+          {
+            text: 'Supprimer',
+            style: 'destructive',
+            onPress: () => void unsend().catch(() => dialog('Suppression impossible', 'Vérifie ta connexion et réessaie.')),
+          },
+        ],
+      );
+    },
+    [session, groupId, resync, dialog],
+  );
+
   return {
     messages,
     pending,
     setPending,
     loaded,
     readMark,
+    confirmDelete,
     online,
     fetchFailed,
     removed,

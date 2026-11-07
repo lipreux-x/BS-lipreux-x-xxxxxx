@@ -27,6 +27,7 @@ export function MessageActions({
   onReply,
   onReport,
   onBlock,
+  onDelete,
   onClose,
   onHidden,
 }: {
@@ -43,6 +44,8 @@ export function MessageActions({
   /** Someone else's message: report it, or block its sender (the panel closes first). */
   onReport?(): void;
   onBlock?(): void;
+  /** One of my messages: delete it for everyone (the panel closes first). */
+  onDelete?(): void;
   onClose(): void;
   /** The panel is gone (see `ActionSheet`): the keyboard can come up for a reply. */
   onHidden?(): void;
@@ -73,6 +76,16 @@ export function MessageActions({
           label="Copier le texte"
           onPress={() => {
             void copySensitive(target.text!);
+            onClose();
+          }}
+        />
+      ) : null}
+      {onDelete ? (
+        <ActionKey
+          label="Supprimer pour tous"
+          danger
+          onPress={() => {
+            onDelete();
             onClose();
           }}
         />

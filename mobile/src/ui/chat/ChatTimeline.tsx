@@ -54,6 +54,8 @@ export interface Line {
   message?: ChatMessage;
   /** A reaction to the story quoted (`quote`), shown as a line of its own. */
   storyReaction?: ReactionId;
+  /** Deleted by its sender: « message supprimé » in its place. */
+  deleted?: boolean;
 }
 
 export type Item = ReturnType<typeof buildTimeline<Line>>[number];
@@ -165,12 +167,13 @@ export const Timeline = memo(function Timeline({
         image: m.image ?? undefined,
         voice: m.voice ?? undefined,
         file: m.file ?? undefined,
-        reactions: reactions.get(m.id),
+        reactions: m.deleted ? undefined : reactions.get(m.id),
         status: m.mine ? ('sent' as const) : undefined,
         replyTo: m.replyTo ?? undefined,
         quote: m.replyTo ? quoteOf(m.replyTo) : undefined,
-        // Unreadable messages cannot be quoted.
-        message: m.text !== null || m.image || m.voice || m.file ? m : undefined,
+        deleted: m.deleted,
+        // Unreadable (or deleted) messages cannot be quoted.
+        message: !m.deleted && (m.text !== null || m.image || m.voice || m.file) ? m : undefined,
       })),
     ];
     // In the order they happened, among the messages (a stable sort keeps the messages' own).
@@ -198,7 +201,7 @@ export const Timeline = memo(function Timeline({
       })),
     ];
     // Someone else's first message after the mark (none: nothing new since).
-    const firstUnread = readMark === null ? null : (messages.find((m) => m.seq > readMark && !m.mine)?.id ?? null);
+    const firstUnread = readMark === null ? null : (messages.find((m) => m.seq > readMark && !m.mine && !m.deleted)?.id ?? null);
     return buildTimeline(lines, new Date(), firstUnread).reverse();
   }, [messages, stories, storyReactions, pending, me, myName, myColor, reactions, readMark]);
 

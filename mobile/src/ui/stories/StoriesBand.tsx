@@ -62,6 +62,7 @@ export function StoriesBand({
   onReact,
   focus,
   onReply,
+  onDelete,
 }: {
   session: Session;
   groupId: string;
@@ -89,6 +90,8 @@ export function StoriesBand({
   focus: string | null;
   /** The keyboard came up over this story: the message being typed answers it. */
   onReply(storyId: string): void;
+  /** The delete key on one of my stories. */
+  onDelete(storyId: string): void;
 }) {
   // The messages area the band lies over; the shutter comes down at most to its bottom.
   // Taken with the keyboard down only: the keyboard goes away as the shutter
@@ -350,6 +353,7 @@ export function StoriesBand({
                   reactions={reactions.get(item.id)}
                   order={order}
                   onReact={onReact}
+                  onDelete={onDelete}
                 />
               )}
               />

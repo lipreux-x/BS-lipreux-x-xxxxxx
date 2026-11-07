@@ -239,6 +239,28 @@ try {
   assert.equal(burst.at(-1), 429);
   step('sending is rate-limited (60 messages a minute)');
 
+  // 8b. Deleting one's own message: a tombstone for everyone, signalled by purgeSeq
+  // (alice sends it: bob has just hit the rate limit)
+  const doomed = await call('POST', `/groups/${groupId}/messages`, { token: alice.token, json: encrypted(groupId, randomUUID(), 'oups') });
+  const del = (token: string, id: string) => call('DELETE', `/groups/${groupId}/messages/${id}`, { token });
+  const purgeBeforeDelete = resync.body.purgeSeq;
+  assert.equal((await del(bob.token, doomed.body.id)).status, 403); // not his
+  assert.equal((await del(alice.token, randomUUID())).status, 404);
+  assert.equal((await del(alice.token, doomed.body.id)).body.deleted, true);
+  assert.equal((await del(alice.token, doomed.body.id)).body.deleted, false); // already gone
+  const afterDelete = await call('GET', `/groups/${groupId}/messages?after=0`, { token: bob.token });
+  const tomb = afterDelete.body.messages.find((x: { id: string }) => x.id === doomed.body.id);
+  assert.deepEqual([tomb.deleted, tomb.ciphertext, tomb.signature, tomb.nonce], [true, '', '', '']);
+  assert.ok(afterDelete.body.purgeSeq > purgeBeforeDelete);
+  const story = await call('POST', `/groups/${groupId}/messages`, {
+    token: alice.token,
+    json: { ...encrypted(groupId, randomUUID(), 'story'), expiresInSeconds: 86_400 },
+  });
+  assert.equal((await call('DELETE', `/groups/${groupId}/messages/${story.body.id}?story=1`, { token: alice.token })).body.deleted, true);
+  const afterStory = await call('GET', `/groups/${groupId}/messages?after=0`, { token: bob.token });
+  assert.ok(!afterStory.body.messages.some((x: { id: string }) => x.id === story.body.id));
+  step('alice deleted her own message for everyone (not bob): a tombstone remains; a story leaves none; purgeSeq moved');
+
   // 9. Erasing a span of history: admin only, signalled by purgeSeq
   const erase = (token: string, from: Date, to: Date) =>
     call('POST', `/groups/${groupId}/messages/erase`, { token, json: { from: from.toISOString(), to: to.toISOString() } });
@@ -248,7 +270,7 @@ try {
   assert.equal((await erase(bob.token, hourAgo, inAnHour)).status, 403);
   assert.equal((await erase(alice.token, inAnHour, hourAgo)).status, 400);
   const erased = await erase(alice.token, hourAgo, inAnHour);
-  assert.equal(erased.body.deleted, 1);
+  assert.equal(erased.body.deleted, 2); // bob's message and alice's tombstone
   const afterErase = await call('GET', `/groups/${groupId}/messages?after=0`, { token: bob.token });
   assert.equal(afterErase.body.messages.length, 0);
   assert.ok(afterErase.body.purgeSeq > purgeBefore);

@@ -1,4 +1,4 @@
-import { Camera, CircleDashed, Mic, Paperclip } from 'lucide-react-native';
+import { Ban, Camera, CircleDashed, Mic, Paperclip } from 'lucide-react-native';
 import { useRef, type ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, View, type StyleProp, type TextStyle } from 'react-native';
 import { accountTones } from '../accountColors';
@@ -269,6 +269,16 @@ export function DaySeparator({ label, fresh, onLongPress }: { label: string; fre
   );
 }
 
+/** In place of a message its sender deleted: « MESSAGE SUPPRIMÉ », in negative like the day labels. */
+export function DeletedNote() {
+  return (
+    <View style={styles.deleted}>
+      <Ban size={12} color={blade.black} strokeWidth={2.5} />
+      <Text style={styles.deletedText}>MESSAGE SUPPRIMÉ</Text>
+    </View>
+  );
+}
+
 /** Width of the prompt column: the text sits under the author, not under the prompt. */
 const INDENT = 18;
 
@@ -327,6 +337,17 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   dayFresh: { backgroundColor: blade.sky },
+  deleted: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 5,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 3,
+    backgroundColor: colors.textDim,
+  },
+  deletedText: { fontFamily: mono, fontSize: 10, letterSpacing: 1.5, color: blade.black },
 });
 
 const AVATAR = 32;
