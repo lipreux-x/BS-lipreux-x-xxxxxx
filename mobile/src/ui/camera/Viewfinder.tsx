@@ -126,7 +126,7 @@ export function Viewfinder({
       </View>
 
       <View style={styles.bottom}>
-        <Text style={styles.note}>RESTE DANS L’APP · JAMAIS DANS LA GALERIE · CHIFFRÉE AVANT L’ENVOI</Text>
+        <Text style={styles.note}>RESTE DANS L’APP · CHIFFRÉE AVANT L’ENVOI</Text>
         <View style={styles.controls}>
           <Key square size="lg" accessibilityLabel="Choisir dans la galerie" onPress={onLibrary}>
             <Images size={22} color={colors.accentFg} strokeWidth={2.25} />
