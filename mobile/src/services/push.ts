@@ -74,7 +74,7 @@ const ACTION_BODY: Record<Exclude<PushKind, 'message'>, string> = {
   approved: 'Demande acceptée : entre le code du groupe',
   member_left: 'Un membre est parti : clé à renouveler',
   code_changed: 'Le code a changé : entre le nouveau',
-  direct: 'Nouveau tête-à-tête : choisis ton code',
+  direct: 'Nouvelle ligne privée : choisis ton code',
 };
 
 interface Push {

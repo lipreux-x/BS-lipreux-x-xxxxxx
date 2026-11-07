@@ -109,7 +109,7 @@ export default function Settings() {
   function confirmDelete() {
     dialog(
       'Supprimer ton compte ?',
-      'Tu quittes tous tes groupes, et tes tête-à-tête sont supprimés pour les deux. Tes messages, photos et vocaux sont effacés du serveur, ton pseudo et ton mot de passe ne servent plus à rien, et tout ce que l’app garde sur ce téléphone est effacé. C’est définitif.',
+      'Tu quittes tous tes groupes, et tes lignes privées sont supprimées pour les deux. Tes messages, photos et vocaux sont effacés du serveur, ton pseudo et ton mot de passe ne servent plus à rien, et tout ce que l’app garde sur ce téléphone est effacé. C’est définitif.',
       [
         { text: 'Annuler', style: 'cancel' },
         { text: 'Supprimer', style: 'destructive', onPress: () => void removeAccount(false) },
@@ -168,7 +168,7 @@ export default function Settings() {
         {avatarError ? <Text style={styles.error}>{avatarError}</Text> : null}
         <Text style={[styles.subTitle, styles.subTitleRow]}>Couleur dans les discussions</Text>
         <Text style={type.dim}>
-          Une par groupe : dans un groupe ou un tête-à-tête, ouvre ses réglages puis « Ta couleur dans ce groupe ». Ton nom, ton avatar et tes messages
+          Une par groupe : dans un groupe ou une ligne privée, ouvre ses réglages puis « Ta couleur dans ce groupe ». Ton nom, ton avatar et tes messages
           la prennent là, pour tous les membres.
         </Text>
       </Section>

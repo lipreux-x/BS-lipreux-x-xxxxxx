@@ -63,7 +63,7 @@ export default function NewDirect() {
     );
   }
 
-  const header = name ? <NamePlate label="Tête-à-tête" name={name} /> : undefined;
+  const header = name ? <NamePlate label="Ligne privée" name={name} /> : undefined;
 
   if (step.kind === 'code') {
     return (

@@ -372,7 +372,7 @@ export default function GroupSettings() {
         </>
       )}
 
-      <Label style={styles.section}>{direct ? 'Tête-à-tête' : `Membres · ${info.members.length}`}</Label>
+      <Label style={styles.section}>{direct ? 'Ligne privée' : `Membres · ${info.members.length}`}</Label>
       <View style={styles.card}>
         {shown.map((m, i) => (
           <View key={m.userId} style={[styles.row, i > 0 && styles.divider]}>
@@ -396,7 +396,7 @@ export default function GroupSettings() {
                 hitSlop={8}
                 disabled={busy}
                 accessibilityRole="button"
-                accessibilityLabel={`Écrire à ${m.username} en tête-à-tête`}
+                accessibilityLabel={`Ouvrir une ligne privée avec ${m.username}`}
                 // The settings sheet gives way to the new conversation.
                 onPress={() => router.replace({ pathname: '/group/direct', params: { peer: m.userId } })}
                 style={styles.directBtn}
@@ -413,7 +413,7 @@ export default function GroupSettings() {
         ))}
       </View>
 
-      <Label style={styles.section}>{direct ? 'Ta couleur dans ce tête-à-tête' : 'Ta couleur dans ce groupe'}</Label>
+      <Label style={styles.section}>{direct ? 'Ta couleur dans cette ligne privée' : 'Ta couleur dans ce groupe'}</Label>
       <View style={styles.card}>
         {mine ? (
           <View style={[styles.row, styles.preview]}>
@@ -427,7 +427,7 @@ export default function GroupSettings() {
           {direct
             ? 'Ton nom, ton avatar et tes messages prennent cette couleur ici, pour vous deux.'
             : 'Ton nom, ton avatar et tes messages prennent cette couleur ici, pour tous les membres.'}{' '}
-          Chaque groupe et chaque tête-à-tête a la sienne.
+          Chaque groupe et chaque ligne privée a la sienne.
         </Text>
       </View>
 
