@@ -84,6 +84,7 @@ export function Chat({
     pending,
     setPending,
     loaded,
+    readMark,
     online,
     fetchFailed,
     removed,
@@ -447,6 +448,7 @@ export function Chat({
               stories={stories.messages}
               storyReactions={stories.reactions}
               onStoryQuote={stories.show}
+              readMark={readMark}
             />
             <StoriesBand
               session={session}

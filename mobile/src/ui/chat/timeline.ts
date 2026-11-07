@@ -72,20 +72,23 @@ export interface TimelineMessage {
 
 export type TimelineItem<M extends TimelineMessage> =
   | { kind: 'day'; key: string; label: string; at: Date }
+  | { kind: 'unread'; key: string }
   | { kind: 'message'; key: string; message: M; first: boolean; last: boolean };
 
 /**
  * Messages in chronological order -> items in chronological order, with a
- * separator before each new day. A run is consecutive messages from the same
- * sender on the same day, less than 5 minutes apart.
+ * separator before each new day, and « nouveaux messages » before the one
+ * keyed `firstUnread` (after its day's). A run is consecutive messages from
+ * the same sender on the same day, less than 5 minutes apart.
  */
-export function buildTimeline<M extends TimelineMessage>(messages: M[], now: Date): TimelineItem<M>[] {
+export function buildTimeline<M extends TimelineMessage>(messages: M[], now: Date, firstUnread?: string | null): TimelineItem<M>[] {
   const items: TimelineItem<M>[] = [];
   const continues = (a: M | undefined, b: M | undefined) =>
     !!a && !!b && a.senderId === b.senderId && dayKey(a.at) === dayKey(b.at) && b.at.getTime() - a.at.getTime() < RUN_GAP_MS;
   messages.forEach((m, i) => {
     const prev = messages[i - 1];
     if (!prev || dayKey(prev.at) !== dayKey(m.at)) items.push({ kind: 'day', key: `day-${dayKey(m.at)}`, label: dayLabel(m.at, now), at: m.at });
+    if (m.key === firstUnread) items.push({ kind: 'unread', key: 'unread' });
     items.push({ kind: 'message', key: m.key, message: m, first: !continues(prev, m), last: !continues(m, messages[i + 1]) });
   });
   return items;

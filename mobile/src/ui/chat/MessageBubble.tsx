@@ -248,8 +248,13 @@ export function QuoteExcerpt({ quote, style, numberOfLines = 1 }: { quote: Quote
   );
 }
 
-/** Day label between runs of messages, as a comment line: "── AUJOURD'HUI ──". Long press: the admin's erase menu. */
-export function DaySeparator({ label, onLongPress }: { label: string; onLongPress?(): void }) {
+/**
+ * Day label between runs of messages, in negative: dark letters on a lit
+ * plate between two rules ("── AUJOURD'HUI ──"). `fresh`: where this phone
+ * stopped reading, « NOUVEAUX MESSAGES » on the sky light. Long press on a
+ * day: the admin's erase menu.
+ */
+export function DaySeparator({ label, fresh, onLongPress }: { label: string; fresh?: boolean; onLongPress?(): void }) {
   return (
     <Pressable
       style={styles.day}
@@ -257,9 +262,9 @@ export function DaySeparator({ label, onLongPress }: { label: string; onLongPres
       onLongPress={onLongPress}
       accessibilityHint={onLongPress ? 'Appui long pour effacer les messages de ce jour' : undefined}
     >
-      <View style={styles.rule} />
-      <Text style={styles.dayLabel}>{label}</Text>
-      <View style={styles.rule} />
+      <View style={[styles.rule, fresh && styles.ruleFresh]} />
+      <Text style={[styles.dayLabel, fresh && styles.dayFresh]}>{label}</Text>
+      <View style={[styles.rule, fresh && styles.ruleFresh]} />
     </Pressable>
   );
 }
@@ -308,7 +313,20 @@ const styles = StyleSheet.create({
   excerptText: { flexShrink: 1 },
   day: { flexDirection: 'row', alignItems: 'center', gap: space.sm, marginVertical: space.sm },
   rule: { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: colors.border },
-  dayLabel: { fontFamily: mono, fontSize: 10, letterSpacing: 2, color: colors.textDim },
+  ruleFresh: { height: 1, backgroundColor: blade.sky },
+  // In negative: dark letters on a lit plate.
+  dayLabel: {
+    fontFamily: mono,
+    fontSize: 10,
+    letterSpacing: 2,
+    color: blade.black,
+    backgroundColor: colors.textDim,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 3,
+    overflow: 'hidden',
+  },
+  dayFresh: { backgroundColor: blade.sky },
 });
 
 const AVATAR = 32;

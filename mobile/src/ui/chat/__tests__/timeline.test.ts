@@ -57,7 +57,7 @@ describe('buildTimeline', () => {
       ],
       now,
     );
-    expect(items.map((i) => (i.kind === 'day' ? i.label : `${i.key}:${+i.first}${+i.last}`))).toEqual([
+    expect(items.map((i) => (i.kind === 'message' ? `${i.key}:${+i.first}${+i.last}` : i.kind === 'day' ? i.label : 'NEW'))).toEqual([
       'HIER',
       'a:11',
       'AUJOURD’HUI',
@@ -66,6 +66,12 @@ describe('buildTimeline', () => {
       'd:11',
       'e:11',
     ]);
+  });
+
+  it('puts « nouveaux messages » before the first unread one, after its day', () => {
+    const items = buildTimeline([msg('a', 'alice', at(18, 20, 0)), msg('b', 'bob', at(19, 10, 0)), msg('c', 'bob', at(19, 10, 1))], now, 'b');
+    expect(items.map((i) => (i.kind === 'message' ? i.key : i.kind === 'day' ? i.label : 'NEW'))).toEqual(['HIER', 'a', 'AUJOURD’HUI', 'NEW', 'b', 'c']);
+    expect(buildTimeline([msg('a', 'alice', at(18, 20, 0))], now, null).some((i) => i.kind === 'unread')).toBe(false);
   });
 
   it('handles an empty chat', () => {

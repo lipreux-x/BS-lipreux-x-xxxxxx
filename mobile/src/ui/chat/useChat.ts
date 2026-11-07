@@ -80,6 +80,9 @@ export function useChat({
   const [expiresAt, setExpiresAt] = useState<Date | null>(null);
   // History fetched once: until then an empty list means "loading", not "no messages".
   const [loaded, setLoaded] = useState(false);
+  // The last message this phone had shown before the conversation opened (null: never opened
+  // here): « nouveaux messages » goes above the next one. Read once, before this opening marks more.
+  const [readMark, setReadMark] = useState<number | null>(null);
   const lastSeq = useRef(0);
   // Latest keys for callbacks that outlive a render (realtime, retries).
   const current = useRef(group);
@@ -214,8 +217,13 @@ export function useChat({
         outboxLoaded.current = true;
       });
       await keep(async (l) => {
-        const [wire, chat] = await Promise.all([l.messages(groupId), l.getRecord<{ purgeSeq: number }>(records.chat(groupId))]);
+        const [wire, chat, seen] = await Promise.all([
+          l.messages(groupId),
+          l.getRecord<{ purgeSeq: number }>(records.chat(groupId)),
+          l.getRecord<{ seq: number }>(records.seen(groupId)),
+        ]);
         if (chat) purgeSeq.current = chat.purgeSeq;
+        if (seen?.seq) setReadMark(seen.seq);
         if (!wire.length) return;
         merge(await decrypt(wire));
         setLoaded(true);
@@ -385,6 +393,7 @@ export function useChat({
     pending,
     setPending,
     loaded,
+    readMark,
     online,
     fetchFailed,
     removed,

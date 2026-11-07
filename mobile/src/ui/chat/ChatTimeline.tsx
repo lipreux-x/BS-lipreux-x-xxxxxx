@@ -79,6 +79,7 @@ export const Timeline = memo(function Timeline({
   stories,
   storyReactions,
   onStoryQuote,
+  readMark,
 }: {
   look: ChatLook;
   /** A private conversation: only the two of them read it. */
@@ -109,6 +110,8 @@ export const Timeline = memo(function Timeline({
   storyReactions: ChatMessage[];
   /** Tap on the quote of a story: show it. */
   onStoryQuote(storyId: string): void;
+  /** The last message seen on this phone before the conversation opened: « nouveaux messages » after it. */
+  readMark: number | null;
 }) {
   const { session, profiles } = useUnlocked();
   const me = session.account.userId;
@@ -194,8 +197,10 @@ export const Timeline = memo(function Timeline({
         quote: p.replyTo ? quoteOf(p.replyTo) : undefined,
       })),
     ];
-    return buildTimeline(lines, new Date()).reverse();
-  }, [messages, stories, storyReactions, pending, me, myName, myColor, reactions]);
+    // Someone else's first message after the mark (none: nothing new since).
+    const firstUnread = readMark === null ? null : (messages.find((m) => m.seq > readMark && !m.mine)?.id ?? null);
+    return buildTimeline(lines, new Date(), firstUnread).reverse();
+  }, [messages, stories, storyReactions, pending, me, myName, myColor, reactions, readMark]);
 
   const jumpTo = useCallback(
     (messageId: string) => {
@@ -217,6 +222,7 @@ export const Timeline = memo(function Timeline({
       if (item.kind === 'day') {
         return <DaySeparator label={item.label} onLongPress={onDayLongPress ? () => onDayLongPress(item.at) : undefined} />;
       }
+      if (item.kind === 'unread') return <DaySeparator label="NOUVEAUX MESSAGES" fresh />;
       const { message: line } = item;
       // Others' messages each carry the sender's avatar and name, so who wrote
       // what is never in doubt; only mine are grouped in runs.
