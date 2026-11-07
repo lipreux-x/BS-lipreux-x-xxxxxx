@@ -1,6 +1,6 @@
 import { ChevronLeft } from 'lucide-react-native';
 import { useEffect, useMemo, useState } from 'react';
-import { BackHandler, KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Animated, BackHandler, Easing, KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CryptoError, isValidPassword, MIN_PASSWORD_LENGTH, NativeCryptoMissingError, passwordProblem } from '@/crypto';
 import { useSession, type RecoveredAccount } from '@/session/SessionProvider';
@@ -15,14 +15,16 @@ import { PasswordField } from '@/ui/PasswordField';
 import { Field } from '@/ui/Screen';
 import { Segment } from '@/ui/Segment';
 import { Wordmark } from '@/ui/Wordmark';
-import { colors, fonts, space, type } from '@/ui/theme';
+import { calm, colors, fonts, space, type } from '@/ui/theme';
+import { VaultDoor } from '@/ui/VaultDoor';
 
 /*
  * SPEC §2.5: invite -> pseudo + password -> app code (twice) -> keys generated
  * on the phone -> account created. The app code never leaves the phone; the
  * password seals a copy of the keys kept by the server, so that "Se connecter"
  * (pseudo + password, then a new app code) brings the account back on a phone
- * that lost its data.
+ * that lost its data. It opens on the vault door, as the lock screen does:
+ * the form waits on the other side, fading in over the door's `calm` backdrop.
  */
 
 type Mode = 'register' | 'login';
@@ -43,6 +45,12 @@ export default function Onboarding() {
   const [recovered, setRecovered] = useState<RecoveredAccount | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [opened, setOpened] = useState(false);
+  const [reveal] = useState(() => new Animated.Value(0));
+  useEffect(() => {
+    if (!opened) return;
+    Animated.timing(reveal, { toValue: 1, duration: 420, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
+  }, [opened, reveal]);
 
   const login = mode === 'login';
   const canContinue = login
@@ -92,6 +100,14 @@ export default function Onboarding() {
       <Text style={styles.backText}>Retour</Text>
     </Pressable>
   ) : null;
+
+  if (!opened) {
+    return (
+      <SafeAreaView style={styles.door}>
+        <VaultDoor hint="Accès au coffre" onOpen={() => setOpened(true)} />
+      </SafeAreaView>
+    );
+  }
 
   if (step.kind === 'code') {
     return (
@@ -240,6 +256,7 @@ export default function Onboarding() {
           />
         </ScrollView>
       </KeyboardAvoidingView>
+      <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, calm, { opacity: reveal.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }) }]} />
     </SafeAreaView>
   );
 }
@@ -283,6 +300,7 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   flex: { flex: 1 },
   center: { flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center' },
+  door: { flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center' },
   centerText: { textAlign: 'center' },
   back: { position: 'absolute', left: space.md, zIndex: 1, flexDirection: 'row', alignItems: 'center', gap: 2 },
   backText: { color: colors.accentFg, fontSize: 16, fontFamily: fonts.medium },

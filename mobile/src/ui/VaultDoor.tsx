@@ -14,8 +14,8 @@ const VOID = '#02080E';
 /** How long the portal takes to pull you in, and how far the scene twists meanwhile. */
 const SUCK_MS = 1250;
 const TWIST_DEG = 140;
-/** Once the bolts have slammed shut, how long the door stays locked before opening by itself. */
-const SETTLE_MS = 450;
+/** Once the door is in place, how long it stays locked before opening by itself. */
+const SETTLE_MS = 600;
 
 /**
  * Being pulled in is a camera moving forward by TRAVEL: something at depth z then
@@ -47,11 +47,11 @@ const t = (value: Animated.Value, toValue: number, duration: number, easing = Ea
 const deg = (v: Animated.Value) => v.interpolate({ inputRange: [0, 360], outputRange: ['0deg', '360deg'] });
 
 /**
- * Lock screen vault door. On mount it rises into place and its bolts slam shut
- * one after the other; a glint sweeps across it and the red LED pulses. Then it
- * opens by itself (a tap opens it at once, without waiting): the combination
- * dial clicks through three numbers, the handwheel
- * turns and draws the bolts in one by one, the LED goes blue, the door unseats
+ * Vault door, once, when an account comes onto the phone (onboarding). On mount it
+ * rises into place, already locked (bolts out, red LED pulsing, a glint
+ * sweeping across it); a beat later it opens by itself (a tap opens it at
+ * once, without waiting): the combination dial clicks through three
+ * numbers, the handwheel turns and draws the bolts in one by one, the LED goes blue, the door unseats
  * with a thud and swings open on a swirling portal, cold at its rim and red at
  * its heart, whose light spills
  * out. The portal pulls you in: the camera speeds towards it while the whole
@@ -64,7 +64,7 @@ export function VaultDoor({ onOpen, hint }: { onOpen(): void; hint?: string }) {
   const [v] = useState(() => ({
     enter: new Animated.Value(0),
     press: new Animated.Value(0), // finger down
-    bolts: new Animated.Value(1), // 0 = locked, 1 = retracted
+    bolts: new Animated.Value(0), // 0 = locked, 1 = retracted
     dial: new Animated.Value(0),
     wheel: new Animated.Value(0),
     unlocked: new Animated.Value(0),
@@ -100,11 +100,7 @@ export function VaultDoor({ onOpen, hint }: { onOpen(): void; hint?: string }) {
     void (async () => {
       await run(Animated.spring(enter, { toValue: 1, friction: 8, tension: 38, useNativeDriver: true }));
       if (!alive) return;
-      await run(t(bolts, 0, 420, Easing.in(Easing.quad)));
-      if (!alive) return;
-      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-      thud(2).start();
-      // Locked: a beat for the thud to settle, then it opens by itself.
+      // Locked from the start: a beat to see it shut, then it opens by itself.
       setTimeout(() => alive && void open(), SETTLE_MS);
       idle.current = Animated.parallel([
         Animated.loop(Animated.sequence([t(pulse, 1, 900), t(pulse, 0, 900)])),
@@ -125,7 +121,7 @@ export function VaultDoor({ onOpen, hint }: { onOpen(): void; hint?: string }) {
     };
     // `thud` only closes over stable Animated values and `k`.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enter, bolts, pulse, sheen]);
+  }, [enter, pulse, sheen]);
 
   async function open() {
     if (busy.current) return;
