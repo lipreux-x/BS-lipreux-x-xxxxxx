@@ -167,14 +167,11 @@ export default function Settings() {
         <AvatarPicker value={avatar ?? null} onChange={(id) => void chooseAvatar(id)} disabled={avatar === undefined} />
         {avatarError ? <Text style={styles.error}>{avatarError}</Text> : null}
         <Text style={[styles.subTitle, styles.subTitleRow]}>Couleur dans les discussions</Text>
-        <Text style={type.dim}>
-          Une par groupe : dans un groupe ou une ligne privée, ouvre ses réglages puis « Ta couleur dans ce groupe ». Ton nom, ton avatar et tes messages
-          la prennent là, pour tous les membres.
-        </Text>
+        <Text style={type.dim}>Une par groupe, à choisir dans ses réglages.</Text>
       </Section>
 
       <Section title="Inviter un pote" icon={UserPlus}>
-        <Text style={type.dim}>Un code à usage unique, valable 2 heures. Donne-le en main propre.</Text>
+        <Text style={type.dim}>Usage unique, valable 2 h. À donner en main propre.</Text>
         {invite ? (
           <View style={styles.inviteBox}>
             <InviteCodeDisplay code={invite.code} />
@@ -192,27 +189,19 @@ export default function Settings() {
             {keyFingerprint(session.identity)}
           </Text>
         </Screen>
-        <Text style={type.dim}>
-          Ta carte d’identité dans l’app. Quand tu demandes à entrer dans un groupe, l’admin voit ces chiffres sur son téléphone : montre-lui les
-          tiens en vrai. Identiques : c’est bien toi, personne ne s’est fait passer pour toi.
-        </Text>
+        <Text style={type.dim}>À comparer en vrai avec l’admin quand tu demandes à entrer : identiques, c’est bien toi.</Text>
       </Section>
 
       <Section title="Sécurité" icon={Lock}>
-        <Text style={type.dim}>
-          Hors de l’app plus de 5 minutes, le code BaseSecrète est redemandé. Un groupe se referme 10 minutes après que tu l’as quitté.
-        </Text>
+        <Text style={type.dim}>Code redemandé après 5 min hors de l’app. Un groupe se referme 10 min après l’avoir quitté.</Text>
         <Button title="Verrouiller maintenant" variant="ghost" onPress={lock} />
 
         <SubTitle icon={bioKind === 'face' ? ScanFace : FingerprintPattern}>{biometricName(bioKind)}</SubTitle>
         {bioAvailable || bioOn ? (
           <>
             <Text style={type.dim}>
-              Ouvre l’app avec {biometricWord(bioKind)} au lieu du code. Le code reste demandé toutes les 48 h, et pour ouvrir chaque groupe. Si une
-              empreinte ou un visage est ajouté au téléphone, l’option se désactive.
-              {Platform.OS === 'android' && bioKind === 'both'
-                ? ' Android n’accepte que ses biométries fortes : l’empreinte toujours, le visage seulement sur les téléphones où il l’est.'
-                : ''}
+              Ouvre l’app avec {biometricWord(bioKind)} au lieu du code, redemandé toutes les 48 h. Se coupe si une empreinte ou un visage est ajouté.
+              {Platform.OS === 'android' && bioKind === 'both' ? ' Sur Android, le visage seulement s’il est classé biométrie forte.' : ''}
             </Text>
             <Button
               title={bioOn ? 'Désactiver' : 'Activer'}
@@ -229,8 +218,8 @@ export default function Settings() {
         <Text style={type.dim}>
           {push === 'on'
             ? Platform.OS === 'android'
-              ? 'Activées. Une notification par groupe, avec son nom (tel qu’il est sur ce téléphone) et « Nouveau message » ou ce que le groupe attend de toi : jamais le texte des messages, et jamais quand l’app est ouverte. Le serveur n’envoie que l’identifiant du groupe : le nom est ajouté par le téléphone. En la touchant, tu tapes tes codes, puis le groupe s’ouvre.'
-              : 'Activées. Elles disent « Nouveau message » ou ce que le groupe attend de toi, sans nom de groupe ni texte, et jamais quand l’app est ouverte. En touchant la notification, tu tapes tes codes, puis le groupe s’ouvre.'
+              ? 'Activées. Le nom du groupe est ajouté par ce téléphone, jamais le texte des messages.'
+              : 'Activées. Sans nom de groupe ni texte des messages.'
             : push === 'denied' || push === 'blocked'
               ? 'Refusées. Autorise les notifications de BaseSecrète dans les réglages du téléphone.'
               : push === 'unavailable'
@@ -241,7 +230,7 @@ export default function Settings() {
         {push === 'blocked' ? <Button title="Ouvrir les réglages du téléphone" variant="ghost" onPress={() => void Linking.openSettings()} /> : null}
 
         <SubTitle icon={CameraOff}>Captures d’écran</SubTitle>
-        <Text style={type.dim}>Bloquées : ni capture ni enregistrement de l’écran dans l’app, sur ce téléphone.</Text>
+        <Text style={type.dim}>Bloquées : ni capture ni enregistrement d’écran dans l’app.</Text>
         <Segment
           options={[
             { label: 'Autorisées', value: false },
@@ -252,7 +241,7 @@ export default function Settings() {
         />
 
         <SubTitle icon={Bomb}>Auto-destruction</SubTitle>
-        <Text style={type.dim}>Après trop de codes faux d’affilée, tout ce que l’app garde sur ce téléphone est effacé.</Text>
+        <Text style={type.dim}>Trop de codes faux d’affilée : tout est effacé de ce téléphone.</Text>
         <Segment
           options={[{ label: 'Désactivée', value: null }, ...WIPE_AFTER_CHOICES.map((n) => ({ label: `${n} essais`, value: n }))]}
           value={wipeAfter}
@@ -262,7 +251,7 @@ export default function Settings() {
 
       {Object.keys(blocked).length ? (
         <Section title="Membres bloqués" icon={Ban}>
-          <Text style={type.dim}>Sur ce téléphone, tu ne vois plus leurs messages, leurs réactions ni leurs stories. Ils n’en savent rien.</Text>
+          <Text style={type.dim}>Leurs messages, réactions et stories sont masqués ici. Ils n’en savent rien.</Text>
           {Object.entries(blocked).map(([id, name]) => (
             <View key={id} style={styles.blockedRow}>
               <Text style={[type.body, styles.flex]}>{name}</Text>
@@ -273,10 +262,7 @@ export default function Settings() {
       ) : null}
 
       <Section title="Compte" icon={Trash2}>
-        <Text style={type.dim}>
-          Supprime ton compte et tout ce qui va avec, sur le serveur et sur ce téléphone. Pour signaler un membre ou un message : appui long sur le
-          message.
-        </Text>
+        <Text style={type.dim}>Tout est effacé, du serveur et de ce téléphone. Pour signaler : appui long sur le message.</Text>
         <Key size="lg" label="Supprimer mon compte" variant="steel" tone="alert" busy={deleting} onPress={confirmDelete} />
       </Section>
     </ScrollView>

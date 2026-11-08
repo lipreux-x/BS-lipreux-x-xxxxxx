@@ -308,10 +308,7 @@ export default function GroupSettings() {
           <View style={styles.card}>
             {admin ? (
               <>
-                <Text style={type.dim}>
-                  Un lien par personne, valable une seule fois pendant 24 h. Elle demande à entrer en l’ouvrant, puis tu acceptes sa demande dans la
-                  discussion, après avoir comparé son numéro de sécurité. Refusée ou ratée : crée-lui un nouveau lien.
-                </Text>
+                <Text style={type.dim}>Un lien par personne, une seule fois, 24 h. Tu acceptes sa demande après avoir comparé son numéro de sécurité.</Text>
                 {link ? (
                   <View style={styles.linkBox}>
                     <InviteCodeDisplay code={link.code} />
@@ -328,7 +325,7 @@ export default function GroupSettings() {
                 </Pressable>
               </>
             ) : (
-              <Text style={type.dim}>Groupe sans code : un admin invite chaque nouveau membre avec un lien à usage unique.</Text>
+              <Text style={type.dim}>Groupe sans code : un admin invite par lien à usage unique.</Text>
             )}
           </View>
         </>
@@ -365,7 +362,7 @@ export default function GroupSettings() {
                 ))}
               </View>
               <Key size="sm" tone="cold" label="Afficher · code du groupe" style={styles.reveal} disabled={!info.keywords} onPress={() => setKeywordsShown('asking')} />
-              <Text style={[type.dim, styles.note]}>Masqués tant que le code du groupe n’est pas retapé. À donner en vrai avec le code, jamais par message.</Text>
+              <Text style={[type.dim, styles.note]}>Masqués sans le code du groupe. À donner en vrai, jamais par message.</Text>
             </>
           )}
         </View>
@@ -425,9 +422,8 @@ export default function GroupSettings() {
         {colorError ? <Text style={[styles.error, styles.note]}>{colorError}</Text> : null}
         <Text style={[type.dim, styles.note]}>
           {direct
-            ? 'Ton nom, ton avatar et tes messages prennent cette couleur ici, pour vous deux.'
-            : 'Ton nom, ton avatar et tes messages prennent cette couleur ici, pour tous les membres.'}{' '}
-          Chaque groupe et chaque ligne privée a la sienne.
+            ? 'Ton nom, ton avatar et tes messages, ici, pour vous deux.'
+            : 'Ton nom, ton avatar et tes messages, ici, pour tous les membres.'}
         </Text>
       </View>
 
@@ -436,9 +432,9 @@ export default function GroupSettings() {
         <Segment options={CHAT_LOOKS} value={look} onChange={chooseLook} />
         <Text style={[type.dim, styles.note]}>
           {look === 'plates'
-            ? 'Chaque message sur sa plaque, avec l’avatar et le nom de qui l’a écrit.'
-            : 'Chaque message comme une ligne de terminal, sans avatar.'}{' '}
-          Sur ce téléphone seulement : ce choix reste chiffré ici, le serveur ne le voit pas.
+            ? 'Chaque message sur sa plaque, avec avatar et nom.'
+            : 'Chaque message en ligne de terminal, sans avatar.'}{' '}
+          Chiffré, sur ce téléphone seulement.
         </Text>
       </View>
 
@@ -467,9 +463,7 @@ export default function GroupSettings() {
             <Text style={type.body}>
               {dateTimeLabel(new Date(info.expiresAt), new Date())} ({countdownLabel(new Date(info.expiresAt), new Date())})
             </Text>
-            <Text style={[type.dim, styles.note]}>
-              À cette date, le groupe, ses messages et ses photos sont effacés de partout, pour tous les membres.
-            </Text>
+            <Text style={[type.dim, styles.note]}>Le groupe et tout son contenu seront effacés pour tous.</Text>
           </View>
         </>
       ) : null}
@@ -478,9 +472,7 @@ export default function GroupSettings() {
         <>
           <Label style={styles.section}>Effacer des messages</Label>
           <View style={styles.card}>
-            <Text style={type.dim}>
-              Dans la conversation, appuie longuement sur une date pour effacer ce jour, ce jour et la veille, ou la semaine jusqu’à ce jour. Effacé pour tous les membres, photos comprises.
-            </Text>
+            <Text style={type.dim}>Appui long sur une date dans la discussion : efface le jour, deux jours ou la semaine, pour tous.</Text>
           </View>
         </>
       ) : null}
@@ -491,7 +483,7 @@ export default function GroupSettings() {
             <LockKeyhole size={16} color={colors.accentFg} />
             <Text style={type.body}>Fermer le coffre</Text>
           </View>
-          <Text style={type.dim}>{info.link ? 'Ses clés quittent la mémoire. Groupe sans code : il se rouvre d’un geste.' : 'Le code sera redemandé pour rouvrir la discussion.'}</Text>
+          <Text style={type.dim}>{info.link ? 'Ses clés quittent la mémoire. Il se rouvre d’un geste.' : 'Le code sera redemandé.'}</Text>
         </Pressable>
         {admin && !direct && !info.link ? (
           <Pressable
